@@ -182,6 +182,10 @@ final class DemoModel {
         downloadingModelID == modelID
     }
 
+    func isInstalled(_ modelID: String) -> Bool {
+        installedModels.contains { $0.id == modelID }
+    }
+
     private func download(model: TTSModelDescriptor) async {
         downloadingModelID = model.id
         activityState = .downloading

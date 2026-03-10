@@ -2,10 +2,52 @@ import SwiftUI
 import TTSMLX
 
 struct ContentView: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var model = DemoModel()
 
     var body: some View {
-        NavigationStack {
+        #if os(iOS)
+        iosBody
+        #else
+        macBody
+        #endif
+    }
+
+    #if os(iOS)
+    private var iosBody: some View {
+        ZStack(alignment: .top) {
+            Color(.systemBackground)
+                .ignoresSafeArea()
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 18) {
+                    header
+
+                    if model.activityState != .idle || !model.progressMessage.isEmpty {
+                        progressSection
+                    }
+
+                    textSection
+                    modelSection
+                    optionsSection
+                    generatedAudioSection
+                    installedSection
+                    statusSection
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.top, 14)
+                .padding(.bottom, 24)
+            }
+        }
+        .task {
+            await model.loadInitialData()
+        }
+    }
+    #endif
+
+    private var macBody: some View {
+        GeometryReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     header
@@ -18,17 +60,23 @@ struct ContentView: View {
                     statusSection
                 }
                 .frame(maxWidth: 920, alignment: .leading)
-                .padding(20)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(minHeight: proxy.size.height, alignment: .topLeading)
+                .padding(isCompactLayout ? 14 : 20)
             }
-            .navigationTitle("TTSMLX Demo")
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .task {
                 await model.loadInitialData()
             }
         }
     }
 
+    private var isCompactLayout: Bool {
+        horizontalSizeClass == .compact
+    }
+
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             Text("Simple on-device text to speech")
                 .font(.title.bold())
             Text("This demo uses the local TTSMLX package, downloads models from Hugging Face when needed, and generates a WAV file with MLX.")
@@ -37,59 +85,82 @@ struct ContentView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            HStack(spacing: 12) {
-                Button {
-                    Task { await model.synthesize() }
-                } label: {
-                    ZStack {
-                        Text("Synthesize")
-                            .opacity(model.isSynthesizing ? 0 : 1)
-                        if model.isSynthesizing {
-                            ProgressView()
-                        }
-                    }
-                    .frame(minWidth: 90)
+            if isCompactLayout {
+                LazyVGrid(columns: [
+                    GridItem(.flexible(), spacing: 10),
+                    GridItem(.flexible(), spacing: 10)
+                ], spacing: 10) {
+                    headerActionButtons
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(model.isSynthesizing)
-
-                Button {
-                    Task { await model.streamSpeak() }
-                } label: {
-                    if model.isStreaming {
-                        ProgressView()
-                    } else {
-                        Text("Stream Speak")
-                    }
+            } else {
+                HStack(spacing: 12) {
+                    headerActionButtons
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(model.isStreaming || model.isSynthesizing)
-
-                Button("Download Selected Model") {
-                    Task { await model.downloadSelectedModel() }
-                }
-                .buttonStyle(.bordered)
-                .disabled(model.downloadingModelID != nil)
-
-                Button("Play Last Audio") {
-                    model.playLatestAudio()
-                }
-                .buttonStyle(.bordered)
-
-                Button("Stop") {
-                    model.stopSpeaking()
-                }
-                .buttonStyle(.bordered)
-                .disabled(!model.isPlayingAudio && !model.isStreaming)
-
-                Button("Reveal File") {
-                    model.revealLatestAudio()
-                }
-                .buttonStyle(.bordered)
             }
         }
         .padding(18)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    @ViewBuilder
+    private var headerActionButtons: some View {
+        Button {
+            Task { await model.synthesize() }
+        } label: {
+            ZStack {
+                Text("Synthesize")
+                    .opacity(model.isSynthesizing ? 0 : 1)
+                if model.isSynthesizing {
+                    ProgressView()
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 36)
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(model.isSynthesizing)
+
+        Button {
+            Task { await model.streamSpeak() }
+        } label: {
+            ZStack {
+                Text("Stream Speak")
+                    .opacity(model.isStreaming ? 0 : 1)
+                if model.isStreaming {
+                    ProgressView()
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 36)
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(model.isStreaming || model.isSynthesizing)
+
+        if !model.isInstalled(model.selectedModelID) {
+            Button("Download Selected Model") {
+                Task { await model.downloadSelectedModel() }
+            }
+            .frame(maxWidth: .infinity, minHeight: 36)
+            .buttonStyle(.bordered)
+            .disabled(model.downloadingModelID != nil)
+        }
+
+        Button("Play Last Audio") {
+            model.playLatestAudio()
+        }
+        .frame(maxWidth: .infinity, minHeight: 36)
+        .buttonStyle(.bordered)
+
+        Button("Stop") {
+            model.stopSpeaking()
+        }
+        .frame(maxWidth: .infinity, minHeight: 36)
+        .buttonStyle(.bordered)
+        .disabled(!model.isPlayingAudio && !model.isStreaming)
+
+        Button("Reveal File") {
+            model.revealLatestAudio()
+        }
+        .frame(maxWidth: .infinity, minHeight: 36)
+        .buttonStyle(.bordered)
     }
 
     private var textSection: some View {
@@ -110,39 +181,58 @@ struct ContentView: View {
     @ViewBuilder
     private var progressSection: some View {
         if model.activityState != .idle || !model.progressMessage.isEmpty {
-            HStack(spacing: 18) {
-                ActivityOrbView(
-                    state: model.activityState,
-                    progress: model.progressValue
-                )
+            if isCompactLayout {
+                VStack(alignment: .leading, spacing: 14) {
+                    ActivityOrbView(
+                        state: model.activityState,
+                        progress: model.progressValue
+                    )
+                    .frame(maxWidth: .infinity)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(model.activityState.title)
-                        .font(.headline)
-
-                    Text(model.progressMessage.isEmpty ? model.status : model.progressMessage)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-
-                    if let progressValue = model.progressValue {
-                        ProgressView(value: progressValue)
-                            .tint(Self.activityColor(for: model.activityState))
-                    }
-
-                    if model.isPlayingAudio || model.isStreaming {
-                        Button("Stop Speaking") {
-                            model.stopSpeaking()
-                        }
-                        .buttonStyle(.bordered)
-                    }
+                    progressDescription
                 }
+                .padding(18)
+                .background(sectionBackground)
+            } else {
+                HStack(spacing: 18) {
+                    ActivityOrbView(
+                        state: model.activityState,
+                        progress: model.progressValue
+                    )
 
-                Spacer(minLength: 0)
+                    progressDescription
+
+                    Spacer(minLength: 0)
+                }
+                .padding(18)
+                .background(sectionBackground)
             }
-            .padding(18)
-            .background(sectionBackground)
         }
+    }
+
+    private var progressDescription: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(model.activityState.title)
+                .font(.headline)
+
+            Text(model.progressMessage.isEmpty ? model.status : model.progressMessage)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+
+            if let progressValue = model.progressValue {
+                ProgressView(value: progressValue)
+                    .tint(Self.activityColor(for: model.activityState))
+            }
+
+            if model.isPlayingAudio || model.isStreaming {
+                Button("Stop Speaking") {
+                    model.stopSpeaking()
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private static func activityColor(for state: DemoActivityState) -> Color {
@@ -292,7 +382,7 @@ struct ContentView: View {
                     .font(.subheadline.weight(.semibold))
 
                 ForEach(model.recommendedModels, id: \.id) { item in
-                    HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 12) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(item.displayName)
                             Text(item.id)
@@ -304,17 +394,21 @@ struct ContentView: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
-                        Spacer()
-                        Button(item.id == model.selectedModelID ? "Selected" : "Select") {
-                            Task { await model.selectModel(item.id) }
-                        }
-                        .buttonStyle(.bordered)
 
-                        Button(model.isDownloading(item.id) ? "Downloading..." : "Download") {
-                            Task { await model.download(modelID: item.id) }
+                        actionRow {
+                            Button(item.id == model.selectedModelID ? "Selected" : "Select") {
+                                Task { await model.selectModel(item.id) }
+                            }
+                            .buttonStyle(.bordered)
+
+                            if !model.isInstalled(item.id) {
+                                Button(model.isDownloading(item.id) ? "Downloading..." : "Download") {
+                                    Task { await model.download(modelID: item.id) }
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(model.downloadingModelID != nil)
+                            }
                         }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(model.downloadingModelID != nil)
                     }
                     .padding(12)
                     .background(.background, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -336,15 +430,28 @@ struct ContentView: View {
                 }
             }
 
-            HStack {
-                TextField("Search Hugging Face models", text: $model.modelSearchQuery)
-                    .textFieldStyle(.roundedBorder)
+            if isCompactLayout {
+                VStack(alignment: .leading, spacing: 10) {
+                    TextField("Search Hugging Face models", text: $model.modelSearchQuery)
+                        .textFieldStyle(.roundedBorder)
 
-                Button("Search") {
-                    Task { await model.searchModels() }
+                    Button("Search") {
+                        Task { await model.searchModels() }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(model.isSearching)
                 }
-                .buttonStyle(.bordered)
-                .disabled(model.isSearching)
+            } else {
+                HStack(spacing: 10) {
+                    TextField("Search Hugging Face models", text: $model.modelSearchQuery)
+                        .textFieldStyle(.roundedBorder)
+
+                    Button("Search") {
+                        Task { await model.searchModels() }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(model.isSearching)
+                }
             }
 
             if model.isSearching {
@@ -357,7 +464,7 @@ struct ContentView: View {
                         .font(.subheadline.weight(.semibold))
 
                     ForEach(model.searchedModels.prefix(6), id: \.id) { item in
-                        HStack(alignment: .top, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 12) {
                             Button {
                                 Task { await model.selectModel(item.id) }
                             } label: {
@@ -377,12 +484,18 @@ struct ContentView: View {
                             }
                             .buttonStyle(.plain)
 
-                            Button(model.isDownloading(item.id) ? "Downloading..." : "Download") {
-                                Task { await model.download(modelID: item.id) }
+                            actionRow {
+                                if !model.isInstalled(item.id) {
+                                    Button(model.isDownloading(item.id) ? "Downloading..." : "Download") {
+                                        Task { await model.download(modelID: item.id) }
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .disabled(model.downloadingModelID != nil)
+                                }
                             }
-                            .buttonStyle(.bordered)
-                            .disabled(model.downloadingModelID != nil)
                         }
+                        .padding(12)
+                        .background(.background, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                 }
             }
@@ -396,38 +509,54 @@ struct ContentView: View {
             Text("Options")
                 .font(.headline)
 
-            HStack(alignment: .top, spacing: 16) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Language")
-                        .font(.subheadline.weight(.semibold))
-                    Picker("Language", selection: $model.selectedLanguageMode) {
-                        ForEach(LanguageMode.allCases, id: \.self) { mode in
-                            Text(mode.title).tag(mode)
-                        }
-                    }
-                    if model.selectedLanguageMode == .custom {
-                        TextField("Custom language", text: $model.customLanguage)
-                            .textFieldStyle(.roundedBorder)
-                    }
+            if isCompactLayout {
+                VStack(alignment: .leading, spacing: 16) {
+                    languagePicker
+                    voicePicker
                 }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Voice")
-                        .font(.subheadline.weight(.semibold))
-                    Picker("Voice", selection: $model.selectedVoiceMode) {
-                        ForEach(model.voiceChoices, id: \.self) { voice in
-                            Text(voice.title).tag(voice)
-                        }
-                    }
-                    if case .custom = model.selectedVoiceMode {
-                        TextField("Custom voice ID", text: $model.customVoice)
-                            .textFieldStyle(.roundedBorder)
-                    }
+            } else {
+                HStack(alignment: .top, spacing: 16) {
+                    languagePicker
+                    voicePicker
                 }
             }
         }
         .padding(18)
         .background(sectionBackground)
+    }
+
+    private var languagePicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Language")
+                .font(.subheadline.weight(.semibold))
+            Picker("Language", selection: $model.selectedLanguageMode) {
+                ForEach(LanguageMode.allCases, id: \.self) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            if model.selectedLanguageMode == .custom {
+                TextField("Custom language", text: $model.customLanguage)
+                    .textFieldStyle(.roundedBorder)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var voicePicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Voice")
+                .font(.subheadline.weight(.semibold))
+            Picker("Voice", selection: $model.selectedVoiceMode) {
+                ForEach(model.voiceChoices, id: \.self) { voice in
+                    Text(voice.title).tag(voice)
+                }
+            }
+            if case .custom = model.selectedVoiceMode {
+                TextField("Custom voice ID", text: $model.customVoice)
+                    .textFieldStyle(.roundedBorder)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var installedSection: some View {
@@ -452,7 +581,7 @@ struct ContentView: View {
                 )
             } else {
                 ForEach(model.installedModels, id: \.id) { item in
-                    HStack {
+                    HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(item.descriptor.displayName)
                             Text(item.id)
@@ -490,39 +619,37 @@ struct ContentView: View {
                 )
             } else {
                 ForEach(model.generatedAudios) { record in
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack(alignment: .top) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(record.audio.url.lastPathComponent)
-                                Text(record.modelName)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Text(record.createdAt.formatted(date: .abbreviated, time: .shortened))
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(record.audio.url.lastPathComponent)
+                            Text(record.modelName)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(record.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        actionRow {
+                            Button("Play") {
+                                model.playAudio(record)
                             }
-                            Spacer()
-                            HStack(spacing: 8) {
-                                Button("Play") {
-                                    model.playAudio(record)
-                                }
-                                .buttonStyle(.bordered)
+                            .buttonStyle(.bordered)
 
-                                Button("Replay") {
-                                    model.replayAudio(record)
-                                }
-                                .buttonStyle(.bordered)
-
-                                Button("Export") {
-                                    model.exportAudio(record)
-                                }
-                                .buttonStyle(.bordered)
-
-                                Button("Locate") {
-                                    model.revealAudio(record)
-                                }
-                                .buttonStyle(.bordered)
+                            Button("Replay") {
+                                model.replayAudio(record)
                             }
+                            .buttonStyle(.bordered)
+
+                            Button("Export") {
+                                model.exportAudio(record)
+                            }
+                            .buttonStyle(.bordered)
+
+                            Button("Locate") {
+                                model.revealAudio(record)
+                            }
+                            .buttonStyle(.bordered)
                         }
 
                         DisclosureGroup("Details") {
@@ -582,5 +709,21 @@ struct ContentView: View {
 
     private func formatByteCount(_ bytes: Int64) -> String {
         ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+
+    @ViewBuilder
+    private func actionRow<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        if isCompactLayout {
+            LazyVGrid(columns: [
+                GridItem(.flexible(), spacing: 8),
+                GridItem(.flexible(), spacing: 8)
+            ], spacing: 8) {
+                content()
+            }
+        } else {
+            HStack(spacing: 8) {
+                content()
+            }
+        }
     }
 }
