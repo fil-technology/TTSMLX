@@ -83,12 +83,12 @@ Use `synthesizeStream(...)` when you want lower-latency playback and chunk-by-ch
 
 ## Demo App
 
-A small SwiftUI demo app is included at [DemoApp](/Users/sviatoslavfil/Development/Fil.Technology/Packages/TTSMLX/DemoApp).
+A small SwiftUI demo app is included at [DemoApp](DemoApp).
 
 Open it with:
 
 ```bash
-cd /Users/sviatoslavfil/Development/Fil.Technology/Packages/TTSMLX/DemoApp
+cd DemoApp
 ./open-xcode
 ```
 

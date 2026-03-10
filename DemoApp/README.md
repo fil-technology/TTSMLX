@@ -5,7 +5,7 @@ Small SwiftUI demo app that uses the local `TTSMLX` package.
 ## Open
 
 ```bash
-cd /Users/sviatoslavfil/Development/Fil.Technology/Packages/TTSMLX/DemoApp
+cd DemoApp
 ./open-xcode
 ```
 
