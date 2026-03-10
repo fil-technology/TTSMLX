@@ -30,22 +30,37 @@ private final class AudioPlayerDelegateProxy: NSObject, AVAudioPlayerDelegate {
 @MainActor
 @Observable
 final class DemoModel {
+    private struct PersistedSettings: Codable {
+        var selectedModelID: String
+        var selectedLanguageMode: String
+        var customLanguage: String
+        var selectedVoiceMode: String
+        var customVoice: String
+    }
+
     struct GeneratedAudioRecord: Identifiable, Hashable {
         let id: UUID
         let audio: TTSAudioFile
         let createdAt: Date
         let modelName: String
         let modelID: String
+        let languageID: String
         let languageDescription: String
+        let voiceID: String
         let voiceDescription: String
+        let sourceText: String
         let textPreview: String
         let streamed: Bool
     }
 
     var inputText = "Hello from TTSMLX."
     var modelSearchQuery = "mlx tts"
-    var customVoice = ""
-    var customLanguage = ""
+    var customVoice = "" {
+        didSet { persistSettings() }
+    }
+    var customLanguage = "" {
+        didSet { persistSettings() }
+    }
 
     var recommendedModels: [TTSModelDescriptor] = TTSMLX.defaultModels
     var searchedModels: [TTSModelDescriptor] = []
@@ -53,9 +68,15 @@ final class DemoModel {
     var generatedAudios: [GeneratedAudioRecord] = []
     var selectedModelMetadata: TTSModelMetadata?
 
-    var selectedModelID: String = TTSMLX.defaultModels.first?.id ?? ""
-    var selectedLanguageMode: LanguageMode = .automatic
-    var selectedVoiceMode: VoiceMode = .automatic
+    var selectedModelID: String = TTSMLX.defaultModels.first?.id ?? "" {
+        didSet { persistSettings() }
+    }
+    var selectedLanguageMode: LanguageMode = .automatic {
+        didSet { persistSettings() }
+    }
+    var selectedVoiceMode: VoiceMode = .automatic {
+        didSet { persistSettings() }
+    }
 
     var isSearching = false
     var isLoadingInstalled = false
@@ -75,8 +96,13 @@ final class DemoModel {
     private var streamingEngine: AVAudioEngine?
     private var streamingNode: AVAudioPlayerNode?
     private let playerDelegate = AudioPlayerDelegateProxy()
+    private var knownInstalledModelIDs = Set<String>()
+    private let userDefaults = UserDefaults.standard
+    private let settingsKey = "com.filtechnology.ttsmlx.demo.settings"
 
     init() {
+        restoreSettings()
+
         playerDelegate.onFinish = { [weak self] success in
             guard let self else { return }
             self.audioPlayer = nil
@@ -125,6 +151,45 @@ final class DemoModel {
         return languages.joined(separator: ", ")
     }
 
+    var trimmedInputText: String {
+        inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var currentInputRecord: GeneratedAudioRecord? {
+        let trimmedInputText = trimmedInputText
+        guard !trimmedInputText.isEmpty else { return nil }
+        let currentLanguageID = resolvedLanguage()?.identifier ?? "automatic"
+        let currentVoiceID = resolvedVoice()?.identifier ?? "automatic"
+
+        return generatedAudios.first(where: {
+            $0.sourceText == trimmedInputText &&
+            $0.modelID == selectedModel.id &&
+            $0.languageID == currentLanguageID &&
+            $0.voiceID == currentVoiceID
+        })
+    }
+
+    var hasGeneratedAudioForCurrentInput: Bool {
+        currentInputRecord != nil
+    }
+
+    var composerPrimarySymbolName: String {
+        if isSynthesizing || isStreaming {
+            return "stop.fill"
+        }
+        return hasGeneratedAudioForCurrentInput ? "play.fill" : "waveform"
+    }
+
+    var composerPrimaryLabel: String {
+        if isSynthesizing {
+            return "Generating"
+        }
+        if isStreaming {
+            return "Streaming"
+        }
+        return hasGeneratedAudioForCurrentInput ? "Play" : "Generate"
+    }
+
     func loadInitialData() async {
         await refreshInstalledModels()
         await refreshSelectedModelMetadata()
@@ -161,6 +226,7 @@ final class DemoModel {
 
         do {
             installedModels = try await store.installedModels()
+            knownInstalledModelIDs.formUnion(installedModels.map(\.id))
         } catch {
             status = "Could not read installed models: \(error.localizedDescription)"
         }
@@ -183,7 +249,24 @@ final class DemoModel {
     }
 
     func isInstalled(_ modelID: String) -> Bool {
-        installedModels.contains { $0.id == modelID }
+        knownInstalledModelIDs.contains(modelID) || installedModels.contains { $0.id == modelID }
+    }
+
+    func removeSelectedModel() async {
+        await removeModel(id: selectedModelID)
+    }
+
+    func removeModel(id: String) async {
+        do {
+            try await store.removeModel(id: id)
+            knownInstalledModelIDs.remove(id)
+            installedModels.removeAll { $0.id == id }
+            status = "Removed model: \(id)"
+            await refreshInstalledModels()
+            await refreshSelectedModelMetadata()
+        } catch {
+            status = "Could not remove model: \(error.localizedDescription)"
+        }
     }
 
     private func download(model: TTSModelDescriptor) async {
@@ -199,8 +282,13 @@ final class DemoModel {
         }
 
         do {
-            _ = try await store.ensureDownloaded(model) { update in
+            let installed = try await store.ensureDownloaded(model) { update in
                 self.apply(progress: update)
+            }
+            knownInstalledModelIDs.insert(model.id)
+            knownInstalledModelIDs.insert(installed.id)
+            if installedModels.contains(where: { $0.id == installed.id }) == false {
+                installedModels.append(installed)
             }
             status = "Model ready: \(model.displayName)"
             progressMessage = ""
@@ -215,7 +303,7 @@ final class DemoModel {
     }
 
     func synthesize() async {
-        let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = trimmedInputText
         guard !trimmed.isEmpty else {
             status = "Enter some text first."
             return
@@ -254,7 +342,7 @@ final class DemoModel {
     }
 
     func streamSpeak() async {
-        let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = trimmedInputText
         guard !trimmed.isEmpty else {
             status = "Enter some text first."
             return
@@ -310,6 +398,20 @@ final class DemoModel {
         } catch {
             status = "Playback failed: \(error.localizedDescription)"
         }
+    }
+
+    func performPrimaryComposerAction() async {
+        if isSynthesizing || isStreaming {
+            stopSpeaking()
+            return
+        }
+
+        if let currentInputRecord {
+            playAudio(currentInputRecord)
+            return
+        }
+
+        await synthesize()
     }
 
     func stopSpeaking() {
@@ -380,6 +482,29 @@ final class DemoModel {
                 status = "Export failed: \(error.localizedDescription)"
             }
         }
+        #else
+        let controller = UIActivityViewController(activityItems: [record.audio.url], applicationActivities: nil)
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow)?
+            .rootViewController?
+            .present(controller, animated: true)
+        #endif
+    }
+
+    func shareAudio(_ record: GeneratedAudioRecord) {
+        #if os(macOS)
+        guard
+            let window = NSApp.keyWindow,
+            let contentView = window.contentView
+        else {
+            NSWorkspace.shared.open(record.audio.url)
+            return
+        }
+
+        let picker = NSSharingServicePicker(items: [record.audio.url])
+        picker.show(relativeTo: contentView.bounds, of: contentView, preferredEdge: .minY)
         #else
         let controller = UIActivityViewController(activityItems: [record.audio.url], applicationActivities: nil)
         UIApplication.shared.connectedScenes
@@ -553,15 +678,21 @@ final class DemoModel {
     }
 
     private func appendGeneratedAudio(_ audio: TTSAudioFile, streamed: Bool) {
+        let sourceText = trimmedInputText
+        let languageID = resolvedLanguage()?.identifier ?? "automatic"
+        let voiceID = resolvedVoice()?.identifier ?? "automatic"
         let record = GeneratedAudioRecord(
             id: UUID(),
             audio: audio,
             createdAt: Date(),
             modelName: selectedModel.displayName,
             modelID: selectedModel.id,
-            languageDescription: resolvedLanguage()?.identifier ?? "Automatic",
-            voiceDescription: resolvedVoice()?.identifier ?? "Automatic",
-            textPreview: String(inputText.prefix(120)),
+            languageID: languageID,
+            languageDescription: languageID == "automatic" ? "Automatic" : languageID,
+            voiceID: voiceID,
+            voiceDescription: voiceID == "automatic" ? "Automatic" : voiceID,
+            sourceText: sourceText,
+            textPreview: String(sourceText.prefix(120)),
             streamed: streamed
         )
         generatedAudios.insert(record, at: 0)
@@ -575,6 +706,35 @@ final class DemoModel {
             try FileManager.default.removeItem(at: destinationURL)
         }
         try FileManager.default.copyItem(at: record.audio.url, to: destinationURL)
+    }
+
+    private func persistSettings() {
+        let settings = PersistedSettings(
+            selectedModelID: selectedModelID,
+            selectedLanguageMode: selectedLanguageMode.persistenceValue,
+            customLanguage: customLanguage,
+            selectedVoiceMode: selectedVoiceMode.persistenceValue,
+            customVoice: customVoice
+        )
+
+        guard let data = try? JSONEncoder().encode(settings) else { return }
+        userDefaults.set(data, forKey: settingsKey)
+    }
+
+    private func restoreSettings() {
+        guard
+            let data = userDefaults.data(forKey: settingsKey),
+            let settings = try? JSONDecoder().decode(PersistedSettings.self, from: data)
+        else { return }
+
+        let availableModelIDs = Set(TTSMLX.defaultModels.map(\.id))
+        if availableModelIDs.contains(settings.selectedModelID) {
+            selectedModelID = settings.selectedModelID
+        }
+        selectedLanguageMode = LanguageMode(persistenceValue: settings.selectedLanguageMode) ?? .automatic
+        customLanguage = settings.customLanguage
+        selectedVoiceMode = VoiceMode(persistenceValue: settings.selectedVoiceMode) ?? .automatic
+        customVoice = settings.customVoice
     }
 }
 
@@ -640,6 +800,25 @@ enum LanguageMode: Hashable, CaseIterable {
         case .custom: "Custom"
         }
     }
+
+    var persistenceValue: String {
+        switch self {
+        case .automatic: "automatic"
+        case .english: "english"
+        case .spanish: "spanish"
+        case .custom: "custom"
+        }
+    }
+
+    init?(persistenceValue: String) {
+        switch persistenceValue {
+        case "automatic": self = .automatic
+        case "english": self = .english
+        case "spanish": self = .spanish
+        case "custom": self = .custom
+        default: return nil
+        }
+    }
 }
 
 enum VoiceMode: Hashable {
@@ -656,5 +835,32 @@ enum VoiceMode: Hashable {
         case .custom:
             return "Custom"
         }
+    }
+
+    var persistenceValue: String {
+        switch self {
+        case .automatic:
+            return "automatic"
+        case .preset(let voice):
+            return "preset:\(voice.identifier)"
+        case .custom:
+            return "custom"
+        }
+    }
+
+    init?(persistenceValue: String) {
+        if persistenceValue == "automatic" {
+            self = .automatic
+            return
+        }
+        if persistenceValue == "custom" {
+            self = .custom
+            return
+        }
+        if persistenceValue.hasPrefix("preset:") {
+            self = .preset(TTSVoice(String(persistenceValue.dropFirst("preset:".count))))
+            return
+        }
+        return nil
     }
 }
