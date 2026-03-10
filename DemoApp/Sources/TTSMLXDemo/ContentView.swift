@@ -4,6 +4,7 @@ import TTSMLX
 struct ContentView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var model = DemoModel()
+    @State private var isShowingIOSOptions = false
 
     var body: some View {
         #if os(iOS)
@@ -15,34 +16,279 @@ struct ContentView: View {
 
     #if os(iOS)
     private var iosBody: some View {
-        ZStack(alignment: .top) {
+        ZStack {
             Color(.systemBackground)
                 .ignoresSafeArea()
 
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 18) {
-                    header
+            VStack(spacing: 0) {
+                ScrollView {
+                    VStack(spacing: 20) {
+                        Spacer(minLength: 24)
 
-                    if model.activityState != .idle || !model.progressMessage.isEmpty {
-                        progressSection
+                        VStack(spacing: 18) {
+                            ActivityOrbView(
+                                state: model.activityState == .idle ? .playing : model.activityState,
+                                progress: model.progressValue
+                            )
+                            .frame(width: 184, height: 184)
+
+                            VStack(spacing: 8) {
+                                Text(model.activityState == .idle ? "Ready" : model.activityState.title)
+                                    .font(.title3.weight(.semibold))
+
+                                Text(model.progressMessage.isEmpty ? model.status : model.progressMessage)
+                                    .font(.body)
+                                    .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal, 28)
+
+                                if let progressValue = model.progressValue {
+                                    ProgressView(value: progressValue)
+                                        .tint(Self.activityColor(for: model.activityState == .idle ? .playing : model.activityState))
+                                        .padding(.horizontal, 40)
+                                }
+                            }
+
+                            VStack(spacing: 12) {
+                                Button {
+                                    isShowingIOSOptions = true
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text("Voice Setup")
+                                                .font(.caption.weight(.semibold))
+                                                .foregroundStyle(.secondary)
+                                            Text(model.selectedModel.displayName)
+                                                .foregroundStyle(.primary)
+                                            Text("\(model.selectedVoiceMode.title) • \(model.selectedLanguageMode.title)")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        Spacer()
+                                        Image(systemName: "slider.horizontal.3")
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 14)
+                                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                }
+                                .buttonStyle(.plain)
+
+                                if !model.isInstalled(model.selectedModelID) {
+                                    Button("Download \(model.selectedModel.displayName)") {
+                                        Task { await model.downloadSelectedModel() }
+                                    }
+                                    .buttonStyle(.bordered)
+                                }
+
+                                HStack(spacing: 10) {
+                                    Button("Play Last") {
+                                        model.playLatestAudio()
+                                    }
+                                    .buttonStyle(.bordered)
+
+                                    Button("Stop") {
+                                        model.stopSpeaking()
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .disabled(!model.isPlayingAudio && !model.isStreaming)
+
+                                    Button("Reveal") {
+                                        model.revealLatestAudio()
+                                    }
+                                    .buttonStyle(.bordered)
+                                }
+                            }
+                            .padding(.horizontal, 20)
+                        }
+
+                        Spacer(minLength: 20)
                     }
-
-                    textSection
-                    modelSection
-                    optionsSection
-                    generatedAudioSection
-                    installedSection
-                    statusSection
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 14)
-                .padding(.top, 14)
-                .padding(.bottom, 24)
+                .scrollIndicators(.hidden)
+
+                iosComposer
             }
+        }
+        .sheet(isPresented: $isShowingIOSOptions) {
+            iosOptionsSheet
         }
         .task {
             await model.loadInitialData()
         }
+    }
+    #endif
+
+    #if os(iOS)
+    private var iosComposer: some View {
+        VStack(spacing: 12) {
+            HStack(alignment: .bottom, spacing: 12) {
+                TextField("Text to speak", text: $model.inputText, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1...5)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 14)
+                    .frame(minHeight: 54)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+
+                Button {
+                    Task { await model.synthesize() }
+                } label: {
+                    Image(systemName: "waveform")
+                        .font(.title3.weight(.semibold))
+                        .frame(width: 52, height: 52)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.isSynthesizing)
+
+                Button {
+                    Task { await model.streamSpeak() }
+                } label: {
+                    Image(systemName: "dot.radiowaves.left.and.right")
+                        .font(.title3.weight(.semibold))
+                        .frame(width: 52, height: 52)
+                }
+                .buttonStyle(.bordered)
+                .disabled(model.isStreaming || model.isSynthesizing)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 12)
+        .padding(.bottom, 12)
+        .background(.regularMaterial)
+    }
+    #endif
+
+    #if os(iOS)
+    private var iosOptionsSheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Model")
+                            .font(.headline)
+
+                        Picker(
+                            "Selected Model",
+                            selection: Binding(
+                                get: { model.selectedModelID },
+                                set: { newValue in
+                                    Task { await model.selectModel(newValue) }
+                                }
+                            )
+                        ) {
+                            ForEach(model.allModels, id: \.id) { item in
+                                Text(item.displayName).tag(item.id)
+                            }
+                        }
+                        .pickerStyle(.menu)
+
+                        Text(model.selectedModel.id)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+
+                        if !model.isInstalled(model.selectedModelID) {
+                            Button("Download Selected Model") {
+                                Task { await model.downloadSelectedModel() }
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Language")
+                            .font(.headline)
+
+                        Picker("Language", selection: $model.selectedLanguageMode) {
+                            ForEach(LanguageMode.allCases, id: \.self) { mode in
+                                Text(mode.title).tag(mode)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+
+                        if model.selectedLanguageMode == .custom {
+                            TextField("Custom language", text: $model.customLanguage)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Voice")
+                            .font(.headline)
+
+                        Picker("Voice", selection: $model.selectedVoiceMode) {
+                            ForEach(model.voiceChoices, id: \.self) { voice in
+                                Text(voice.title).tag(voice)
+                            }
+                        }
+                        .pickerStyle(.menu)
+
+                        if case .custom = model.selectedVoiceMode {
+                            TextField("Custom voice ID", text: $model.customVoice)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Discover Models")
+                            .font(.headline)
+
+                        HStack(spacing: 10) {
+                            TextField("Search Hugging Face models", text: $model.modelSearchQuery)
+                                .textFieldStyle(.roundedBorder)
+
+                            Button("Search") {
+                                Task { await model.searchModels() }
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(model.isSearching)
+                        }
+
+                        if !model.searchedModels.isEmpty {
+                            ForEach(model.searchedModels.prefix(5), id: \.id) { item in
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Button {
+                                        Task { await model.selectModel(item.id) }
+                                    } label: {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(item.displayName)
+                                                .foregroundStyle(.primary)
+                                            Text(item.id)
+                                                .font(.caption.monospaced())
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    .buttonStyle(.plain)
+
+                                    if !model.isInstalled(item.id) {
+                                        Button(model.isDownloading(item.id) ? "Downloading..." : "Download") {
+                                            Task { await model.download(modelID: item.id) }
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .disabled(model.downloadingModelID != nil)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(12)
+                                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            }
+                        }
+                    }
+                }
+                .padding(20)
+            }
+            .navigationTitle("Options")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        isShowingIOSOptions = false
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
     #endif
 
