@@ -1,0 +1,61 @@
+name: TTSMLXDemo
+options:
+  minimumXcodeGenVersion: 2.40.0
+  createIntermediateGroups: true
+packages:
+  TTSMLX:
+    path: ..
+settings:
+  base:
+    SWIFT_VERSION: 6.0
+targets:
+  TTSMLXDemo-iOS:
+    type: application
+    platform: iOS
+    productName: TTSMLXDemo
+    deploymentTarget: "17.0"
+    sources:
+      - path: Sources/TTSMLXDemo
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.filtechnology.ttsmlx.demo.ios
+        PRODUCT_NAME: TTSMLXDemo
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 1.0
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Automatic
+        TARGETED_DEVICE_FAMILY: "1,2"
+    dependencies:
+      - package: TTSMLX
+        product: TTSMLX
+  TTSMLXDemo-macOS:
+    type: application
+    platform: macOS
+    productName: TTSMLXDemo
+    deploymentTarget: "14.0"
+    sources:
+      - path: Sources/TTSMLXDemo
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.filtechnology.ttsmlx.demo.macos
+        PRODUCT_NAME: TTSMLXDemo
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 1.0
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Automatic
+    dependencies:
+      - package: TTSMLX
+        product: TTSMLX
+schemes:
+  TTSMLXDemo-iOS:
+    build:
+      targets:
+        TTSMLXDemo-iOS: all
+    run:
+      config: Debug
+  TTSMLXDemo-macOS:
+    build:
+      targets:
+        TTSMLXDemo-macOS: all
+    run:
+      config: Debug
