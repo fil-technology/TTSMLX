@@ -6,15 +6,18 @@ public actor TTSModelStore {
     private let fileManager: FileManager
     private let session: URLSession
     private let defaultModels: [TTSModelDescriptor]
+    private let cacheRoots: [URL]
 
     public init(
         defaultModels: [TTSModelDescriptor] = TTSMLX.defaultModels,
         session: URLSession = .shared,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        cacheRoots: [URL]? = nil
     ) {
         self.defaultModels = defaultModels
         self.session = session
         self.fileManager = fileManager
+        self.cacheRoots = cacheRoots ?? Self.defaultModelCacheRoots()
     }
 
     public func recommendedModels() -> [TTSModelDescriptor] {
@@ -151,6 +154,7 @@ private extension TTSModelStore {
         let tags: [String]?
         let downloads: Int?
         let likes: Int?
+        let usedStorage: Int64?
 
         enum CodingKeys: String, CodingKey {
             case id
@@ -158,6 +162,7 @@ private extension TTSModelStore {
             case tags
             case downloads
             case likes
+            case usedStorage
         }
     }
 
@@ -206,6 +211,8 @@ private extension TTSModelStore {
             || id.contains("soprano")
             || id.contains("pocket-tts")
             || id.contains("qwen3-tts")
+            || id.contains("orpheus")
+            || id.contains("vyvotts")
 
         return explicitTTS || likelyMLX
     }
@@ -235,11 +242,11 @@ private extension TTSModelStore {
         let key = modelID.lowercased()
 
         if key.contains("pocket-tts") {
-            return [.alba, .marius]
+            return [.alba, .marius, .javert, .jean]
         }
 
         if key.contains("orpheus") || key.contains("llama") {
-            return [.tara, .leo]
+            return [.tara, .leah, .jess, .leo, .dan, .mia, .zac, .zoe]
         }
 
         if key.contains("qwen3") || key.contains("vyvotts") {
@@ -258,6 +265,7 @@ private extension TTSModelStore {
             tags: model.tags ?? [],
             downloads: model.downloads,
             likes: model.likes,
+            storageSizeBytes: model.usedStorage,
             languageIdentifiers: languageIdentifiers,
             license: license
         )
@@ -274,6 +282,7 @@ private extension TTSModelStore {
             tags: metadata.tags,
             downloads: metadata.downloads,
             likes: metadata.likes,
+            storageSizeBytes: metadata.storageSizeBytes,
             languageIdentifiers: mergedLanguages,
             license: config.license ?? metadata.license,
             modelType: config.modelType,
@@ -401,13 +410,17 @@ private extension TTSModelStore {
         return nil
     }
 
-    func modelCacheRoots() -> [URL] {
+    static func defaultModelCacheRoots() -> [URL] {
         let home = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
         return [
             home.appendingPathComponent(".cache/huggingface/hub", isDirectory: true),
             home.appendingPathComponent("Library/Caches/huggingface/hub", isDirectory: true),
             home.appendingPathComponent("Library/Application Support/huggingface/hub", isDirectory: true)
         ]
+    }
+
+    func modelCacheRoots() -> [URL] {
+        cacheRoots
     }
 
     func directorySize(at url: URL) -> Int64 {

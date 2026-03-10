@@ -13,7 +13,7 @@ cd DemoApp
 
 - enter text
 - choose a recommended or searched Hugging Face model
-- download the model if needed
+- explicitly download only the model you want, one at a time
 - generate speech to a WAV file
 - stream speech progressively with `Stream Speak`
 - play the generated audio

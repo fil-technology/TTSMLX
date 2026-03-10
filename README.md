@@ -6,28 +6,33 @@ Small Swift package for text-to-speech with Hugging Face models running through 
 
 - Simple actor-based API
 - Streaming playback API for long-form speech
-- Recommended MLX TTS models out of the box
+- Built-in catalog of supported MLX TTS models
 - Hugging Face model search
 - Lazy model download and cache management
 - Voice and language selection when the model supports them
 - Reference-audio voice cloning hooks
 
-## Recommended Models
+## Supported Models
 
-These are the most useful models to start with for `TTSMLX` as of March 10, 2026:
+These models are included in the built-in `TTSMLX.supportedModels` catalog:
 
 - [Marvis-AI/marvis-tts-250m-v0.2-MLX-8bit](https://huggingface.co/Marvis-AI/marvis-tts-250m-v0.2-MLX-8bit) - best default choice for a balanced quality/size tradeoff.
 - [mlx-community/pocket-tts](https://huggingface.co/mlx-community/pocket-tts) - smallest and simplest option when startup speed and low memory matter most.
 - [mlx-community/Soprano-80M-bf16](https://huggingface.co/mlx-community/Soprano-80M-bf16) - compact model that is still easy to run locally on Apple Silicon.
+- [mlx-community/VyvoTTS-EN-Beta-4bit](https://huggingface.co/mlx-community/VyvoTTS-EN-Beta-4bit) - English Qwen3-based option when you want a smaller alternative to full Qwen3-TTS.
+- [mlx-community/orpheus-3b-0.1-ft-bf16](https://huggingface.co/mlx-community/orpheus-3b-0.1-ft-bf16) - larger multi-voice LlamaTTS model with expressive built-in speakers.
 - [mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit](https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit) - strongest general-purpose option here when you want better quality, multilingual support, and voice-cloning style inputs.
-- [mlx-community/Spark-TTS-0.5B-8bit](https://huggingface.co/mlx-community/Spark-TTS-0.5B-8bit) - useful larger option for English/Chinese workflows if you want another high-capacity model to compare against Qwen3-TTS.
 
 Quick picking guide:
 
 - Start with `Marvis` if you want the safest default.
 - Use `Pocket TTS` for fast, lightweight local generation.
+- Use `Orpheus` when you want more built-in English voice choices.
 - Use `Qwen3-TTS` when voice options, multilingual output, or cloning features matter more than model size.
-- Try `Spark-TTS` if your target languages are English or Chinese and you want another larger model family.
+- Try `VyvoTTS` if you want a smaller English Qwen3-style model.
+
+Nothing in this catalog is downloaded automatically.
+Models are downloaded only when you explicitly call `ensureDownloaded(...)`, or when you synthesize using a specific selected model.
 
 ## Usage
 
@@ -37,7 +42,7 @@ import TTSMLX
 let synthesizer = TTSSpeechSynthesizer()
 let result = try await synthesizer.synthesize(
     "Hello from TTSMLX",
-    using: TTSMLX.defaultModels[0],
+    using: TTSMLX.supportedModels[0],
     options: .init(
         language: .english,
         outputURL: URL.documentsDirectory.appending(path: "hello.wav")
@@ -68,7 +73,7 @@ import TTSMLX
 let synthesizer = TTSSpeechSynthesizer()
 let stream = try await synthesizer.synthesizeStream(
     "Read this out progressively.",
-    using: TTSMLX.defaultModels[0],
+    using: TTSMLX.supportedModels[0],
     options: .init(streamingInterval: 1.0)
 )
 
@@ -103,6 +108,8 @@ let installed = try await store.installedModels()
 if let model = models.first {
     _ = try await store.ensureDownloaded(model)
 }
+
+// Downloads happen one model at a time and only for the descriptor you pass in.
 ```
 
 ## Model Metadata
@@ -116,12 +123,15 @@ let metadata = try await store.fetchMetadata(for: "mlx-community/Qwen3-TTS-12Hz-
 print(metadata.languageIdentifiers)
 print(metadata.modelType ?? "unknown")
 print(metadata.sampleRate ?? 0)
+print(metadata.storageSizeBytes ?? 0)
 ```
+
+`storageSizeBytes` is the remote repository size reported by the Hugging Face model API.
 
 ## Voice Selection
 
 ```swift
-let pocketTTS = TTSMLX.defaultModels.first { $0.id == "mlx-community/pocket-tts" }!
+let pocketTTS = TTSMLX.supportedModels.first { $0.id == "mlx-community/pocket-tts" }!
 
 let audio = try await TTSSpeechSynthesizer().synthesize(
     "A different voice",

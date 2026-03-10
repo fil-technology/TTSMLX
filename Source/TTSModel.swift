@@ -80,8 +80,16 @@ public struct TTSVoice: Sendable, Hashable, Codable, ExpressibleByStringLiteral 
 
     public static let alba: Self = "alba"
     public static let marius: Self = "marius"
+    public static let javert: Self = "javert"
+    public static let jean: Self = "jean"
+    public static let leah: Self = "leah"
+    public static let jess: Self = "jess"
     public static let tara: Self = "tara"
     public static let leo: Self = "leo"
+    public static let dan: Self = "dan"
+    public static let mia: Self = "mia"
+    public static let zac: Self = "zac"
+    public static let zoe: Self = "zoe"
     public static let enUS1: Self = "en-us-1"
 }
 
@@ -90,6 +98,7 @@ public struct TTSModelMetadata: Sendable, Hashable, Codable {
     public let tags: [String]
     public let downloads: Int?
     public let likes: Int?
+    public let storageSizeBytes: Int64?
     public let languageIdentifiers: [String]
     public let license: String?
     public let modelType: String?
@@ -102,6 +111,7 @@ public struct TTSModelMetadata: Sendable, Hashable, Codable {
         tags: [String] = [],
         downloads: Int? = nil,
         likes: Int? = nil,
+        storageSizeBytes: Int64? = nil,
         languageIdentifiers: [String] = [],
         license: String? = nil,
         modelType: String? = nil,
@@ -113,6 +123,7 @@ public struct TTSModelMetadata: Sendable, Hashable, Codable {
         self.tags = tags
         self.downloads = downloads
         self.likes = likes
+        self.storageSizeBytes = storageSizeBytes
         self.languageIdentifiers = languageIdentifiers
         self.license = license
         self.modelType = modelType

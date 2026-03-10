@@ -8,6 +8,25 @@ import AppKit
 import UIKit
 #endif
 
+private final class AudioPlayerDelegateProxy: NSObject, AVAudioPlayerDelegate {
+    nonisolated(unsafe) var onFinish: (@MainActor @Sendable (Bool) -> Void)?
+    nonisolated(unsafe) var onDecodeError: (@MainActor @Sendable (Error?) -> Void)?
+
+    nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        let onFinish = self.onFinish
+        Task { @MainActor in
+            onFinish?(flag)
+        }
+    }
+
+    nonisolated func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
+        let onDecodeError = self.onDecodeError
+        Task { @MainActor in
+            onDecodeError?(error)
+        }
+    }
+}
+
 @MainActor
 @Observable
 final class DemoModel {
@@ -42,16 +61,44 @@ final class DemoModel {
     var isLoadingInstalled = false
     var isSynthesizing = false
     var isStreaming = false
+    var isPlayingAudio = false
+    var downloadingModelID: String?
     var status = "Ready"
     var progressMessage = ""
     var progressValue: Double?
     var lastAudio: TTSAudioFile?
+    var activityState: DemoActivityState = .idle
 
     private let synthesizer = TTSSpeechSynthesizer()
     private let store = TTSModelStore()
     private var audioPlayer: AVAudioPlayer?
     private var streamingEngine: AVAudioEngine?
     private var streamingNode: AVAudioPlayerNode?
+    private let playerDelegate = AudioPlayerDelegateProxy()
+
+    init() {
+        playerDelegate.onFinish = { [weak self] success in
+            guard let self else { return }
+            self.audioPlayer = nil
+            self.isPlayingAudio = false
+            if self.activityState == .playing {
+                self.activityState = .idle
+            }
+            if success {
+                self.status = "Playback finished."
+            }
+        }
+
+        playerDelegate.onDecodeError = { [weak self] error in
+            guard let self else { return }
+            self.audioPlayer = nil
+            self.isPlayingAudio = false
+            if self.activityState == .playing {
+                self.activityState = .idle
+            }
+            self.status = "Playback failed: \(error?.localizedDescription ?? "Unknown audio decoding error.")"
+        }
+    }
 
     var selectedModel: TTSModelDescriptor {
         if let match = allModels.first(where: { $0.id == selectedModelID }) {
@@ -91,7 +138,13 @@ final class DemoModel {
         }
 
         isSearching = true
+        activityState = .searching
         defer { isSearching = false }
+        defer {
+            if activityState == .searching {
+                activityState = .idle
+            }
+        }
 
         do {
             searchedModels = try await store.searchModels(query: query)
@@ -114,11 +167,38 @@ final class DemoModel {
     }
 
     func downloadSelectedModel() async {
+        await download(model: selectedModel)
+    }
+
+    func download(modelID: String) async {
+        guard let descriptor = allModels.first(where: { $0.id == modelID }) else {
+            status = "Model not found."
+            return
+        }
+        await download(model: descriptor)
+    }
+
+    func isDownloading(_ modelID: String) -> Bool {
+        downloadingModelID == modelID
+    }
+
+    private func download(model: TTSModelDescriptor) async {
+        downloadingModelID = model.id
+        activityState = .downloading
+        progressMessage = "Waiting to download \(model.displayName)..."
+        progressValue = nil
+        defer {
+            downloadingModelID = nil
+            if activityState == .downloading {
+                activityState = .idle
+            }
+        }
+
         do {
-            _ = try await store.ensureDownloaded(selectedModel) { update in
+            _ = try await store.ensureDownloaded(model) { update in
                 self.apply(progress: update)
             }
-            status = "Model ready: \(selectedModel.displayName)"
+            status = "Model ready: \(model.displayName)"
             progressMessage = ""
             progressValue = nil
             await refreshInstalledModels()
@@ -138,7 +218,13 @@ final class DemoModel {
         }
 
         isSynthesizing = true
+        activityState = .preparing
         defer { isSynthesizing = false }
+        defer {
+            if !isPlayingAudio, activityState != .streaming {
+                activityState = .idle
+            }
+        }
 
         do {
             let audio = try await synthesizer.synthesize(
@@ -171,6 +257,7 @@ final class DemoModel {
         }
 
         isStreaming = true
+        activityState = .streaming
         defer { isStreaming = false }
 
         do {
@@ -193,6 +280,10 @@ final class DemoModel {
 
             progressMessage = ""
             progressValue = nil
+            isPlayingAudio = false
+            if activityState == .streaming {
+                activityState = .idle
+            }
             status = receivedChunk ? "Streaming playback finished." : "No streamed audio chunks received."
             await refreshInstalledModels()
         } catch {
@@ -215,6 +306,19 @@ final class DemoModel {
         } catch {
             status = "Playback failed: \(error.localizedDescription)"
         }
+    }
+
+    func stopSpeaking() {
+        audioPlayer?.stop()
+        audioPlayer = nil
+        stopStreamingPlayback()
+        isPlayingAudio = false
+        progressMessage = ""
+        progressValue = nil
+        if !isSynthesizing, !isStreaming, downloadingModelID == nil, !isSearching {
+            activityState = .idle
+        }
+        status = "Playback stopped."
     }
 
     func revealLatestAudio() {
@@ -333,14 +437,33 @@ final class DemoModel {
         stopStreamingPlayback()
         configurePlaybackSessionIfNeeded()
         audioPlayer = try AVAudioPlayer(contentsOf: audio.url)
+        audioPlayer?.delegate = playerDelegate
         audioPlayer?.volume = 1
         audioPlayer?.prepareToPlay()
         audioPlayer?.play()
+        isPlayingAudio = true
+        activityState = .playing
     }
 
     private func apply(progress: TTSProgressUpdate) {
         progressMessage = progress.message
         progressValue = progress.fractionCompleted
+        switch progress.stage {
+        case .resolvingModel, .loadingModel:
+            activityState = .preparing
+        case .downloadingModel:
+            activityState = .downloading
+        case .generatingAudio, .writingFile:
+            activityState = .generating
+        case .completed:
+            if isPlayingAudio {
+                activityState = .playing
+            } else if isStreaming {
+                activityState = .streaming
+            } else if downloadingModelID == nil, !isSearching {
+                activityState = .idle
+            }
+        }
     }
 
     private func configurePlaybackSessionIfNeeded() {
@@ -373,6 +496,8 @@ final class DemoModel {
 
         streamingEngine = engine
         streamingNode = node
+        isPlayingAudio = true
+        activityState = .streaming
     }
 
     private func scheduleStreamingBuffer(_ buffer: AVAudioPCMBuffer) {
@@ -418,6 +543,9 @@ final class DemoModel {
         streamingEngine?.stop()
         streamingNode = nil
         streamingEngine = nil
+        if isStreaming == false {
+            isPlayingAudio = false
+        }
     }
 
     private func appendGeneratedAudio(_ audio: TTSAudioFile, streamed: Bool) {
@@ -443,6 +571,54 @@ final class DemoModel {
             try FileManager.default.removeItem(at: destinationURL)
         }
         try FileManager.default.copyItem(at: record.audio.url, to: destinationURL)
+    }
+}
+
+enum DemoActivityState: Hashable {
+    case idle
+    case searching
+    case downloading
+    case preparing
+    case generating
+    case streaming
+    case playing
+
+    var title: String {
+        switch self {
+        case .idle:
+            return "Idle"
+        case .searching:
+            return "Searching"
+        case .downloading:
+            return "Downloading"
+        case .preparing:
+            return "Preparing"
+        case .generating:
+            return "Generating"
+        case .streaming:
+            return "Streaming"
+        case .playing:
+            return "Playing"
+        }
+    }
+
+    var accentColorName: String {
+        switch self {
+        case .idle:
+            return "secondary"
+        case .searching:
+            return "cyan"
+        case .downloading:
+            return "blue"
+        case .preparing:
+            return "indigo"
+        case .generating:
+            return "orange"
+        case .streaming:
+            return "pink"
+        case .playing:
+            return "green"
+        }
     }
 }
 

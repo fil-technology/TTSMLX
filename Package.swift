@@ -33,6 +33,11 @@ let package = Package(
             swiftSettings: [
                 .unsafeFlags(["-Xfrontend", "-strict-concurrency=complete"])
             ]
+        ),
+        .testTarget(
+            name: "TTSMLXTests",
+            dependencies: ["TTSMLX"],
+            path: "Tests"
         )
     ]
 )

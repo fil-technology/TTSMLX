@@ -33,6 +33,9 @@ struct ContentView: View {
                 .font(.title.bold())
             Text("This demo uses the local TTSMLX package, downloads models from Hugging Face when needed, and generates a WAV file with MLX.")
                 .foregroundStyle(.secondary)
+            Text("Recommended and supported models are only listed here. Nothing is downloaded until you explicitly choose a model and download it, or synthesize with that selected model.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             HStack(spacing: 12) {
                 Button {
@@ -62,15 +65,22 @@ struct ContentView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(model.isStreaming || model.isSynthesizing)
 
-                Button("Download Model") {
+                Button("Download Selected Model") {
                     Task { await model.downloadSelectedModel() }
                 }
                 .buttonStyle(.bordered)
+                .disabled(model.downloadingModelID != nil)
 
                 Button("Play Last Audio") {
                     model.playLatestAudio()
                 }
                 .buttonStyle(.bordered)
+
+                Button("Stop") {
+                    model.stopSpeaking()
+                }
+                .buttonStyle(.bordered)
+                .disabled(!model.isPlayingAudio && !model.isStreaming)
 
                 Button("Reveal File") {
                     model.revealLatestAudio()
@@ -99,24 +109,142 @@ struct ContentView: View {
 
     @ViewBuilder
     private var progressSection: some View {
-        if !model.progressMessage.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Progress")
-                    .font(.headline)
+        if model.activityState != .idle || !model.progressMessage.isEmpty {
+            HStack(spacing: 18) {
+                ActivityOrbView(
+                    state: model.activityState,
+                    progress: model.progressValue
+                )
 
-                if let progressValue = model.progressValue {
-                    ProgressView(value: progressValue)
-                } else {
-                    ProgressView()
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(model.activityState.title)
+                        .font(.headline)
+
+                    Text(model.progressMessage.isEmpty ? model.status : model.progressMessage)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+
+                    if let progressValue = model.progressValue {
+                        ProgressView(value: progressValue)
+                            .tint(Self.activityColor(for: model.activityState))
+                    }
+
+                    if model.isPlayingAudio || model.isStreaming {
+                        Button("Stop Speaking") {
+                            model.stopSpeaking()
+                        }
+                        .buttonStyle(.bordered)
+                    }
                 }
 
-                Text(model.progressMessage)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
+                Spacer(minLength: 0)
             }
             .padding(18)
             .background(sectionBackground)
+        }
+    }
+
+    private static func activityColor(for state: DemoActivityState) -> Color {
+        switch state {
+        case .idle:
+            return .secondary
+        case .searching:
+            return .cyan
+        case .downloading:
+            return .blue
+        case .preparing:
+            return .indigo
+        case .generating:
+            return .orange
+        case .streaming:
+            return .pink
+        case .playing:
+            return .green
+        }
+    }
+
+    private static func activityGradient(for state: DemoActivityState) -> AngularGradient {
+        let base = activityColor(for: state)
+        return AngularGradient(
+            colors: [
+                base.opacity(0.15),
+                base.opacity(0.95),
+                .white.opacity(0.9),
+                base.opacity(0.35)
+            ],
+            center: .center
+        )
+    }
+
+    private static func activityBackground(for state: DemoActivityState) -> LinearGradient {
+        let base = activityColor(for: state)
+        return LinearGradient(
+            colors: [
+                base.opacity(0.28),
+                base.opacity(0.08)
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    private struct ActivityOrbView: View {
+        let state: DemoActivityState
+        let progress: Double?
+
+        var body: some View {
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+                let time = context.date.timeIntervalSinceReferenceDate
+                let primaryRotation = Angle.degrees(time * 110)
+                let secondaryRotation = Angle.degrees(time * -75)
+                let pulse = 0.88 + (sin(time * 2.2) * 0.08)
+
+                ZStack {
+                    Circle()
+                        .fill(ContentView.activityBackground(for: state))
+                        .overlay {
+                            Circle()
+                                .stroke(.white.opacity(0.08), lineWidth: 1)
+                        }
+
+                    Circle()
+                        .trim(from: 0.08, to: 0.38)
+                        .stroke(
+                            ContentView.activityGradient(for: state),
+                            style: StrokeStyle(lineWidth: 9, lineCap: .round)
+                        )
+                        .rotationEffect(primaryRotation)
+
+                    Circle()
+                        .trim(from: 0.55, to: 0.82)
+                        .stroke(
+                            ContentView.activityGradient(for: state),
+                            style: StrokeStyle(lineWidth: 6, lineCap: .round)
+                        )
+                        .rotationEffect(secondaryRotation)
+                        .blur(radius: 0.4)
+
+                    if let progress, progress > 0, progress < 1 {
+                        Circle()
+                            .trim(from: 0, to: progress)
+                            .stroke(
+                                .white.opacity(0.95),
+                                style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                            )
+                            .rotationEffect(.degrees(-90))
+                            .padding(8)
+                    }
+
+                    Circle()
+                        .fill(ContentView.activityGradient(for: state))
+                        .frame(width: 26, height: 26)
+                        .scaleEffect(pulse)
+                        .blur(radius: state == .playing ? 0.5 : 0)
+                }
+                .frame(width: 84, height: 84)
+                .shadow(color: ContentView.activityColor(for: state).opacity(0.22), radius: 18, y: 8)
+            }
         }
     }
 
@@ -153,6 +281,44 @@ struct ContentView: View {
                 Text("Languages: \(model.supportedLanguageSummary)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                Text("Only the selected model downloads. Models are fetched one at a time.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Supported Models")
+                    .font(.subheadline.weight(.semibold))
+
+                ForEach(model.recommendedModels, id: \.id) { item in
+                    HStack(alignment: .top, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.displayName)
+                            Text(item.id)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                            if let summary = item.summary {
+                                Text(summary)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        Button(item.id == model.selectedModelID ? "Selected" : "Select") {
+                            Task { await model.selectModel(item.id) }
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button(model.isDownloading(item.id) ? "Downloading..." : "Download") {
+                            Task { await model.download(modelID: item.id) }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(model.downloadingModelID != nil)
+                    }
+                    .padding(12)
+                    .background(.background, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
             }
 
             if let metadata = model.selectedModelMetadata {
@@ -161,6 +327,7 @@ struct ContentView: View {
                         metadataRow("Pipeline", metadata.pipelineTag ?? "Unknown")
                         metadataRow("Model Type", metadata.modelType ?? "Unknown")
                         metadataRow("License", metadata.license ?? "Unknown")
+                        metadataRow("Remote Size", metadata.storageSizeBytes.map(formatByteCount) ?? "Unknown")
                         metadataRow("Sample Rate", metadata.sampleRate.map(String.init) ?? "Unknown")
                         metadataRow("Architectures", metadata.architectures.isEmpty ? "Unknown" : metadata.architectures.joined(separator: ", "))
                         metadataRow("Tags", metadata.tags.isEmpty ? "None" : metadata.tags.prefix(8).joined(separator: ", "))
@@ -190,24 +357,32 @@ struct ContentView: View {
                         .font(.subheadline.weight(.semibold))
 
                     ForEach(model.searchedModels.prefix(6), id: \.id) { item in
-                        Button {
-                            Task { await model.selectModel(item.id) }
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(item.displayName)
-                                        .foregroundStyle(.primary)
-                                    Text(item.id)
-                                        .font(.caption.monospaced())
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                if item.id == model.selectedModelID {
-                                    Image(systemName: "checkmark.circle.fill")
+                        HStack(alignment: .top, spacing: 12) {
+                            Button {
+                                Task { await model.selectModel(item.id) }
+                            } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(item.displayName)
+                                            .foregroundStyle(.primary)
+                                        Text(item.id)
+                                            .font(.caption.monospaced())
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    if item.id == model.selectedModelID {
+                                        Image(systemName: "checkmark.circle.fill")
+                                    }
                                 }
                             }
+                            .buttonStyle(.plain)
+
+                            Button(model.isDownloading(item.id) ? "Downloading..." : "Download") {
+                                Task { await model.download(modelID: item.id) }
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(model.downloadingModelID != nil)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -403,5 +578,9 @@ struct ContentView: View {
                 .font(.caption)
                 .textSelection(.enabled)
         }
+    }
+
+    private func formatByteCount(_ bytes: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 }

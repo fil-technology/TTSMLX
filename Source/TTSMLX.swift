@@ -1,7 +1,7 @@
 import Foundation
 
 public enum TTSMLX {
-    public static let defaultModels: [TTSModelDescriptor] = [
+    public static let supportedModels: [TTSModelDescriptor] = [
         .init(
             id: "Marvis-AI/marvis-tts-250m-v0.2-MLX-8bit",
             displayName: "Marvis",
@@ -14,7 +14,7 @@ public enum TTSMLX {
             displayName: "Pocket TTS",
             summary: "Small and fast.",
             supportedLanguages: [.english],
-            suggestedVoices: [.alba, .marius]
+            suggestedVoices: [.alba, .marius, .javert, .jean]
         ),
         .init(
             id: "mlx-community/Soprano-80M-bf16",
@@ -24,6 +24,20 @@ public enum TTSMLX {
             suggestedVoices: []
         ),
         .init(
+            id: "mlx-community/VyvoTTS-EN-Beta-4bit",
+            displayName: "VyvoTTS",
+            summary: "English Qwen3-based model with a small footprint.",
+            supportedLanguages: [.english],
+            suggestedVoices: [.enUS1]
+        ),
+        .init(
+            id: "mlx-community/orpheus-3b-0.1-ft-bf16",
+            displayName: "Orpheus",
+            summary: "Higher-capacity LlamaTTS model with multiple built-in voices.",
+            supportedLanguages: [.english],
+            suggestedVoices: [.tara, .leah, .jess, .leo, .dan, .mia, .zac, .zoe]
+        ),
+        .init(
             id: "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit",
             displayName: "Qwen3 TTS",
             summary: "Higher quality multilingual model.",
@@ -31,4 +45,6 @@ public enum TTSMLX {
             suggestedVoices: [.enUS1]
         )
     ]
+
+    public static let defaultModels: [TTSModelDescriptor] = supportedModels
 }
