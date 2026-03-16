@@ -6,6 +6,19 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-03-16
+
+### Changed
+
+- Updated `mlx-audio-swift` to `0.1.2`.
+- Added `Echo TTS` to the built-in supported model catalog.
+- Tightened model search filtering so the demo only surfaces TTS models that the current loader can actually open.
+
+### Fixed
+
+- Prevented unsupported search results such as `kokoro` from appearing and then failing at synthesis time.
+- Added regression coverage for supported-model filtering and Echo model discovery.
+
 ## [0.1.0] - 2026-03-10
 
 ### Added

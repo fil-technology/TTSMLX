@@ -17,6 +17,13 @@ public enum TTSMLX {
             suggestedVoices: [.alba, .marius, .javert, .jean]
         ),
         .init(
+            id: "mlx-community/echo-tts-base",
+            displayName: "Echo TTS",
+            summary: "Reference-audio cloning model added in mlx-audio-swift 0.1.2.",
+            supportedLanguages: [.english],
+            suggestedVoices: []
+        ),
+        .init(
             id: "mlx-community/Soprano-80M-bf16",
             displayName: "Soprano",
             summary: "Compact MLX voice model.",

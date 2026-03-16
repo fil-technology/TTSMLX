@@ -31,6 +31,11 @@ struct TTSModelStoreTests {
                         "downloads": 90
                     ],
                     [
+                        "id": "mlx-community/echo-tts-base",
+                        "tags": ["voice-cloning", "english"],
+                        "downloads": 95
+                    ],
+                    [
                         "id": "someone/not-tts",
                         "tags": ["tts"],
                         "downloads": 80
@@ -38,7 +43,20 @@ struct TTSModelStoreTests {
                     [
                         "id": "someone/real-tts",
                         "pipeline_tag": "text-to-speech",
+                        "tags": ["kokoro"],
                         "downloads": 70
+                    ],
+                    [
+                        "id": "mlx-community/kokoro-82m-4bit",
+                        "pipeline_tag": "text-to-speech",
+                        "tags": ["kokoro"],
+                        "downloads": 85
+                    ],
+                    [
+                        "id": "custom/qwen3-tts-demo",
+                        "pipeline_tag": "text-to-speech",
+                        "tags": ["qwen3_tts"],
+                        "downloads": 75
                     ],
                     [
                         "id": "someone/asr-model",
@@ -54,14 +72,16 @@ struct TTSModelStoreTests {
 
         #expect(results.map(\.id) == [
             "mlx-community/pocket-tts",
+            "mlx-community/echo-tts-base",
             "mlx-community/orpheus-3b-0.1-ft-bf16",
-            "someone/not-tts",
-            "someone/real-tts"
+            "custom/qwen3-tts-demo"
         ])
         #expect(results.first?.suggestedVoices.contains(.alba) == true)
-        #expect(results[1].suggestedVoices.contains(.tara) == true)
+        #expect(results[2].suggestedVoices.contains(.tara) == true)
         #expect(results.contains { $0.id == "someone/asr-model" } == false)
         #expect(results.contains { $0.id == "mlx-community/pocket-tts-8bit" } == false)
+        #expect(results.contains { $0.id.contains("kokoro") } == false)
+        #expect(results.contains { $0.id == "someone/not-tts" } == false)
     }
 
     @Test("metadata fetch merges Hugging Face fields with config.json")

@@ -43,7 +43,7 @@ public actor TTSModelStore {
 
         let apiModels = try JSONDecoder().decode([HuggingFaceModel].self, from: data)
         let unique = Self.deduplicate(apiModels)
-        let filtered = unique.filter(Self.isRelevantTTSModel)
+        let filtered = unique.filter(Self.isSupportedSearchResult)
         let ranked = filtered.sorted { ($0.downloads ?? 0) > ($1.downloads ?? 0) }
 
         return ranked.prefix(limit).map {
@@ -197,24 +197,93 @@ private extension TTSModelStore {
         }
     }
 
-    static func isRelevantTTSModel(_ model: HuggingFaceModel) -> Bool {
+    static func isSupportedSearchResult(_ model: HuggingFaceModel) -> Bool {
         let id = model.id.lowercased()
         let pipeline = model.pipelineTag?.lowercased() ?? ""
         let tags = (model.tags ?? []).map { $0.lowercased() }
+        let supportedType = inferredSupportedModelType(id: id, tags: tags)
 
         let explicitTTS = pipeline == "text-to-speech"
             || id.contains("tts")
             || tags.contains(where: { $0.contains("text-to-speech") || $0 == "tts" })
 
-        let likelyMLX = id.contains("mlx")
-            || id.contains("marvis")
-            || id.contains("soprano")
-            || id.contains("pocket-tts")
-            || id.contains("qwen3-tts")
-            || id.contains("orpheus")
-            || id.contains("vyvotts")
+        guard let supportedType else {
+            return false
+        }
 
-        return explicitTTS || likelyMLX
+        if explicitTTS {
+            return true
+        }
+
+        switch supportedType {
+        case "echo_tts", "soprano", "llama_tts", "csm", "pocket_tts":
+            return true
+        case "qwen3_tts":
+            return true
+        case "qwen3":
+            return id.contains("vyvotts")
+        default:
+            return false
+        }
+    }
+
+    static func inferredSupportedModelType(id: String, tags: [String]) -> String? {
+        let normalizedTags = Set(tags.map { $0.lowercased() })
+
+        if id.contains("qwen3_tts")
+            || id.contains("qwen3-tts")
+            || normalizedTags.contains("qwen3_tts")
+        {
+            return "qwen3_tts"
+        }
+
+        if id.contains("echo-tts")
+            || id.contains("echo_tts")
+            || normalizedTags.contains("echo_tts")
+            || normalizedTags.contains("echo")
+        {
+            return "echo_tts"
+        }
+
+        if id.contains("qwen3")
+            || id.contains("qwen")
+            || normalizedTags.contains("qwen3")
+            || normalizedTags.contains("qwen")
+        {
+            return "qwen3"
+        }
+
+        if id.contains("soprano") || normalizedTags.contains("soprano_tts") || normalizedTags.contains("soprano") {
+            return "soprano"
+        }
+
+        if id.contains("orpheus")
+            || id.contains("llama")
+            || normalizedTags.contains("llama_tts")
+            || normalizedTags.contains("llama3_tts")
+            || normalizedTags.contains("orpheus")
+            || normalizedTags.contains("orpheus_tts")
+        {
+            return "llama_tts"
+        }
+
+        if id.contains("marvis")
+            || id.contains("sesame")
+            || id.contains("csm")
+            || normalizedTags.contains("csm")
+            || normalizedTags.contains("sesame")
+        {
+            return "csm"
+        }
+
+        if id.contains("pocket-tts")
+            || id.contains("pocket_tts")
+            || normalizedTags.contains("pocket_tts")
+        {
+            return "pocket_tts"
+        }
+
+        return nil
     }
 
     static func deduplicate(_ models: [HuggingFaceModel]) -> [HuggingFaceModel] {

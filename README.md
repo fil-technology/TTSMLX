@@ -18,6 +18,7 @@ These models are included in the built-in `TTSMLX.supportedModels` catalog:
 
 - [Marvis-AI/marvis-tts-250m-v0.2-MLX-8bit](https://huggingface.co/Marvis-AI/marvis-tts-250m-v0.2-MLX-8bit) - best default choice for a balanced quality/size tradeoff.
 - [mlx-community/pocket-tts](https://huggingface.co/mlx-community/pocket-tts) - smallest and simplest option when startup speed and low memory matter most.
+- [mlx-community/echo-tts-base](https://huggingface.co/mlx-community/echo-tts-base) - reference-audio cloning model added by the latest `mlx-audio-swift` release.
 - [mlx-community/Soprano-80M-bf16](https://huggingface.co/mlx-community/Soprano-80M-bf16) - compact model that is still easy to run locally on Apple Silicon.
 - [mlx-community/VyvoTTS-EN-Beta-4bit](https://huggingface.co/mlx-community/VyvoTTS-EN-Beta-4bit) - English Qwen3-based option when you want a smaller alternative to full Qwen3-TTS.
 - [mlx-community/orpheus-3b-0.1-ft-bf16](https://huggingface.co/mlx-community/orpheus-3b-0.1-ft-bf16) - larger multi-voice LlamaTTS model with expressive built-in speakers.
@@ -27,9 +28,15 @@ Quick picking guide:
 
 - Start with `Marvis` if you want the safest default.
 - Use `Pocket TTS` for fast, lightweight local generation.
+- Use `Echo TTS` when you specifically want short reference-audio voice cloning.
 - Use `Orpheus` when you want more built-in English voice choices.
 - Use `Qwen3-TTS` when voice options, multilingual output, or cloning features matter more than model size.
 - Try `VyvoTTS` if you want a smaller English Qwen3-style model.
+
+Current upstream note:
+
+- `mlx-audio-swift` `0.1.2` adds `Echo TTS`, which is included here.
+- `mlx-audio` release notes mention `KittenTTS`, but the current `mlx-audio-swift` loader still does not expose a `kitten` model type, so `TTSMLX` does not list it yet to avoid broken runtime support.
 
 Nothing in this catalog is downloaded automatically.
 Models are downloaded only when you explicitly call `ensureDownloaded(...)`, or when you synthesize using a specific selected model.
@@ -57,7 +64,7 @@ print(result.url)
 Add `TTSMLX` to your Swift package dependencies:
 
 ```swift
-.package(url: "https://github.com/fil-technology/TTSMLX.git", from: "0.1.0")
+.package(url: "https://github.com/fil-technology/TTSMLX.git", from: "0.3.0")
 ```
 
 Then depend on the `TTSMLX` product in your target.

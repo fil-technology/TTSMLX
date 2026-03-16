@@ -14,7 +14,7 @@ let package = Package(
         )
     ],
     dependencies: [
-        .package(url: "https://github.com/Blaizzy/mlx-audio-swift.git", branch: "main"),
+        .package(url: "https://github.com/Blaizzy/mlx-audio-swift.git", from: "0.1.2"),
         .package(url: "https://github.com/ml-explore/mlx-swift.git", from: "0.30.6"),
         .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", from: "2.30.6"),
         .package(url: "https://github.com/huggingface/swift-huggingface.git", from: "0.8.1")
