@@ -5,12 +5,47 @@ import MLXAudioTTS
 @preconcurrency import AVFoundation
 #endif
 
+public enum TTSGenerationProfile: String, Sendable, Hashable, Codable, CaseIterable {
+    case fast
+    case balanced
+    case highQuality
+
+    public var title: String {
+        switch self {
+        case .fast:
+            "Fast"
+        case .balanced:
+            "Balanced"
+        case .highQuality:
+            "High Quality"
+        }
+    }
+
+    func apply(to parameters: inout GenerateParameters) {
+        switch self {
+        case .fast:
+            parameters.maxTokens = 640
+            parameters.temperature = 0.75
+            parameters.topP = 0.85
+        case .balanced:
+            parameters.maxTokens = 1280
+            parameters.temperature = 0.9
+            parameters.topP = 0.95
+        case .highQuality:
+            parameters.maxTokens = 2048
+            parameters.temperature = 1.0
+            parameters.topP = 0.98
+        }
+    }
+}
+
 public struct TTSSynthesisOptions: Sendable, Hashable {
     public var language: TTSLanguage?
     public var voice: TTSVoice?
     public var referenceAudio: URL?
     public var referenceText: String?
     public var outputURL: URL?
+    public var generationProfile: TTSGenerationProfile?
     public var maxTokens: Int?
     public var temperature: Float?
     public var topP: Float?
@@ -23,6 +58,7 @@ public struct TTSSynthesisOptions: Sendable, Hashable {
         referenceAudio: URL? = nil,
         referenceText: String? = nil,
         outputURL: URL? = nil,
+        generationProfile: TTSGenerationProfile? = nil,
         maxTokens: Int? = nil,
         temperature: Float? = nil,
         topP: Float? = nil,
@@ -34,6 +70,7 @@ public struct TTSSynthesisOptions: Sendable, Hashable {
         self.referenceAudio = referenceAudio
         self.referenceText = referenceText
         self.outputURL = outputURL
+        self.generationProfile = generationProfile
         self.maxTokens = maxTokens
         self.temperature = temperature
         self.topP = topP

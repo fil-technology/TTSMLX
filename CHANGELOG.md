@@ -6,6 +6,19 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-03-18
+
+### Added
+
+- Demo app: automatically sync generation profile to each selected model’s default.
+- Demo app: added reference-audio controls with capability-based support gating.
+- Demo app: added streaming capability awareness for composer and stream controls.
+
+### Fixed
+
+- Demo app: preserved backward-compatible persisted settings while adding profile and reference-audio settings fields.
+- Demo app: cleared unsupported reference-audio inputs when the selected model cannot handle them.
+
 ## [0.3.1] - 2026-03-16
 
 ### Changed

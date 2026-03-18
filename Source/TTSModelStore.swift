@@ -46,14 +46,27 @@ public actor TTSModelStore {
         let filtered = unique.filter(Self.isSupportedSearchResult)
         let ranked = filtered.sorted { ($0.downloads ?? 0) > ($1.downloads ?? 0) }
 
-        return ranked.prefix(limit).map {
-            let metadata = Self.metadata(from: $0)
+        return ranked.prefix(limit).map { searchModel in
+            let metadata = Self.metadata(from: searchModel)
+            let fallback = defaultModel(for: searchModel.id)
+            let fallbackLanguages = fallback?.supportedLanguages ?? []
+            let metadataLanguages = Self.languages(from: metadata.languageIdentifiers)
+            let capabilities = Self.capabilities(
+                for: searchModel.id,
+                modelTags: searchModel.tags ?? [],
+                fallback: fallback,
+                discoveredLanguages: metadataLanguages,
+                metadata: metadata
+            )
+            let supportedLanguages = capabilities.supportedLanguages
+
             return TTSModelDescriptor(
-                id: $0.id,
-                displayName: $0.id.components(separatedBy: "/").last ?? $0.id,
-                summary: $0.pipelineTag,
-                supportedLanguages: Self.languages(from: metadata.languageIdentifiers),
-                suggestedVoices: Self.suggestedVoices(for: $0.id),
+                id: searchModel.id,
+                displayName: searchModel.id.components(separatedBy: "/").last ?? searchModel.id,
+                summary: searchModel.pipelineTag,
+                supportedLanguages: supportedLanguages.isEmpty ? fallbackLanguages : supportedLanguages,
+                suggestedVoices: Self.suggestedVoices(for: searchModel.id, fallback: fallback),
+                capabilities: capabilities,
                 metadata: metadata
             )
         }
@@ -204,15 +217,17 @@ private extension TTSModelStore {
         let supportedType = inferredSupportedModelType(id: id, tags: tags)
 
         let explicitTTS = pipeline == "text-to-speech"
-            || id.contains("tts")
-            || tags.contains(where: { $0.contains("text-to-speech") || $0 == "tts" })
+        let hasLanguageHints = tags.contains { $0.hasPrefix("language:") }
+            || tags.contains { languageTagMap[$0] != nil }
+        let hasReferenceAudioHints = tags.contains("voice-cloning")
+            || tags.contains("voice_cloning")
+
+        if explicitTTS && (hasLanguageHints || hasReferenceAudioHints) {
+            return true
+        }
 
         guard let supportedType else {
             return false
-        }
-
-        if explicitTTS {
-            return true
         }
 
         switch supportedType {
@@ -307,7 +322,12 @@ private extension TTSModelStore {
         return output
     }
 
-    static func suggestedVoices(for modelID: String) -> [TTSVoice] {
+    func defaultModel(for modelID: String) -> TTSModelDescriptor? {
+        let normalized = modelID.lowercased()
+        return defaultModels.first(where: { $0.id.lowercased() == normalized })
+    }
+
+    static func suggestedVoices(for modelID: String, fallback: TTSModelDescriptor?) -> [TTSVoice] {
         let key = modelID.lowercased()
 
         if key.contains("pocket-tts") {
@@ -322,7 +342,42 @@ private extension TTSModelStore {
             return [.enUS1]
         }
 
-        return []
+        return fallback?.suggestedVoices ?? []
+    }
+
+    static func capabilities(
+        for modelID: String,
+        modelTags: [String],
+        fallback: TTSModelDescriptor?,
+        discoveredLanguages: [TTSLanguage],
+        metadata: TTSModelMetadata
+    ) -> TTSModelCapabilities {
+        let id = modelID.lowercased()
+        let supportedType = inferredSupportedModelType(id: id, tags: modelTags.map { $0.lowercased() })
+
+        let fallbackProfile = fallback?.capabilities.defaultGenerationProfile ?? .balanced
+        let defaultGenerationProfile: TTSGenerationProfile
+        switch supportedType {
+        case "csm", "pocket_tts":
+            defaultGenerationProfile = .fast
+        case "llama_tts", "qwen3_tts":
+            defaultGenerationProfile = .highQuality
+        case "soprano", "echo_tts":
+            defaultGenerationProfile = .balanced
+        default:
+            defaultGenerationProfile = fallbackProfile
+        }
+
+        let inferredLanguages: [TTSLanguage] = discoveredLanguages.isEmpty
+            ? (fallback?.capabilities.supportedLanguages ?? [])
+            : discoveredLanguages
+
+        return TTSModelCapabilities(
+            supportsReferenceAudio: ["echo_tts", "csm"].contains(supportedType),
+            supportsLanguageList: !inferredLanguages.isEmpty || !metadata.languageIdentifiers.isEmpty,
+            supportedLanguages: inferredLanguages,
+            defaultGenerationProfile: defaultGenerationProfile
+        )
     }
 
     static func metadata(from model: HuggingFaceModel) -> TTSModelMetadata {
@@ -377,7 +432,10 @@ private extension TTSModelStore {
     }
 
     static func languages(from identifiers: [String]) -> [TTSLanguage] {
-        identifiers.map { TTSLanguage($0) }
+        identifiers.map { identifier in
+            let normalized = identifier.lowercased()
+            return TTSLanguage(languageTagMap[normalized] ?? identifier)
+        }
     }
 
     static let languageTagMap: [String: String] = [
@@ -432,7 +490,7 @@ private extension TTSModelStore {
                     let repoID = String(entry.lastPathComponent.dropFirst("models--".count))
                         .replacingOccurrences(of: "--", with: "/")
                     guard seen.insert(repoID).inserted else { continue }
-                    let descriptor = defaultModels.first(where: { $0.id == repoID }) ?? .init(id: repoID)
+                    let descriptor = defaultModel(for: repoID) ?? .init(id: repoID, capabilities: .init(supportedLanguages: [.english]))
                     models.append(.init(descriptor: descriptor, location: entry, sizeBytes: directorySize(at: entry)))
                     continue
                 }
@@ -450,7 +508,7 @@ private extension TTSModelStore {
 
                         let repoID = legacyEntry.lastPathComponent.replacingOccurrences(of: "_", with: "/")
                         guard seen.insert(repoID).inserted else { continue }
-                        let descriptor = defaultModels.first(where: { $0.id == repoID }) ?? .init(id: repoID)
+                        let descriptor = defaultModel(for: repoID) ?? .init(id: repoID, capabilities: .init(supportedLanguages: [.english]))
                         models.append(.init(descriptor: descriptor, location: legacyEntry, sizeBytes: directorySize(at: legacyEntry)))
                     }
                 }

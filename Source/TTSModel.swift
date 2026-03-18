@@ -6,6 +6,7 @@ public struct TTSModelDescriptor: Sendable, Hashable, Identifiable, Codable {
     public let summary: String?
     public let supportedLanguages: [TTSLanguage]
     public let suggestedVoices: [TTSVoice]
+    public let capabilities: TTSModelCapabilities
     public let metadata: TTSModelMetadata?
 
     public init(
@@ -14,6 +15,7 @@ public struct TTSModelDescriptor: Sendable, Hashable, Identifiable, Codable {
         summary: String? = nil,
         supportedLanguages: [TTSLanguage] = [],
         suggestedVoices: [TTSVoice] = [],
+        capabilities: TTSModelCapabilities = .init(),
         metadata: TTSModelMetadata? = nil
     ) {
         self.id = id
@@ -21,7 +23,30 @@ public struct TTSModelDescriptor: Sendable, Hashable, Identifiable, Codable {
         self.summary = summary
         self.supportedLanguages = supportedLanguages
         self.suggestedVoices = suggestedVoices
+        self.capabilities = capabilities
         self.metadata = metadata
+    }
+}
+
+public struct TTSModelCapabilities: Sendable, Hashable, Codable {
+    public let supportsReferenceAudio: Bool
+    public let supportsLanguageList: Bool
+    public let supportedLanguages: [TTSLanguage]
+    public let defaultGenerationProfile: TTSGenerationProfile
+    public let supportsStreaming: Bool
+
+    public init(
+        supportsReferenceAudio: Bool = false,
+        supportsLanguageList: Bool = false,
+        supportedLanguages: [TTSLanguage] = [],
+        defaultGenerationProfile: TTSGenerationProfile = .balanced,
+        supportsStreaming: Bool = true
+    ) {
+        self.supportsReferenceAudio = supportsReferenceAudio
+        self.supportsLanguageList = supportsLanguageList
+        self.supportedLanguages = supportedLanguages
+        self.defaultGenerationProfile = defaultGenerationProfile
+        self.supportsStreaming = supportsStreaming
     }
 }
 

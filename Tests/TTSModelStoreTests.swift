@@ -84,6 +84,71 @@ struct TTSModelStoreTests {
         #expect(results.contains { $0.id == "someone/not-tts" } == false)
     }
 
+    @Test("search inference uses fallback metadata and capabilities")
+    func searchModelsUsesFallbackMetadataAndCapabilities() async throws {
+        let session = makeSession { request in
+            let url = try #require(request.url)
+            #expect(url.absoluteString.contains("/api/models"))
+
+            return try httpJSONResponse(
+                url: url,
+                body: [
+                    [
+                        "id": "mlx-community/pocket-tts",
+                        "tags": ["tts"],
+                        "downloads": 300
+                    ],
+                    [
+                        "id": "custom/qwen3-tts-mini",
+                        "pipeline_tag": "text-to-speech",
+                        "tags": ["qwen3_tts"],
+                        "downloads": 120
+                    ]
+                ]
+            )
+        }
+
+        let store = TTSModelStore(session: session, cacheRoots: [])
+        let results = try await store.searchModels(query: "tts", limit: 10)
+
+        let pocket = try #require(results.first(where: { $0.id == "mlx-community/pocket-tts" }))
+        #expect(pocket.supportedLanguages == [.english])
+        #expect(pocket.capabilities.defaultGenerationProfile == .fast)
+
+        let unknown = try #require(results.first(where: { $0.id == "custom/qwen3-tts-mini" }))
+        #expect(unknown.capabilities.supportsReferenceAudio == false)
+        #expect(unknown.supportedLanguages.isEmpty == true)
+        #expect(unknown.capabilities.supportedLanguages.isEmpty == true)
+    }
+
+    @Test("search maps language tags into capabilities")
+    func searchModelsMapsLanguageTagsToCapabilities() async throws {
+        let session = makeSession { request in
+            let url = try #require(request.url)
+            #expect(url.absoluteString.contains("/api/models"))
+
+            return try httpJSONResponse(
+                url: url,
+                body: [
+                    [
+                        "id": "custom/custom-multilingual-tts",
+                        "pipeline_tag": "text-to-speech",
+                        "tags": ["language:en", "language:fr", "voice-cloning", "tts"],
+                        "downloads": 50
+                    ]
+                ]
+            )
+        }
+
+        let store = TTSModelStore(session: session, cacheRoots: [])
+        let results = try await store.searchModels(query: "tts", limit: 10)
+
+        let model = try #require(results.first)
+        #expect(model.id == "custom/custom-multilingual-tts")
+        #expect(model.capabilities.supportedLanguages.map(\.identifier) == ["English", "French"])
+        #expect(model.capabilities.supportsLanguageList)
+    }
+
     @Test("metadata fetch merges Hugging Face fields with config.json")
     func fetchMetadataMergesRemoteAndConfig() async throws {
         let session = makeSession { request in

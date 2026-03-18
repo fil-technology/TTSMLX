@@ -36,6 +36,12 @@ final class DemoModel {
         var customLanguage: String
         var selectedVoiceMode: String
         var customVoice: String
+        var selectedGenerationProfile: String
+        var maxTokens: String
+        var temperature: String
+        var topP: String
+        var referenceAudioPath: String?
+        var referenceText: String?
     }
 
     struct GeneratedAudioRecord: Identifiable, Hashable {
@@ -55,10 +61,28 @@ final class DemoModel {
 
     var inputText = "Hello from TTSMLX."
     var modelSearchQuery = "mlx tts"
+    var selectedGenerationProfile: TTSGenerationProfile = .balanced {
+        didSet { persistSettings() }
+    }
     var customVoice = "" {
         didSet { persistSettings() }
     }
     var customLanguage = "" {
+        didSet { persistSettings() }
+    }
+    var customMaxTokens = "" {
+        didSet { persistSettings() }
+    }
+    var customTemperature = "" {
+        didSet { persistSettings() }
+    }
+    var customTopP = "" {
+        didSet { persistSettings() }
+    }
+    var customReferenceAudioPath = "" {
+        didSet { persistSettings() }
+    }
+    var customReferenceText = "" {
         didSet { persistSettings() }
     }
 
@@ -89,6 +113,14 @@ final class DemoModel {
     var progressValue: Double?
     var lastAudio: TTSAudioFile?
     var activityState: DemoActivityState = .idle
+
+    var supportsStreamingForSelectedModel: Bool {
+        selectedModel.capabilities.supportsStreaming
+    }
+
+    var supportsReferenceAudioForSelectedModel: Bool {
+        selectedModel.capabilities.supportsReferenceAudio
+    }
 
     private let synthesizer = TTSSpeechSynthesizer()
     private let store = TTSModelStore()
@@ -143,10 +175,29 @@ final class DemoModel {
         [.automatic] + selectedModel.suggestedVoices.map { .preset($0) } + [.custom]
     }
 
+    var languageOptions: [LanguageMode] {
+        var options: [LanguageMode] = [.automatic]
+        let languages = selectedModel.capabilities.supportedLanguages.isEmpty
+            ? selectedModel.supportedLanguages
+            : selectedModel.capabilities.supportedLanguages
+        for language in languages {
+            let mode: LanguageMode = .preset(language.identifier)
+            if options.contains(mode) == false {
+                options.append(mode)
+            }
+        }
+
+        if selectedLanguageMode == .custom || !customLanguage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            options.append(.custom)
+        }
+        return options
+    }
+
     var supportedLanguageSummary: String {
-        let languages = selectedModel.metadata?.languageIdentifiers
-            ?? selectedModelMetadata?.languageIdentifiers
-            ?? selectedModel.supportedLanguages.map(\.identifier)
+        let languages = (selectedModel.capabilities.supportedLanguages.isEmpty
+            ? selectedModel.supportedLanguages
+            : selectedModel.capabilities.supportedLanguages)
+            .map(\.identifier)
         guard !languages.isEmpty else { return "Unknown" }
         return languages.joined(separator: ", ")
     }
@@ -342,6 +393,11 @@ final class DemoModel {
     }
 
     func streamSpeak() async {
+        guard supportsStreamingForSelectedModel else {
+            status = "Streaming is not supported for this model."
+            return
+        }
+
         let trimmed = trimmedInputText
         guard !trimmed.isEmpty else {
             status = "Enter some text first."
@@ -527,23 +583,58 @@ final class DemoModel {
         } catch {
             selectedModelMetadata = nil
         }
+        synchronizeSelectedGenerationProfile()
+        coerceReferenceInputs()
+        coerceSelectedLanguageMode()
     }
 
     private func synthesisOptions() -> TTSSynthesisOptions {
         .init(
             language: resolvedLanguage(),
-            voice: resolvedVoice()
+            voice: resolvedVoice(),
+            generationProfile: selectedGenerationProfile,
+            maxTokens: parsed(customMaxTokens),
+            temperature: parsed(customTemperature),
+            topP: parsed(customTopP),
+            referenceAudio: resolvedReferenceAudio(),
+            referenceText: resolvedReferenceText()
         )
+    }
+
+    private func resolvedReferenceAudio() -> URL? {
+        guard supportsReferenceAudioForSelectedModel else { return nil }
+        let trimmedPath = customReferenceAudioPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPath.isEmpty else { return nil }
+        let expanded = NSString(string: trimmedPath).expandingTildeInPath
+        let url = URL(fileURLWithPath: expanded)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    private func resolvedReferenceText() -> String? {
+        guard supportsReferenceAudioForSelectedModel else { return nil }
+        let trimmedText = customReferenceText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedText.isEmpty ? nil : trimmedText
+    }
+
+    private func parsed(_ value: String) -> Float? {
+        let text = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+        return Float(text)
+    }
+
+    private func parsed(_ value: String) -> Int? {
+        let text = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+        return Int(text)
     }
 
     private func resolvedLanguage() -> TTSLanguage? {
         switch selectedLanguageMode {
         case .automatic:
             return nil
-        case .english:
-            return .english
-        case .spanish:
-            return .spanish
+        case .preset(let identifier):
+            let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : TTSLanguage(trimmed)
         case .custom:
             let trimmed = customLanguage.trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed.isEmpty ? nil : TTSLanguage(trimmed)
@@ -714,7 +805,13 @@ final class DemoModel {
             selectedLanguageMode: selectedLanguageMode.persistenceValue,
             customLanguage: customLanguage,
             selectedVoiceMode: selectedVoiceMode.persistenceValue,
-            customVoice: customVoice
+            customVoice: customVoice,
+            selectedGenerationProfile: selectedGenerationProfile.rawValue,
+            maxTokens: customMaxTokens,
+            temperature: customTemperature,
+            topP: customTopP,
+            referenceAudioPath: customReferenceAudioPath,
+            referenceText: customReferenceText
         )
 
         guard let data = try? JSONEncoder().encode(settings) else { return }
@@ -735,6 +832,47 @@ final class DemoModel {
         customLanguage = settings.customLanguage
         selectedVoiceMode = VoiceMode(persistenceValue: settings.selectedVoiceMode) ?? .automatic
         customVoice = settings.customVoice
+        selectedGenerationProfile = TTSGenerationProfile(rawValue: settings.selectedGenerationProfile) ?? .balanced
+        customMaxTokens = settings.maxTokens
+        customTemperature = settings.temperature
+        customTopP = settings.topP
+        customReferenceAudioPath = settings.referenceAudioPath ?? ""
+        customReferenceText = settings.referenceText ?? ""
+    }
+
+    private func coerceSelectedLanguageMode() {
+        let supported = Set(languageOptions.compactMap { mode in
+            switch mode {
+            case .preset(let identifier):
+                return identifier
+            default:
+                return nil
+            }
+        })
+        if case .preset(let identifier) = selectedLanguageMode, !supported.contains(identifier) {
+            selectedLanguageMode = .automatic
+        }
+    }
+
+    private func synchronizeSelectedGenerationProfile() {
+        let defaultProfile = selectedModel.capabilities.defaultGenerationProfile
+        if selectedGenerationProfile != defaultProfile {
+            selectedGenerationProfile = defaultProfile
+        }
+    }
+
+    private func coerceReferenceInputs() {
+        if supportsReferenceAudioForSelectedModel {
+            return
+        }
+
+        if customReferenceAudioPath.isEmpty == false {
+            customReferenceAudioPath = ""
+        }
+
+        if customReferenceText.isEmpty == false {
+            customReferenceText = ""
+        }
     }
 }
 
@@ -786,17 +924,15 @@ enum DemoActivityState: Hashable {
     }
 }
 
-enum LanguageMode: Hashable, CaseIterable {
+enum LanguageMode: Hashable {
     case automatic
-    case english
-    case spanish
+    case preset(String)
     case custom
 
     var title: String {
         switch self {
         case .automatic: "Automatic"
-        case .english: "English"
-        case .spanish: "Spanish"
+        case .preset(let value): value
         case .custom: "Custom"
         }
     }
@@ -804,8 +940,7 @@ enum LanguageMode: Hashable, CaseIterable {
     var persistenceValue: String {
         switch self {
         case .automatic: "automatic"
-        case .english: "english"
-        case .spanish: "spanish"
+        case .preset(let identifier): "preset:\(identifier)"
         case .custom: "custom"
         }
     }
@@ -813,9 +948,11 @@ enum LanguageMode: Hashable, CaseIterable {
     init?(persistenceValue: String) {
         switch persistenceValue {
         case "automatic": self = .automatic
-        case "english": self = .english
-        case "spanish": self = .spanish
+        case let value where value.starts(with: "preset:"):
+            self = .preset(String(value.dropFirst("preset:".count)))
         case "custom": self = .custom
+        case "english": self = .preset("English")
+        case "spanish": self = .preset("Spanish")
         default: return nil
         }
     }

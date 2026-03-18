@@ -208,7 +208,13 @@ struct ContentView: View {
             .frame(height: composerHeight)
 
             if isShowingComposerHint {
-                ComposerTipBubble(text: model.hasGeneratedAudioForCurrentInput ? "Tap to play. Long press to stream." : "Tap to generate. Long press to stream.")
+                ComposerTipBubble(
+                    text: model.hasGeneratedAudioForCurrentInput
+                        ? "Tap to play. Long press to stream."
+                        : model.supportsStreamingForSelectedModel
+                            ? "Tap to generate. Long press to stream."
+                            : "Tap to generate."
+                )
                     .padding(.trailing, 8)
                     .offset(y: -56)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -229,7 +235,9 @@ struct ContentView: View {
     #if os(iOS)
     private var composerPrimaryButton: some View {
         let isBusy = model.isSynthesizing || model.isStreaming
+        let supportsStreaming = model.supportsStreamingForSelectedModel
         let isDisabled = model.trimmedInputText.isEmpty && !isBusy
+        let isLongPressDisabled = isBusy || !supportsStreaming
 
         return Circle()
             .fill(isDisabled ? Color.white.opacity(0.28) : Color.white)
@@ -251,13 +259,13 @@ struct ContentView: View {
                 Task { await model.performPrimaryComposerAction() }
             }
             .onLongPressGesture(minimumDuration: 0.45) {
-                guard !isDisabled, !isBusy else { return }
+                guard !isBusy, !isLongPressDisabled else { return }
                 isComposerFocused = false
                 Task { await model.streamSpeak() }
             }
             .accessibilityElement()
             .accessibilityLabel(model.composerPrimaryLabel)
-            .accessibilityHint("Long press to stream audio.")
+            .accessibilityHint(supportsStreaming ? "Long press to stream audio." : "Streaming is not supported for this model.")
     }
     #endif
 
@@ -393,7 +401,7 @@ struct ContentView: View {
 
                 Section("Voice & Language") {
                     Picker("Language", selection: $model.selectedLanguageMode) {
-                        ForEach(LanguageMode.allCases, id: \.self) { mode in
+                        ForEach(model.languageOptions, id: \.self) { mode in
                             Text(mode.title).tag(mode)
                         }
                     }
@@ -417,6 +425,41 @@ struct ContentView: View {
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                     }
+
+                Picker("Generation Profile", selection: $model.selectedGenerationProfile) {
+                    ForEach(TTSGenerationProfile.allCases, id: \.self) { profile in
+                        Text(profile.title).tag(profile)
+                    }
+                }
+                .pickerStyle(.navigationLink)
+
+                if model.supportsReferenceAudioForSelectedModel {
+                    TextField("Reference audio path", text: $model.customReferenceAudioPath)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("Reference text", text: $model.customReferenceText)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                } else {
+                    Text("Reference audio not supported for this model")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+                Section("Advanced Parameters") {
+                    TextField("maxTokens", text: $model.customMaxTokens)
+                        .keyboardType(.numberPad)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("temperature", text: $model.customTemperature)
+                        .keyboardType(.decimalPad)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("topP", text: $model.customTopP)
+                        .keyboardType(.decimalPad)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
                 }
 
                 Section("Discover Models") {
@@ -562,7 +605,7 @@ struct ContentView: View {
             Task { await model.streamSpeak() }
         } label: {
             ZStack {
-                Text("Stream Speak")
+                Text(model.supportsStreamingForSelectedModel ? "Stream Speak" : "Streaming Unsupported")
                     .opacity(model.isStreaming ? 0 : 1)
                 if model.isStreaming {
                     ProgressView()
@@ -571,7 +614,7 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, minHeight: 36)
         }
         .buttonStyle(.borderedProminent)
-        .disabled(model.isStreaming || model.isSynthesizing)
+        .disabled(model.isStreaming || model.isSynthesizing || !model.supportsStreamingForSelectedModel)
 
         if !model.isInstalled(model.selectedModelID) {
             Button("Download Selected Model") {
@@ -815,6 +858,14 @@ private struct ActivityOrbView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Text("Default profile: \(model.selectedModel.capabilities.defaultGenerationProfile.title)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text("Supports language list: \(model.selectedModel.capabilities.supportsLanguageList ? "Yes" : "No")")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 Text("Languages: \(model.supportedLanguageSummary)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -964,6 +1015,30 @@ private struct ActivityOrbView: View {
                     settingsGroup(title: "Voice") {
                         voicePicker
                     }
+                    settingsGroup(title: "Generation Profile") {
+                        Picker("Generation Profile", selection: $model.selectedGenerationProfile) {
+                            ForEach(TTSGenerationProfile.allCases, id: \.self) { profile in
+                                Text(profile.title).tag(profile)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+                    if model.supportsReferenceAudioForSelectedModel {
+                        settingsGroup(title: "Reference Audio") {
+                            TextField("Reference audio path", text: $model.customReferenceAudioPath)
+                                .textFieldStyle(.roundedBorder)
+                            TextField("Reference text", text: $model.customReferenceText)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                    }
+                    settingsGroup(title: "Advanced Parameters") {
+                        TextField("maxTokens", text: $model.customMaxTokens)
+                            .textFieldStyle(.roundedBorder)
+                        TextField("temperature", text: $model.customTemperature)
+                            .textFieldStyle(.roundedBorder)
+                        TextField("topP", text: $model.customTopP)
+                            .textFieldStyle(.roundedBorder)
+                    }
                 }
             } else {
                 HStack(alignment: .top, spacing: 16) {
@@ -972,6 +1047,32 @@ private struct ActivityOrbView: View {
                     }
                     settingsGroup(title: "Voice") {
                         voicePicker
+                    }
+                    settingsGroup(title: "Generation Profile") {
+                        Picker("Generation Profile", selection: $model.selectedGenerationProfile) {
+                            ForEach(TTSGenerationProfile.allCases, id: \.self) { profile in
+                                Text(profile.title).tag(profile)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+                    if model.supportsReferenceAudioForSelectedModel {
+                        settingsGroup(title: "Reference Audio") {
+                            TextField("Reference audio path", text: $model.customReferenceAudioPath)
+                                .textFieldStyle(.roundedBorder)
+                            TextField("Reference text", text: $model.customReferenceText)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                    }
+                }
+                HStack(alignment: .top, spacing: 16) {
+                    settingsGroup(title: "Advanced Parameters") {
+                        TextField("maxTokens", text: $model.customMaxTokens)
+                            .textFieldStyle(.roundedBorder)
+                        TextField("temperature", text: $model.customTemperature)
+                            .textFieldStyle(.roundedBorder)
+                        TextField("topP", text: $model.customTopP)
+                            .textFieldStyle(.roundedBorder)
                     }
                 }
             }
@@ -983,7 +1084,7 @@ private struct ActivityOrbView: View {
     private var languagePicker: some View {
         VStack(alignment: .leading, spacing: 10) {
             Picker("Language", selection: $model.selectedLanguageMode) {
-                ForEach(LanguageMode.allCases, id: \.self) { mode in
+                ForEach(model.languageOptions, id: \.self) { mode in
                     Text(mode.title).tag(mode)
                 }
             }

@@ -43,6 +43,7 @@ public actor TTSSpeechSynthesizer {
         let loadedModel = try await MLXTTSModelLoader.load(descriptor: model, hfToken: options.hfToken)
 
         var parameters = loadedModel.defaultGenerationParameters
+        options.generationProfile?.apply(to: &parameters)
         if let maxTokens = options.maxTokens {
             parameters.maxTokens = maxTokens
         }
@@ -218,6 +219,7 @@ private extension TTSSpeechSynthesizer {
         options: TTSSynthesisOptions
     ) -> GenerateParameters {
         var parameters = model.defaultGenerationParameters
+        options.generationProfile?.apply(to: &parameters)
         if let maxTokens = options.maxTokens {
             parameters.maxTokens = maxTokens
         }
