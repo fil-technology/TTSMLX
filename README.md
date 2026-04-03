@@ -2,6 +2,8 @@
 
 Small Swift package for text-to-speech with Hugging Face models running through `mlx-audio-swift`.
 
+`TTSMLX` is intentionally TTS-only. Upstream `mlx-audio` also supports STT, STS, quantization utilities, and server paths, but those surfaces are not wrapped by this package yet.
+
 ## Features
 
 - Simple actor-based API
@@ -18,25 +20,27 @@ These models are included in the built-in `TTSMLX.supportedModels` catalog:
 
 - [Marvis-AI/marvis-tts-250m-v0.2-MLX-8bit](https://huggingface.co/Marvis-AI/marvis-tts-250m-v0.2-MLX-8bit) - best default choice for a balanced quality/size tradeoff.
 - [mlx-community/pocket-tts](https://huggingface.co/mlx-community/pocket-tts) - smallest and simplest option when startup speed and low memory matter most.
-- [mlx-community/echo-tts-base](https://huggingface.co/mlx-community/echo-tts-base) - reference-audio cloning model added by the latest `mlx-audio-swift` release.
 - [mlx-community/Soprano-80M-bf16](https://huggingface.co/mlx-community/Soprano-80M-bf16) - compact model that is still easy to run locally on Apple Silicon.
 - [mlx-community/VyvoTTS-EN-Beta-4bit](https://huggingface.co/mlx-community/VyvoTTS-EN-Beta-4bit) - English Qwen3-based option when you want a smaller alternative to full Qwen3-TTS.
 - [mlx-community/orpheus-3b-0.1-ft-bf16](https://huggingface.co/mlx-community/orpheus-3b-0.1-ft-bf16) - larger multi-voice LlamaTTS model with expressive built-in speakers.
 - [mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit](https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit) - strongest general-purpose option here when you want better quality, multilingual support, and voice-cloning style inputs.
+- [mlx-community/kitten-tts-mini-0.8](https://huggingface.co/mlx-community/kitten-tts-mini-0.8) - compact runtime-supported option exposed by the current local `mlx-audio-swift` loader.
 
 Quick picking guide:
 
 - Start with `Marvis` if you want the safest default.
 - Use `Pocket TTS` for fast, lightweight local generation.
-- Use `Echo TTS` when you specifically want short reference-audio voice cloning.
 - Use `Orpheus` when you want more built-in English voice choices.
 - Use `Qwen3-TTS` when voice options, multilingual output, or cloning features matter more than model size.
 - Try `VyvoTTS` if you want a smaller English Qwen3-style model.
+- Try `Kitten TTS` when you want a smaller runtime-supported alternative in the built-in catalog.
 
 Current upstream note:
 
-- `mlx-audio-swift` `0.1.2` adds `Echo TTS`, which is included here.
-- `mlx-audio` release notes mention `KittenTTS`, but the current `mlx-audio-swift` loader still does not expose a `kitten` model type, so `TTSMLX` does not list it yet to avoid broken runtime support.
+- `TTSMLX` keeps the local path dependency on `../mlx-audio-swift` during active fork development. This package does not pin a standalone `mlx-audio` backend version by itself.
+- The wrapper catalog only lists model families that the current local `mlx-audio-swift` loader can open today.
+- New upstream `mlx-audio v0.4.2` TTS families such as `Irodori-TTS`, `HumeAI TADA`, `KugelAudio TTS`, and `Voxtral-4B-TTS-2603` may still appear in model search as discovery-only results, but they are intentionally marked unsupported until the local Swift backend gains loaders for them.
+- Upstream additions outside the TTS wrapper scope, such as `Cohere Transcribe ASR`, `Qwen2-Audio-7B-Instruct`, `Moshi STS`, and Distil-Whisper documentation updates, are not exposed through `TTSMLX` yet.
 
 Nothing in this catalog is downloaded automatically.
 Models are downloaded only when you explicitly call `ensureDownloaded(...)`, or when you synthesize using a specific selected model.
@@ -92,6 +96,7 @@ for try await chunk in stream {
 
 Use `synthesize(...)` when you want a finished WAV file.
 Use `synthesizeStream(...)` when you want lower-latency playback and chunk-by-chunk delivery.
+The current wrapper treats streaming as a buffer-delivery API: it does not surface a persisted file artifact for streamed runs, even if future upstream runtimes save one internally.
 
 ## Demo App
 

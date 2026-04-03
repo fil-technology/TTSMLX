@@ -47,6 +47,12 @@ struct TTSModelStoreTests {
                         "downloads": 70
                     ],
                     [
+                        "id": "mlx-community/kitten-tts-mini-0.8",
+                        "pipeline_tag": "text-to-speech",
+                        "tags": ["language:en", "kitten_tts"],
+                        "downloads": 74
+                    ],
+                    [
                         "id": "mlx-community/kokoro-82m-4bit",
                         "pipeline_tag": "text-to-speech",
                         "tags": ["kokoro"],
@@ -57,6 +63,18 @@ struct TTSModelStoreTests {
                         "pipeline_tag": "text-to-speech",
                         "tags": ["qwen3_tts"],
                         "downloads": 75
+                    ],
+                    [
+                        "id": "mlx-community/Irodori-TTS-JP-4bit",
+                        "pipeline_tag": "text-to-speech",
+                        "tags": ["language:ja", "irodori_tts"],
+                        "downloads": 73
+                    ],
+                    [
+                        "id": "mlx-community/Voxtral-4B-TTS-2603-8bit",
+                        "pipeline_tag": "text-to-speech",
+                        "tags": ["voxtral_tts", "language:en"],
+                        "downloads": 72
                     ],
                     [
                         "id": "someone/asr-model",
@@ -72,15 +90,24 @@ struct TTSModelStoreTests {
 
         #expect(results.map(\.id) == [
             "mlx-community/pocket-tts",
-            "mlx-community/echo-tts-base",
             "mlx-community/orpheus-3b-0.1-ft-bf16",
-            "custom/qwen3-tts-demo"
+            "mlx-community/kokoro-82m-4bit",
+            "custom/qwen3-tts-demo",
+            "mlx-community/kitten-tts-mini-0.8",
+            "mlx-community/Irodori-TTS-JP-4bit",
+            "mlx-community/Voxtral-4B-TTS-2603-8bit",
         ])
         #expect(results.first?.suggestedVoices.contains(.alba) == true)
-        #expect(results[2].suggestedVoices.contains(.tara) == true)
+        #expect(results.first(where: { $0.id == "mlx-community/orpheus-3b-0.1-ft-bf16" })?.suggestedVoices.contains(.tara) == true)
+        #expect(results.contains { $0.id == "mlx-community/kitten-tts-mini-0.8" } == true)
+        #expect(results.first(where: { $0.id == "mlx-community/kitten-tts-mini-0.8" })?.capabilities.isRuntimeSupported == true)
+        #expect(results.contains { $0.id == "mlx-community/echo-tts-base" } == false)
+        #expect(results.first(where: { $0.id == "mlx-community/Irodori-TTS-JP-4bit" })?.capabilities.isRuntimeSupported == false)
+        #expect(results.first(where: { $0.id == "mlx-community/Voxtral-4B-TTS-2603-8bit" })?.capabilities.isRuntimeSupported == false)
+        #expect(results.first(where: { $0.id == "mlx-community/kokoro-82m-4bit" })?.capabilities.isRuntimeSupported == false)
         #expect(results.contains { $0.id == "someone/asr-model" } == false)
         #expect(results.contains { $0.id == "mlx-community/pocket-tts-8bit" } == false)
-        #expect(results.contains { $0.id.contains("kokoro") } == false)
+        #expect(results.contains { $0.id == "someone/real-tts" } == false)
         #expect(results.contains { $0.id == "someone/not-tts" } == false)
     }
 
@@ -112,10 +139,12 @@ struct TTSModelStoreTests {
         let results = try await store.searchModels(query: "tts", limit: 10)
 
         let pocket = try #require(results.first(where: { $0.id == "mlx-community/pocket-tts" }))
+        #expect(pocket.capabilities.isRuntimeSupported)
         #expect(pocket.supportedLanguages == [.english])
         #expect(pocket.capabilities.defaultGenerationProfile == .fast)
 
         let unknown = try #require(results.first(where: { $0.id == "custom/qwen3-tts-mini" }))
+        #expect(unknown.capabilities.isRuntimeSupported)
         #expect(unknown.capabilities.supportsReferenceAudio == false)
         #expect(unknown.supportedLanguages.isEmpty == true)
         #expect(unknown.capabilities.supportedLanguages.isEmpty == true)
@@ -131,9 +160,9 @@ struct TTSModelStoreTests {
                 url: url,
                 body: [
                     [
-                        "id": "custom/custom-multilingual-tts",
+                        "id": "custom/echo-tts-multilingual",
                         "pipeline_tag": "text-to-speech",
-                        "tags": ["language:en", "language:fr", "voice-cloning", "tts"],
+                        "tags": ["language:en", "language:fr", "voice-cloning", "echo_tts"],
                         "downloads": 50
                     ]
                 ]
@@ -144,7 +173,8 @@ struct TTSModelStoreTests {
         let results = try await store.searchModels(query: "tts", limit: 10)
 
         let model = try #require(results.first)
-        #expect(model.id == "custom/custom-multilingual-tts")
+        #expect(model.id == "custom/echo-tts-multilingual")
+        #expect(model.capabilities.isRuntimeSupported == false)
         #expect(model.capabilities.supportedLanguages.map(\.identifier) == ["English", "French"])
         #expect(model.capabilities.supportsLanguageList)
     }
@@ -213,26 +243,45 @@ struct TTSModelStoreTests {
         let duplicateLegacyModel = legacyRoot
             .appendingPathComponent("mlx-community_pocket-tts", isDirectory: true)
         let legacyOnlyModel = legacyRoot
-            .appendingPathComponent("custom_demo-model", isDirectory: true)
+            .appendingPathComponent("custom_echo-tts-demo", isDirectory: true)
+        let unsupportedLegacyModel = legacyRoot
+            .appendingPathComponent("mlx-community_kitten-tts-mini-0.8", isDirectory: true)
 
         try FileManager.default.createDirectory(at: hubModel, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: duplicateLegacyModel, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: legacyOnlyModel, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: unsupportedLegacyModel, withIntermediateDirectories: true)
 
         try Data(repeating: 1, count: 12).write(to: hubModel.appendingPathComponent("weights.safetensors"))
         try Data(repeating: 2, count: 8).write(to: duplicateLegacyModel.appendingPathComponent("weights.safetensors"))
         try Data(repeating: 3, count: 20).write(to: legacyOnlyModel.appendingPathComponent("weights.safetensors"))
+        try Data("""
+        {
+          "model_type": "echo_tts",
+          "languages": ["en"]
+        }
+        """.utf8).write(to: legacyOnlyModel.appendingPathComponent("config.json"))
+        try Data("""
+        {
+          "model_type": "kitten_tts"
+        }
+        """.utf8).write(to: unsupportedLegacyModel.appendingPathComponent("config.json"))
 
         let store = TTSModelStore(cacheRoots: [temporaryRoot])
         let installed = try await store.installedModels()
 
-        #expect(installed.map(\.id) == ["custom/demo-model", "mlx-community/pocket-tts"])
+        #expect(installed.map(\.id) == ["custom/echo-tts-demo", "mlx-community/kitten-tts-mini-0.8", "mlx-community/pocket-tts"])
 
         let custom = try #require(installed.first)
-        #expect(custom.sizeBytes == 20)
+        #expect(custom.sizeBytes > 20)
+        #expect(custom.descriptor.capabilities.isRuntimeSupported == false)
+
+        let kitten = try #require(installed.first(where: { $0.id == "mlx-community/kitten-tts-mini-0.8" }))
+        #expect(kitten.descriptor.capabilities.isRuntimeSupported)
 
         let pocket = try #require(installed.last)
         #expect(pocket.descriptor.displayName == "Pocket TTS")
+        #expect(pocket.descriptor.capabilities.isRuntimeSupported)
         #expect([8, 12].contains(pocket.sizeBytes))
     }
 }

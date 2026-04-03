@@ -9,6 +9,7 @@ public enum TTSMLX {
             supportedLanguages: [.english],
             suggestedVoices: [],
             capabilities: .init(
+                isRuntimeSupported: true,
                 supportsReferenceAudio: false,
                 supportsLanguageList: true,
                 supportedLanguages: [.english],
@@ -22,23 +23,11 @@ public enum TTSMLX {
             supportedLanguages: [.english],
             suggestedVoices: [.alba, .marius, .javert, .jean],
             capabilities: .init(
+                isRuntimeSupported: true,
                 supportsReferenceAudio: false,
                 supportsLanguageList: true,
                 supportedLanguages: [.english],
                 defaultGenerationProfile: .fast
-            )
-        ),
-        .init(
-            id: "mlx-community/echo-tts-base",
-            displayName: "Echo TTS",
-            summary: "Reference-audio cloning model added in mlx-audio-swift 0.1.2.",
-            supportedLanguages: [.english],
-            suggestedVoices: [],
-            capabilities: .init(
-                supportsReferenceAudio: true,
-                supportsLanguageList: true,
-                supportedLanguages: [.english],
-                defaultGenerationProfile: .balanced
             )
         ),
         .init(
@@ -48,6 +37,7 @@ public enum TTSMLX {
             supportedLanguages: [.english],
             suggestedVoices: [],
             capabilities: .init(
+                isRuntimeSupported: true,
                 supportsReferenceAudio: false,
                 supportsLanguageList: true,
                 supportedLanguages: [.english],
@@ -61,6 +51,7 @@ public enum TTSMLX {
             supportedLanguages: [.english],
             suggestedVoices: [.enUS1],
             capabilities: .init(
+                isRuntimeSupported: true,
                 supportsReferenceAudio: false,
                 supportsLanguageList: true,
                 supportedLanguages: [.english],
@@ -74,6 +65,7 @@ public enum TTSMLX {
             supportedLanguages: [.english],
             suggestedVoices: [.tara, .leah, .jess, .leo, .dan, .mia, .zac, .zoe],
             capabilities: .init(
+                isRuntimeSupported: true,
                 supportsReferenceAudio: false,
                 supportsLanguageList: true,
                 supportedLanguages: [.english],
@@ -87,10 +79,25 @@ public enum TTSMLX {
             supportedLanguages: [.english, .spanish, .french, .german, .italian, .portuguese, .dutch, .polish, .turkish, .russian, .japanese, .korean, .chinese, .arabic, .hindi],
             suggestedVoices: [.enUS1],
             capabilities: .init(
+                isRuntimeSupported: true,
                 supportsReferenceAudio: false,
                 supportsLanguageList: true,
                 supportedLanguages: [.english, .spanish, .french, .german, .italian, .portuguese, .dutch, .polish, .turkish, .russian, .japanese, .korean, .chinese, .arabic, .hindi],
                 defaultGenerationProfile: .highQuality
+            )
+        ),
+        .init(
+            id: "mlx-community/kitten-tts-mini-0.8",
+            displayName: "Kitten TTS",
+            summary: "Compact runtime-supported TTS option with built-in voices.",
+            supportedLanguages: [.english],
+            suggestedVoices: [],
+            capabilities: .init(
+                isRuntimeSupported: true,
+                supportsReferenceAudio: false,
+                supportsLanguageList: true,
+                supportedLanguages: [.english],
+                defaultGenerationProfile: .balanced
             )
         )
     ]

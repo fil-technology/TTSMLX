@@ -94,6 +94,10 @@ public actor TTSModelStore {
         hfToken: String? = nil,
         progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)? = nil
     ) async throws -> TTSInstalledModel {
+        guard descriptor.capabilities.isRuntimeSupported else {
+            throw TTSError.unsupportedModel(descriptor.id)
+        }
+
         if let installedLocation = modelCacheLocation(for: descriptor.id) {
             let installed = TTSInstalledModel(
                 descriptor: descriptor,
@@ -214,32 +218,114 @@ private extension TTSModelStore {
         let id = model.id.lowercased()
         let pipeline = model.pipelineTag?.lowercased() ?? ""
         let tags = (model.tags ?? []).map { $0.lowercased() }
-        let supportedType = inferredSupportedModelType(id: id, tags: tags)
+        let supportedType = supportedModelType(
+            id: id,
+            tags: tags,
+            modelType: nil,
+            architectures: []
+        )
+
+        if let supportedType {
+            switch supportedType {
+            case "soprano", "llama_tts", "csm", "pocket_tts", "kitten_tts":
+                return true
+            case "qwen3_tts":
+                return true
+            case "qwen3":
+                return id.contains("vyvotts")
+            default:
+                return false
+            }
+        }
 
         let explicitTTS = pipeline == "text-to-speech"
         let hasLanguageHints = tags.contains { $0.hasPrefix("language:") }
             || tags.contains { languageTagMap[$0] != nil }
         let hasReferenceAudioHints = tags.contains("voice-cloning")
             || tags.contains("voice_cloning")
+        let isKnownUnsupportedTTSFamily = knownUnsupportedTTSModelFamily(id: id, tags: tags)
+        let looksLikeMLXRepo = id.contains("mlx")
 
-        if explicitTTS && (hasLanguageHints || hasReferenceAudioHints) {
+        if explicitTTS && (looksLikeMLXRepo || hasLanguageHints || hasReferenceAudioHints || isKnownUnsupportedTTSFamily) {
             return true
         }
 
-        guard let supportedType else {
-            return false
+        return false
+    }
+
+    static func supportedModelType(
+        id: String,
+        tags: [String],
+        modelType: String?,
+        architectures: [String]
+    ) -> String? {
+        if let normalized = normalizedSupportedModelType(modelType) {
+            return normalized
         }
 
-        switch supportedType {
-        case "echo_tts", "soprano", "llama_tts", "csm", "pocket_tts":
-            return true
+        if let inferred = inferredSupportedModelType(from: architectures) {
+            return inferred
+        }
+
+        return inferredSupportedModelType(id: id, tags: tags)
+    }
+
+    static func normalizedSupportedModelType(_ modelType: String?) -> String? {
+        guard let modelType else { return nil }
+
+        let trimmed = modelType
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard !trimmed.isEmpty else { return nil }
+
+        switch trimmed {
+        case "soprano", "soprano_tts":
+            return "soprano"
+        case "llama_tts", "llama3_tts", "llama3", "llama", "orpheus", "orpheus_tts":
+            return "llama_tts"
+        case "csm", "sesame":
+            return "csm"
+        case "pocket_tts":
+            return "pocket_tts"
         case "qwen3_tts":
-            return true
-        case "qwen3":
-            return id.contains("vyvotts")
+            return "qwen3_tts"
+        case "qwen3", "qwen":
+            return "qwen3"
+        case "kitten_tts", "kitten", "kitten-tts":
+            return "kitten_tts"
         default:
-            return false
+            return nil
         }
+    }
+
+    static func inferredSupportedModelType(from architectures: [String]) -> String? {
+        for architecture in architectures {
+            let lower = architecture.lowercased()
+
+            if lower.contains("qwen3tts") {
+                return "qwen3_tts"
+            }
+            if lower.contains("qwen3") {
+                return "qwen3"
+            }
+            if lower.contains("soprano") {
+                return "soprano"
+            }
+            if lower.contains("llamatts") || lower.contains("orpheus") {
+                return "llama_tts"
+            }
+            if lower.contains("marvis") || lower.contains("csm") || lower.contains("sesame") {
+                return "csm"
+            }
+            if lower.contains("pockettts") {
+                return "pocket_tts"
+            }
+            if lower.contains("kittentts") {
+                return "kitten_tts"
+            }
+        }
+
+        return nil
     }
 
     static func inferredSupportedModelType(id: String, tags: [String]) -> String? {
@@ -250,14 +336,6 @@ private extension TTSModelStore {
             || normalizedTags.contains("qwen3_tts")
         {
             return "qwen3_tts"
-        }
-
-        if id.contains("echo-tts")
-            || id.contains("echo_tts")
-            || normalizedTags.contains("echo_tts")
-            || normalizedTags.contains("echo")
-        {
-            return "echo_tts"
         }
 
         if id.contains("qwen3")
@@ -298,7 +376,29 @@ private extension TTSModelStore {
             return "pocket_tts"
         }
 
+        if id.contains("kitten-tts")
+            || id.contains("kitten_tts")
+            || normalizedTags.contains("kitten_tts")
+            || normalizedTags.contains("kitten")
+        {
+            return "kitten_tts"
+        }
+
         return nil
+    }
+
+    static func knownUnsupportedTTSModelFamily(id: String, tags: [String]) -> Bool {
+        let haystack = [id] + tags
+        return haystack.contains { value in
+            value.contains("irodori")
+                || value.contains("hume")
+                || value.contains("tada")
+                || value.contains("kugel")
+                || value.contains("voxtral-4b-tts")
+                || value.contains("voxtral_tts")
+                || value.contains("vibevoice")
+                || value.contains("voicevoice")
+        }
     }
 
     static func deduplicate(_ models: [HuggingFaceModel]) -> [HuggingFaceModel] {
@@ -353,7 +453,12 @@ private extension TTSModelStore {
         metadata: TTSModelMetadata
     ) -> TTSModelCapabilities {
         let id = modelID.lowercased()
-        let supportedType = inferredSupportedModelType(id: id, tags: modelTags.map { $0.lowercased() })
+        let supportedType = supportedModelType(
+            id: id,
+            tags: modelTags.map { $0.lowercased() },
+            modelType: metadata.modelType,
+            architectures: metadata.architectures
+        )
 
         let fallbackProfile = fallback?.capabilities.defaultGenerationProfile ?? .balanced
         let defaultGenerationProfile: TTSGenerationProfile
@@ -362,7 +467,7 @@ private extension TTSModelStore {
             defaultGenerationProfile = .fast
         case "llama_tts", "qwen3_tts":
             defaultGenerationProfile = .highQuality
-        case "soprano", "echo_tts":
+        case "soprano", "kitten_tts":
             defaultGenerationProfile = .balanced
         default:
             defaultGenerationProfile = fallbackProfile
@@ -373,7 +478,8 @@ private extension TTSModelStore {
             : discoveredLanguages
 
         return TTSModelCapabilities(
-            supportsReferenceAudio: ["echo_tts", "csm"].contains(supportedType),
+            isRuntimeSupported: supportedType != nil,
+            supportsReferenceAudio: fallback?.capabilities.supportsReferenceAudio ?? false,
             supportsLanguageList: !inferredLanguages.isEmpty || !metadata.languageIdentifiers.isEmpty,
             supportedLanguages: inferredLanguages,
             defaultGenerationProfile: defaultGenerationProfile
@@ -490,7 +596,7 @@ private extension TTSModelStore {
                     let repoID = String(entry.lastPathComponent.dropFirst("models--".count))
                         .replacingOccurrences(of: "--", with: "/")
                     guard seen.insert(repoID).inserted else { continue }
-                    let descriptor = defaultModel(for: repoID) ?? .init(id: repoID, capabilities: .init(supportedLanguages: [.english]))
+                    guard let descriptor = makeInstalledDescriptor(for: repoID, location: entry) else { continue }
                     models.append(.init(descriptor: descriptor, location: entry, sizeBytes: directorySize(at: entry)))
                     continue
                 }
@@ -508,7 +614,7 @@ private extension TTSModelStore {
 
                         let repoID = legacyEntry.lastPathComponent.replacingOccurrences(of: "_", with: "/")
                         guard seen.insert(repoID).inserted else { continue }
-                        let descriptor = defaultModel(for: repoID) ?? .init(id: repoID, capabilities: .init(supportedLanguages: [.english]))
+                        guard let descriptor = makeInstalledDescriptor(for: repoID, location: legacyEntry) else { continue }
                         models.append(.init(descriptor: descriptor, location: legacyEntry, sizeBytes: directorySize(at: legacyEntry)))
                     }
                 }
@@ -516,6 +622,55 @@ private extension TTSModelStore {
         }
 
         return models
+    }
+
+    func makeInstalledDescriptor(for repoID: String, location: URL) -> TTSModelDescriptor? {
+        let fallback = defaultModel(for: repoID)
+        let config = loadLocalConfig(from: location)
+        let metadata = Self.merge(
+            metadata: .init(),
+            config: config
+        )
+
+        let supportedType = Self.supportedModelType(
+            id: repoID.lowercased(),
+            tags: [],
+            modelType: metadata.modelType,
+            architectures: metadata.architectures
+        )
+
+        let looksLikeTTS = fallback != nil
+            || metadata.modelType?.lowercased().contains("tts") == true
+            || metadata.architectures.contains(where: { $0.lowercased().contains("tts") })
+
+        guard looksLikeTTS else {
+            return nil
+        }
+
+        let discoveredLanguages = Self.languages(from: metadata.languageIdentifiers)
+        let capabilities = Self.capabilities(
+            for: repoID,
+            modelTags: [],
+            fallback: fallback,
+            discoveredLanguages: discoveredLanguages,
+            metadata: metadata
+        )
+
+        return fallback ?? .init(
+            id: repoID,
+            displayName: repoID.components(separatedBy: "/").last ?? repoID,
+            supportedLanguages: capabilities.supportedLanguages,
+            suggestedVoices: Self.suggestedVoices(for: repoID, fallback: fallback),
+            capabilities: TTSModelCapabilities(
+                isRuntimeSupported: supportedType != nil,
+                supportsReferenceAudio: capabilities.supportsReferenceAudio,
+                supportsLanguageList: capabilities.supportsLanguageList,
+                supportedLanguages: capabilities.supportedLanguages,
+                defaultGenerationProfile: capabilities.defaultGenerationProfile,
+                supportsStreaming: capabilities.supportsStreaming
+            ),
+            metadata: metadata
+        )
     }
 
     func modelCacheLocation(for modelID: String) -> URL? {
@@ -661,9 +816,8 @@ private extension TTSModelStore {
 
     func fetchConfig(modelID: String) async throws -> ModelConfig? {
         let localConfigURL = modelCacheLocation(for: modelID)?.appendingPathComponent("config.json")
-        if let localConfigURL, fileManager.fileExists(atPath: localConfigURL.path) {
-            let data = try Data(contentsOf: localConfigURL)
-            return try? JSONDecoder().decode(ModelConfig.self, from: data)
+        if let localConfigURL {
+            return loadConfig(at: localConfigURL)
         }
 
         guard let encodedID = modelID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
@@ -674,6 +828,16 @@ private extension TTSModelStore {
         let (data, response) = try await session.data(from: url)
         guard let httpResponse = response as? HTTPURLResponse else { return nil }
         guard (200..<300).contains(httpResponse.statusCode) else { return nil }
+        return try? JSONDecoder().decode(ModelConfig.self, from: data)
+    }
+
+    func loadLocalConfig(from modelDirectory: URL) -> ModelConfig? {
+        loadConfig(at: modelDirectory.appendingPathComponent("config.json"))
+    }
+
+    func loadConfig(at url: URL) -> ModelConfig? {
+        guard fileManager.fileExists(atPath: url.path) else { return nil }
+        guard let data = try? Data(contentsOf: url) else { return nil }
         return try? JSONDecoder().decode(ModelConfig.self, from: data)
     }
 }

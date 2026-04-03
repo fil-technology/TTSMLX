@@ -44,6 +44,8 @@ public struct TTSSynthesisOptions: Sendable, Hashable {
     public var voice: TTSVoice?
     public var referenceAudio: URL?
     public var referenceText: String?
+    // Used by synthesize(_:using:options:...). The streaming API currently yields buffers only
+    // and does not surface a persisted output artifact through the wrapper.
     public var outputURL: URL?
     public var generationProfile: TTSGenerationProfile?
     public var maxTokens: Int?
@@ -119,6 +121,7 @@ public enum TTSError: LocalizedError, Sendable {
     case invalidResponse
     case httpError(statusCode: Int, body: Data)
     case modelNotFound(String)
+    case unsupportedModel(String)
 
     public var errorDescription: String? {
         switch self {
@@ -132,6 +135,8 @@ public enum TTSError: LocalizedError, Sendable {
             return "The request failed with HTTP status \(statusCode)."
         case let .modelNotFound(modelID):
             return "The model \(modelID) is not installed."
+        case let .unsupportedModel(modelID):
+            return "This app can list \(modelID), but the current MLX runtime cannot synthesize with it yet."
         }
     }
 }

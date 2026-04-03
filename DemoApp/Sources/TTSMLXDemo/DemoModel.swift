@@ -115,11 +115,15 @@ final class DemoModel {
     var activityState: DemoActivityState = .idle
 
     var supportsStreamingForSelectedModel: Bool {
-        selectedModel.capabilities.supportsStreaming
+        selectedModel.capabilities.isRuntimeSupported && selectedModel.capabilities.supportsStreaming
     }
 
     var supportsReferenceAudioForSelectedModel: Bool {
-        selectedModel.capabilities.supportsReferenceAudio
+        selectedModel.capabilities.isRuntimeSupported && selectedModel.capabilities.supportsReferenceAudio
+    }
+
+    var isSelectedModelRuntimeSupported: Bool {
+        selectedModel.capabilities.isRuntimeSupported
     }
 
     private let synthesizer = TTSSpeechSynthesizer()
@@ -264,6 +268,7 @@ final class DemoModel {
 
         do {
             searchedModels = try await store.searchModels(query: query)
+            sanitizeSelectedModel()
             status = searchedModels.isEmpty ? "No matching models found." : "Found \(searchedModels.count) models."
             await refreshSelectedModelMetadata()
         } catch {
@@ -278,6 +283,7 @@ final class DemoModel {
         do {
             installedModels = try await store.installedModels()
             knownInstalledModelIDs.formUnion(installedModels.map(\.id))
+            sanitizeSelectedModel()
         } catch {
             status = "Could not read installed models: \(error.localizedDescription)"
         }
@@ -321,6 +327,11 @@ final class DemoModel {
     }
 
     private func download(model: TTSModelDescriptor) async {
+        guard model.capabilities.isRuntimeSupported else {
+            status = "This model is discoverable, but the current MLX runtime cannot download and synthesize it yet."
+            return
+        }
+
         downloadingModelID = model.id
         activityState = .downloading
         progressMessage = "Waiting to download \(model.displayName)..."
@@ -354,6 +365,11 @@ final class DemoModel {
     }
 
     func synthesize() async {
+        guard isSelectedModelRuntimeSupported else {
+            status = "This model is listed for discovery, but the current MLX runtime cannot synthesize with it yet."
+            return
+        }
+
         let trimmed = trimmedInputText
         guard !trimmed.isEmpty else {
             status = "Enter some text first."
@@ -393,6 +409,11 @@ final class DemoModel {
     }
 
     func streamSpeak() async {
+        guard isSelectedModelRuntimeSupported else {
+            status = "This model is listed for discovery, but the current MLX runtime cannot stream with it yet."
+            return
+        }
+
         guard supportsStreamingForSelectedModel else {
             status = "Streaming is not supported for this model."
             return
@@ -432,7 +453,9 @@ final class DemoModel {
             if activityState == .streaming {
                 activityState = .idle
             }
-            status = receivedChunk ? "Streaming playback finished." : "No streamed audio chunks received."
+            status = receivedChunk
+                ? "Streaming playback finished. The current TTSMLX wrapper exposes streamed buffers only and does not record a file artifact for this run."
+                : "No streamed audio chunks received."
             await refreshInstalledModels()
         } catch {
             status = "Streaming failed: \(error.localizedDescription)"
@@ -592,12 +615,12 @@ final class DemoModel {
         .init(
             language: resolvedLanguage(),
             voice: resolvedVoice(),
+            referenceAudio: resolvedReferenceAudio(),
+            referenceText: resolvedReferenceText(),
             generationProfile: selectedGenerationProfile,
             maxTokens: parsed(customMaxTokens),
             temperature: parsed(customTemperature),
-            topP: parsed(customTopP),
-            referenceAudio: resolvedReferenceAudio(),
-            referenceText: resolvedReferenceText()
+            topP: parsed(customTopP)
         )
     }
 
@@ -873,6 +896,13 @@ final class DemoModel {
         if customReferenceText.isEmpty == false {
             customReferenceText = ""
         }
+    }
+
+    private func sanitizeSelectedModel() {
+        let availableModelIDs = Set(allModels.map(\.id))
+        guard !availableModelIDs.isEmpty else { return }
+        guard availableModelIDs.contains(selectedModelID) == false else { return }
+        selectedModelID = recommendedModels.first?.id ?? allModels.first?.id ?? selectedModelID
     }
 }
 
