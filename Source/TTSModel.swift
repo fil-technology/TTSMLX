@@ -29,6 +29,7 @@ public struct TTSModelDescriptor: Sendable, Hashable, Identifiable, Codable {
 }
 
 public struct TTSModelCapabilities: Sendable, Hashable, Codable {
+    public let isRuntimeSupported: Bool
     public let supportsReferenceAudio: Bool
     public let supportsLanguageList: Bool
     public let supportedLanguages: [TTSLanguage]
@@ -36,12 +37,14 @@ public struct TTSModelCapabilities: Sendable, Hashable, Codable {
     public let supportsStreaming: Bool
 
     public init(
+        isRuntimeSupported: Bool = false,
         supportsReferenceAudio: Bool = false,
         supportsLanguageList: Bool = false,
         supportedLanguages: [TTSLanguage] = [],
         defaultGenerationProfile: TTSGenerationProfile = .balanced,
         supportsStreaming: Bool = true
     ) {
+        self.isRuntimeSupported = isRuntimeSupported
         self.supportsReferenceAudio = supportsReferenceAudio
         self.supportsLanguageList = supportsLanguageList
         self.supportedLanguages = supportedLanguages
