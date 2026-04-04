@@ -86,20 +86,6 @@ public enum TTSMLX {
                 defaultGenerationProfile: .highQuality
             )
         ),
-        .init(
-            id: "mlx-community/kitten-tts-mini-0.8",
-            displayName: "Kitten TTS",
-            summary: "Compact runtime-supported TTS option with built-in voices.",
-            supportedLanguages: [.english],
-            suggestedVoices: [],
-            capabilities: .init(
-                isRuntimeSupported: true,
-                supportsReferenceAudio: false,
-                supportsLanguageList: true,
-                supportedLanguages: [.english],
-                defaultGenerationProfile: .balanced
-            )
-        )
     ]
 
     public static let defaultModels: [TTSModelDescriptor] = supportedModels

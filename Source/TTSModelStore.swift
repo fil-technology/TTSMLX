@@ -227,7 +227,7 @@ private extension TTSModelStore {
 
         if let supportedType {
             switch supportedType {
-            case "soprano", "llama_tts", "csm", "pocket_tts", "kitten_tts":
+            case "soprano", "llama_tts", "csm", "pocket_tts":
                 return true
             case "qwen3_tts":
                 return true
@@ -291,8 +291,6 @@ private extension TTSModelStore {
             return "qwen3_tts"
         case "qwen3", "qwen":
             return "qwen3"
-        case "kitten_tts", "kitten", "kitten-tts":
-            return "kitten_tts"
         default:
             return nil
         }
@@ -319,9 +317,6 @@ private extension TTSModelStore {
             }
             if lower.contains("pockettts") {
                 return "pocket_tts"
-            }
-            if lower.contains("kittentts") {
-                return "kitten_tts"
             }
         }
 
@@ -374,14 +369,6 @@ private extension TTSModelStore {
             || normalizedTags.contains("pocket_tts")
         {
             return "pocket_tts"
-        }
-
-        if id.contains("kitten-tts")
-            || id.contains("kitten_tts")
-            || normalizedTags.contains("kitten_tts")
-            || normalizedTags.contains("kitten")
-        {
-            return "kitten_tts"
         }
 
         return nil
@@ -467,7 +454,7 @@ private extension TTSModelStore {
             defaultGenerationProfile = .fast
         case "llama_tts", "qwen3_tts":
             defaultGenerationProfile = .highQuality
-        case "soprano", "kitten_tts":
+        case "soprano":
             defaultGenerationProfile = .balanced
         default:
             defaultGenerationProfile = fallbackProfile

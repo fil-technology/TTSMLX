@@ -100,7 +100,7 @@ struct TTSModelStoreTests {
         #expect(results.first?.suggestedVoices.contains(.alba) == true)
         #expect(results.first(where: { $0.id == "mlx-community/orpheus-3b-0.1-ft-bf16" })?.suggestedVoices.contains(.tara) == true)
         #expect(results.contains { $0.id == "mlx-community/kitten-tts-mini-0.8" } == true)
-        #expect(results.first(where: { $0.id == "mlx-community/kitten-tts-mini-0.8" })?.capabilities.isRuntimeSupported == true)
+        #expect(results.first(where: { $0.id == "mlx-community/kitten-tts-mini-0.8" })?.capabilities.isRuntimeSupported == false)
         #expect(results.contains { $0.id == "mlx-community/echo-tts-base" } == false)
         #expect(results.first(where: { $0.id == "mlx-community/Irodori-TTS-JP-4bit" })?.capabilities.isRuntimeSupported == false)
         #expect(results.first(where: { $0.id == "mlx-community/Voxtral-4B-TTS-2603-8bit" })?.capabilities.isRuntimeSupported == false)
@@ -277,7 +277,7 @@ struct TTSModelStoreTests {
         #expect(custom.descriptor.capabilities.isRuntimeSupported == false)
 
         let kitten = try #require(installed.first(where: { $0.id == "mlx-community/kitten-tts-mini-0.8" }))
-        #expect(kitten.descriptor.capabilities.isRuntimeSupported)
+        #expect(kitten.descriptor.capabilities.isRuntimeSupported == false)
 
         let pocket = try #require(installed.last)
         #expect(pocket.descriptor.displayName == "Pocket TTS")

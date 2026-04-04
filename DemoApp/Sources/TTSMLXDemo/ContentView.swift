@@ -97,14 +97,19 @@ struct ContentView: View {
                                             .font(.caption2)
                                             .foregroundStyle(.secondary)
                                     }
+                                    Text(model.selectedModelStatusLine)
+                                        .font(.caption)
+                                        .foregroundStyle(model.isSelectedModelRuntimeSupported ? Color.secondary : Color.orange)
                                 }
                                 Spacer()
-                                if !model.isInstalled(model.selectedModelID) {
+                                if model.canDownloadSelectedModel {
                                     Text(downloadLabelText)
                                         .font(.caption.weight(.semibold))
                                         .foregroundStyle(.blue)
                                 }
                             }
+
+                            capabilityBadgeRow(for: model.selectedModel)
 
                             if model.isDownloading(model.selectedModelID) {
                                 VStack(alignment: .leading, spacing: 6) {
@@ -211,7 +216,9 @@ struct ContentView: View {
                 ComposerTipBubble(
                     text: model.hasGeneratedAudioForCurrentInput
                         ? "Tap to play. Long press to stream."
-                        : model.supportsStreamingForSelectedModel
+                        : !model.canGenerateSelectedModel
+                            ? "This model is discovery-only in the current runtime."
+                            : model.supportsStreamingForSelectedModel
                             ? "Tap to generate. Long press to stream."
                             : "Tap to generate."
                 )
@@ -236,7 +243,8 @@ struct ContentView: View {
     private var composerPrimaryButton: some View {
         let isBusy = model.isSynthesizing || model.isStreaming
         let supportsStreaming = model.supportsStreamingForSelectedModel
-        let isDisabled = model.trimmedInputText.isEmpty && !isBusy
+        let canGenerate = model.canGenerateSelectedModel || model.hasGeneratedAudioForCurrentInput
+        let isDisabled = (!canGenerate || model.trimmedInputText.isEmpty) && !isBusy
         let isLongPressDisabled = isBusy || !supportsStreaming
 
         return Circle()
@@ -265,7 +273,13 @@ struct ContentView: View {
             }
             .accessibilityElement()
             .accessibilityLabel(model.composerPrimaryLabel)
-            .accessibilityHint(supportsStreaming ? "Long press to stream audio." : "Streaming is not supported for this model.")
+            .accessibilityHint(
+                !model.canGenerateSelectedModel && !model.hasGeneratedAudioForCurrentInput
+                    ? "This model can be discovered in search, but it cannot generate audio in the current runtime."
+                    : supportsStreaming
+                        ? "Long press to stream audio."
+                        : "Streaming is not supported for this model."
+            )
     }
     #endif
 
@@ -358,6 +372,18 @@ struct ContentView: View {
                             .foregroundStyle(.secondary)
                     }
 
+                    LabeledContent("Runtime Status") {
+                        Text(model.isSelectedModelRuntimeSupported ? "Supported" : "Discovery only")
+                            .foregroundStyle(model.isSelectedModelRuntimeSupported ? Color.secondary : Color.orange)
+                    }
+
+                    if model.isInstalled(model.selectedModelID) {
+                        LabeledContent("Installed") {
+                            Text("Yes")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
                     if let metadata = model.selectedModelMetadata {
                         LabeledContent("Remote Size") {
                             Text(metadata.storageSizeBytes.map(formatByteCount) ?? "Unknown")
@@ -371,14 +397,18 @@ struct ContentView: View {
                         Label("Open on Hugging Face", systemImage: "link")
                     }
 
-                    if !model.isInstalled(model.selectedModelID) {
+                    if model.canDownloadSelectedModel {
                         Button("Download Selected Model") {
                             Task { await model.downloadSelectedModel() }
                         }
-                    } else {
+                    } else if model.isInstalled(model.selectedModelID) {
                         Button("Delete Selected Model", role: .destructive) {
                             Task { await model.removeSelectedModel() }
                         }
+                    } else {
+                        Text("This model is visible for discovery only and cannot be downloaded through the current runtime.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
                     }
 
                     if model.isDownloading(model.selectedModelID) {
@@ -493,6 +523,8 @@ struct ContentView: View {
                                 }
                                 .buttonStyle(.plain)
 
+                                capabilityBadgeRow(for: item)
+
                                 HStack {
                                     if item.id == model.selectedModelID {
                                         Label("Selected", systemImage: "checkmark.circle.fill")
@@ -504,7 +536,7 @@ struct ContentView: View {
                                         Button(model.isDownloading(item.id) ? "Downloading…" : "Download") {
                                             Task { await model.download(modelID: item.id) }
                                         }
-                                        .disabled(model.downloadingModelID != nil)
+                                        .disabled(model.downloadingModelID != nil || !item.capabilities.isRuntimeSupported)
                                     }
                                 }
                             }
@@ -561,9 +593,9 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Simple on-device text to speech")
                 .font(.title.bold())
-            Text("This demo uses the local TTSMLX package, downloads models from Hugging Face when needed, and generates a WAV file with MLX.")
+            Text("This demo uses the local TTSMLX package, downloads runtime-supported models from Hugging Face when needed, and generates WAV output with MLX.")
                 .foregroundStyle(.secondary)
-            Text("Recommended and supported models are only listed here. Nothing is downloaded until you explicitly choose a model and download it, or synthesize with that selected model.")
+            Text("The built-in catalog only includes models the current local runtime can synthesize with end to end. Search can also surface newer upstream families as discovery-only entries until the Swift backend adds full support for them.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -599,7 +631,7 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, minHeight: 36)
         }
         .buttonStyle(.borderedProminent)
-        .disabled(model.isSynthesizing)
+        .disabled(model.isSynthesizing || !model.canGenerateSelectedModel)
 
         Button {
             Task { await model.streamSpeak() }
@@ -622,7 +654,7 @@ struct ContentView: View {
             }
             .frame(maxWidth: .infinity, minHeight: 36)
             .buttonStyle(.bordered)
-            .disabled(model.downloadingModelID != nil)
+            .disabled(model.downloadingModelID != nil || !model.canDownloadSelectedModel)
         }
 
         Button("Play Last Audio") {
@@ -858,6 +890,12 @@ private struct ActivityOrbView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Text(model.selectedModelStatusLine)
+                    .font(.caption)
+                    .foregroundStyle(model.isSelectedModelRuntimeSupported ? Color.secondary : Color.orange)
+
+                capabilityBadgeRow(for: model.selectedModel)
+
                 Text("Default profile: \(model.selectedModel.capabilities.defaultGenerationProfile.title)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -876,7 +914,7 @@ private struct ActivityOrbView: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Supported Models")
+                Text("Built-in Runtime Catalog")
                     .font(.subheadline.weight(.semibold))
 
                 ForEach(model.recommendedModels, id: \.id) { item in
@@ -893,6 +931,8 @@ private struct ActivityOrbView: View {
                             }
                         }
 
+                        capabilityBadgeRow(for: item)
+
                         actionRow {
                             Button(item.id == model.selectedModelID ? "Selected" : "Select") {
                                 Task { await model.selectModel(item.id) }
@@ -904,7 +944,7 @@ private struct ActivityOrbView: View {
                                     Task { await model.download(modelID: item.id) }
                                 }
                                 .buttonStyle(.borderedProminent)
-                                .disabled(model.downloadingModelID != nil)
+                                .disabled(model.downloadingModelID != nil || !item.capabilities.isRuntimeSupported)
                             }
                         }
                     }
@@ -973,6 +1013,11 @@ private struct ActivityOrbView: View {
                                         Text(item.id)
                                             .font(.caption.monospaced())
                                             .foregroundStyle(.secondary)
+                                        if !item.capabilities.isRuntimeSupported {
+                                            Text("Unsupported by current MLX runtime")
+                                                .font(.caption)
+                                                .foregroundStyle(.orange)
+                                        }
                                     }
                                     Spacer()
                                     if item.id == model.selectedModelID {
@@ -982,13 +1027,15 @@ private struct ActivityOrbView: View {
                             }
                             .buttonStyle(.plain)
 
+                            capabilityBadgeRow(for: item)
+
                             actionRow {
                                 if !model.isInstalled(item.id) {
                                     Button(model.isDownloading(item.id) ? "Downloading..." : "Download") {
                                         Task { await model.download(modelID: item.id) }
                                     }
                                     .buttonStyle(.bordered)
-                                    .disabled(model.downloadingModelID != nil)
+                                    .disabled(model.downloadingModelID != nil || !item.capabilities.isRuntimeSupported)
                                 }
                             }
                         }
@@ -1006,6 +1053,12 @@ private struct ActivityOrbView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Options")
                 .font(.headline)
+
+            if !model.isSelectedModelRuntimeSupported {
+                Text("This selected model is currently discovery-only. You can inspect its metadata, but generation and download are disabled until the local runtime adds support.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
 
             if isCompactLayout {
                 VStack(alignment: .leading, spacing: 12) {
@@ -1146,13 +1199,16 @@ private struct ActivityOrbView: View {
                     description: Text("Download one of the recommended models to start generating speech.")
                 )
             } else {
-                ForEach(model.installedModels, id: \.id) { item in
+                ForEach(Array(model.installedModels), id: \.id) { item in
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(item.descriptor.displayName)
                             Text(item.id)
                                 .font(.caption.monospaced())
                                 .foregroundStyle(.secondary)
+                            Text(item.descriptor.capabilities.isRuntimeSupported ? "Runtime-supported" : "Installed, but discovery-only in the current runtime")
+                                .font(.caption)
+                                .foregroundStyle(item.descriptor.capabilities.isRuntimeSupported ? Color.secondary : Color.orange)
                         }
                         Spacer()
                         VStack(alignment: .trailing, spacing: 8) {
@@ -1285,6 +1341,24 @@ private struct ActivityOrbView: View {
         }
     }
 
+    @ViewBuilder
+    private func capabilityBadgeRow(for descriptor: TTSModelDescriptor) -> some View {
+        let languages = descriptor.capabilities.supportedLanguages.isEmpty
+            ? descriptor.supportedLanguages
+            : descriptor.capabilities.supportedLanguages
+
+        FlexibleBadgeRow(
+            badges: [
+                descriptor.capabilities.isRuntimeSupported ? "Runtime Supported" : "Discovery Only",
+                descriptor.capabilities.supportsStreaming ? "Streaming" : "Non-streaming",
+                descriptor.capabilities.supportsReferenceAudio ? "Reference Audio" : "Built-in Voice",
+                descriptor.capabilities.supportsLanguageList
+                    ? "\(max(1, languages.count)) Language\(languages.count == 1 ? "" : "s")"
+                    : "Language Metadata Unknown"
+            ]
+        )
+    }
+
     private func formatByteCount(_ bytes: Int64) -> String {
         ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
@@ -1303,6 +1377,61 @@ private struct ActivityOrbView: View {
                 content()
             }
         }
+    }
+}
+
+private struct FlexibleBadgeRow: View {
+    let badges: [String]
+
+    var body: some View {
+        if badges.isEmpty {
+            EmptyView()
+        } else {
+            ViewThatFits(in: .vertical) {
+                HStack(spacing: 6) {
+                    ForEach(badges, id: \.self) { badge in
+                        CapabilityBadge(label: badge)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(badges.chunked(into: 2), id: \.self) { row in
+                        HStack(spacing: 6) {
+                            ForEach(row, id: \.self) { badge in
+                                CapabilityBadge(label: badge)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct CapabilityBadge: View {
+    let label: String
+
+    var body: some View {
+        Text(label)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(.quaternary.opacity(0.5), in: Capsule())
+    }
+}
+
+private extension Array {
+    func chunked(into size: Int) -> [[Element]] {
+        guard size > 0 else { return [self] }
+        var chunks: [[Element]] = []
+        var index = startIndex
+        while index < endIndex {
+            let nextIndex = self.index(index, offsetBy: size, limitedBy: endIndex) ?? endIndex
+            chunks.append(Array(self[index ..< nextIndex]))
+            index = nextIndex
+        }
+        return chunks
     }
 }
 

@@ -9,13 +9,14 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 ### Changed
 
 - Clarified that `TTSMLX` is a TTS-only wrapper over the local `../mlx-audio-swift` checkout and does not expose upstream STT or STS surfaces yet.
-- Tightened the built-in catalog so it only advertises model families the current local Swift runtime can actually load.
-- Added `Kitten TTS` to the built-in runtime-supported catalog and removed `Echo TTS` from the default supported list until the local runtime exposes a matching loader again.
+- Tightened the built-in catalog so it only advertises model families the current local Swift runtime can actually synthesize with.
+- Removed `Kitten TTS` from the built-in runtime-supported catalog and kept `Echo TTS` out of the default supported list until the local runtime exposes a complete end-to-end implementation again.
 - Updated Hugging Face search behavior so known upstream-only TTS families from `mlx-audio v0.4.2`, including `Irodori-TTS`, `HumeAI TADA`, `KugelAudio TTS`, and `Voxtral-4B-TTS-2603`, can appear as discovery-only results without being mislabeled as runnable.
 
 ### Fixed
 
 - Prevented wrapper/runtime mismatches where the demo could surface unsupported models as if they were safe to synthesize with locally.
+- Prevented `Kitten TTS` from being labeled runnable in the wrapper and demo while the local backend still throws for generation and streaming.
 - Made streamed-output behavior explicit in the wrapper and demo: streaming remains a buffer-delivery path and does not record a wrapper-managed output artifact.
 - Added regression coverage for discovery-only upstream TTS families and the current local runtime support boundary.
 

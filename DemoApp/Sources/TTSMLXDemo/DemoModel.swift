@@ -228,6 +228,28 @@ final class DemoModel {
         currentInputRecord != nil
     }
 
+    var canGenerateSelectedModel: Bool {
+        isSelectedModelRuntimeSupported
+    }
+
+    var canDownloadSelectedModel: Bool {
+        isSelectedModelRuntimeSupported && !isInstalled(selectedModelID)
+    }
+
+    var selectedModelStatusLine: String {
+        if isInstalled(selectedModelID) {
+            return isSelectedModelRuntimeSupported
+                ? "Installed and ready for local generation."
+                : "Installed locally, but unsupported by the current MLX runtime."
+        }
+
+        if isSelectedModelRuntimeSupported {
+            return "Runtime-supported. Download on demand before first synthesis."
+        }
+
+        return "Discovery only. This upstream model family is not wired through the current local runtime yet."
+    }
+
     var composerPrimarySymbolName: String {
         if isSynthesizing || isStreaming {
             return "stop.fill"
@@ -241,6 +263,9 @@ final class DemoModel {
         }
         if isStreaming {
             return "Streaming"
+        }
+        if !canGenerateSelectedModel && !hasGeneratedAudioForCurrentInput {
+            return "Unavailable"
         }
         return hasGeneratedAudioForCurrentInput ? "Play" : "Generate"
     }
