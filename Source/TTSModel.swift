@@ -93,6 +93,12 @@ public struct TTSLanguage: Sendable, Hashable, Codable, ExpressibleByStringLiter
     public static let chinese: Self = "Chinese"
     public static let arabic: Self = "Arabic"
     public static let hindi: Self = "Hindi"
+    public static let hungarian: Self = "Hungarian"
+    public static let persian: Self = "Persian"
+    public static let czech: Self = "Czech"
+    public static let danish: Self = "Danish"
+    public static let swedish: Self = "Swedish"
+    public static let greek: Self = "Greek"
 }
 
 public struct TTSVoice: Sendable, Hashable, Codable, ExpressibleByStringLiteral {

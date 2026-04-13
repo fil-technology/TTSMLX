@@ -77,6 +77,12 @@ struct TTSModelStoreTests {
                         "downloads": 72
                     ],
                     [
+                        "id": "OpenMOSS-Team/MOSS-TTS-Nano",
+                        "pipeline_tag": "text-to-speech",
+                        "tags": ["moss_tts", "language:en", "language:zh"],
+                        "downloads": 71
+                    ],
+                    [
                         "id": "someone/asr-model",
                         "pipeline_tag": "automatic-speech-recognition",
                         "downloads": 999
@@ -96,6 +102,7 @@ struct TTSModelStoreTests {
             "mlx-community/kitten-tts-mini-0.8",
             "mlx-community/Irodori-TTS-JP-4bit",
             "mlx-community/Voxtral-4B-TTS-2603-8bit",
+            "OpenMOSS-Team/MOSS-TTS-Nano",
         ])
         #expect(results.first?.suggestedVoices.contains(.alba) == true)
         #expect(results.first(where: { $0.id == "mlx-community/orpheus-3b-0.1-ft-bf16" })?.suggestedVoices.contains(.tara) == true)
@@ -105,6 +112,7 @@ struct TTSModelStoreTests {
         #expect(results.first(where: { $0.id == "mlx-community/Irodori-TTS-JP-4bit" })?.capabilities.isRuntimeSupported == false)
         #expect(results.first(where: { $0.id == "mlx-community/Voxtral-4B-TTS-2603-8bit" })?.capabilities.isRuntimeSupported == false)
         #expect(results.first(where: { $0.id == "mlx-community/kokoro-82m-4bit" })?.capabilities.isRuntimeSupported == false)
+        #expect(results.first(where: { $0.id == "OpenMOSS-Team/MOSS-TTS-Nano" })?.capabilities.isRuntimeSupported == false)
         #expect(results.contains { $0.id == "someone/asr-model" } == false)
         #expect(results.contains { $0.id == "mlx-community/pocket-tts-8bit" } == false)
         #expect(results.contains { $0.id == "someone/real-tts" } == false)
@@ -283,6 +291,19 @@ struct TTSModelStoreTests {
         #expect(pocket.descriptor.displayName == "Pocket TTS")
         #expect(pocket.descriptor.capabilities.isRuntimeSupported)
         #expect([8, 12].contains(pocket.sizeBytes))
+    }
+
+    @Test("public model catalog separates validated implemented and planned models")
+    func modelCatalogExposesSupportStages() throws {
+        #expect(TTSMLX.supportedModels.count == TTSMLX.validatedModels.count)
+        #expect(TTSMLX.validatedModels.allSatisfy { $0.supportStage == .validated })
+        #expect(TTSMLX.implementedModels.contains { $0.id == "mlx-community/kitten-tts-mini-0.8" })
+
+        let moss = try #require(TTSMLX.plannedModels.first(where: { $0.id == "OpenMOSS-Team/MOSS-TTS-Nano" }))
+        #expect(moss.supportStage == .planned)
+        #expect(moss.projectURL?.absoluteString == "https://github.com/OpenMOSS/MOSS-TTS-Nano")
+        #expect(moss.modelURL?.absoluteString == "https://huggingface.co/OpenMOSS-Team/MOSS-TTS-Nano")
+        #expect(moss.supportedLanguages.contains(.greek))
     }
 }
 

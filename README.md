@@ -24,6 +24,9 @@ These models are included in the built-in `TTSMLX.supportedModels` catalog:
 - [mlx-community/VyvoTTS-EN-Beta-4bit](https://huggingface.co/mlx-community/VyvoTTS-EN-Beta-4bit) - English Qwen3-based option when you want a smaller alternative to full Qwen3-TTS.
 - [mlx-community/orpheus-3b-0.1-ft-bf16](https://huggingface.co/mlx-community/orpheus-3b-0.1-ft-bf16) - larger multi-voice LlamaTTS model with expressive built-in speakers.
 - [mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit](https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit) - strongest general-purpose option here when you want better quality, multilingual support, and voice-cloning style inputs.
+
+For a fuller support matrix, including non-runnable tracked models such as `MOSS-TTS-Nano`, see [Docs/ModelSupport.md](Docs/ModelSupport.md) or inspect `TTSMLX.modelCatalog` at runtime.
+
 Quick picking guide:
 
 - Start with `Marvis` if you want the safest default.
@@ -37,7 +40,21 @@ Current upstream note:
 - The wrapper catalog only lists model families that the current local `mlx-audio-swift` runtime can synthesize with end to end.
 - New upstream `mlx-audio v0.4.2` TTS families such as `Irodori-TTS`, `HumeAI TADA`, `KugelAudio TTS`, and `Voxtral-4B-TTS-2603` may still appear in model search as discovery-only results, but they are intentionally marked unsupported until the local Swift backend gains loaders for them.
 - `Kitten TTS` may also appear in search as discovery-only for now. The local backend can parse its model assets, but audio generation and streaming are still not wired through yet, so `TTSMLX` does not advertise it as runnable.
+- `MOSS-TTS-Nano` is tracked as planned support. As of April 13, 2026, it still requires the upstream OpenMOSS runtime rather than the local `mlx-audio-swift` backend used by `TTSMLX`.
 - Upstream additions outside the TTS wrapper scope, such as `Cohere Transcribe ASR`, `Qwen2-Audio-7B-Instruct`, `Moshi STS`, and Distil-Whisper documentation updates, are not exposed through `TTSMLX` yet.
+
+## Model Catalog
+
+`TTSMLX` exposes a public support catalog so app code can distinguish between validated, implemented, and planned models:
+
+```swift
+let validated = TTSMLX.validatedModels
+let planned = TTSMLX.plannedModels
+
+for entry in TTSMLX.modelCatalog {
+    print(entry.displayName, entry.supportStage.rawValue, entry.modelURL?.absoluteString ?? "n/a")
+}
+```
 
 Nothing in this catalog is downloaded automatically.
 Models are downloaded only when you explicitly call `ensureDownloaded(...)`, or when you synthesize using a specific selected model.

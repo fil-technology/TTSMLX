@@ -383,6 +383,9 @@ private extension TTSModelStore {
                 || value.contains("kugel")
                 || value.contains("voxtral-4b-tts")
                 || value.contains("voxtral_tts")
+                || value.contains("moss-tts")
+                || value.contains("moss_tts")
+                || value.contains("openmoss")
                 || value.contains("vibevoice")
                 || value.contains("voicevoice")
         }
@@ -561,7 +564,20 @@ private extension TTSModelStore {
         "ar": "Arabic",
         "arabic": "Arabic",
         "hi": "Hindi",
-        "hindi": "Hindi"
+        "hindi": "Hindi",
+        "hu": "Hungarian",
+        "hungarian": "Hungarian",
+        "fa": "Persian",
+        "persian": "Persian",
+        "farsi": "Persian",
+        "cs": "Czech",
+        "czech": "Czech",
+        "da": "Danish",
+        "danish": "Danish",
+        "sv": "Swedish",
+        "swedish": "Swedish",
+        "el": "Greek",
+        "greek": "Greek"
     ]
 
     func discoverInstalledModels() throws -> [TTSInstalledModel] {
