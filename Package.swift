@@ -14,10 +14,13 @@ let package = Package(
         )
     ],
     dependencies: [
-        .package(url: "https://github.com/Blaizzy/mlx-audio-swift.git", from: "0.1.2"),
-        .package(url: "https://github.com/ml-explore/mlx-swift.git", from: "0.30.6"),
-        .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", from: "2.30.6"),
-        .package(url: "https://github.com/huggingface/swift-huggingface.git", from: "0.8.1")
+        // Local-path during fork development. See Docs/mlx-audio-fork.md.
+        .package(path: "../mlx-audio-swift"),
+        // Pinned to exact versions so `swift package resolve` never silently
+        // drifts. Bump deliberately, validate, then move the pin.
+        .package(url: "https://github.com/ml-explore/mlx-swift.git", exact: "0.31.3"),
+        .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", exact: "2.31.3"),
+        .package(url: "https://github.com/huggingface/swift-huggingface.git", exact: "0.8.1")
     ],
     targets: [
         .target(
