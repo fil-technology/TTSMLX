@@ -35,6 +35,11 @@ public struct TTSModelCapabilities: Sendable, Hashable, Codable {
     public let supportedLanguages: [TTSLanguage]
     public let defaultGenerationProfile: TTSGenerationProfile
     public let supportsStreaming: Bool
+    /// Empirical peak resident memory in MB while generating. `nil` means unknown.
+    public let peakMemoryMB: Int?
+    /// Smallest device class known to run this model without OOM crashes.
+    /// `nil` means we don't have data and the caller should treat as "unverified".
+    public let minimumDeviceClass: TTSDeviceClass?
 
     public init(
         isRuntimeSupported: Bool = false,
@@ -42,7 +47,9 @@ public struct TTSModelCapabilities: Sendable, Hashable, Codable {
         supportsLanguageList: Bool = false,
         supportedLanguages: [TTSLanguage] = [],
         defaultGenerationProfile: TTSGenerationProfile = .balanced,
-        supportsStreaming: Bool = true
+        supportsStreaming: Bool = true,
+        peakMemoryMB: Int? = nil,
+        minimumDeviceClass: TTSDeviceClass? = nil
     ) {
         self.isRuntimeSupported = isRuntimeSupported
         self.supportsReferenceAudio = supportsReferenceAudio
@@ -50,6 +57,42 @@ public struct TTSModelCapabilities: Sendable, Hashable, Codable {
         self.supportedLanguages = supportedLanguages
         self.defaultGenerationProfile = defaultGenerationProfile
         self.supportsStreaming = supportsStreaming
+        self.peakMemoryMB = peakMemoryMB
+        self.minimumDeviceClass = minimumDeviceClass
+    }
+
+    /// Decode tolerates older encoded values without the device fields.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.isRuntimeSupported = try c.decode(Bool.self, forKey: .isRuntimeSupported)
+        self.supportsReferenceAudio = try c.decode(Bool.self, forKey: .supportsReferenceAudio)
+        self.supportsLanguageList = try c.decode(Bool.self, forKey: .supportsLanguageList)
+        self.supportedLanguages = try c.decode([TTSLanguage].self, forKey: .supportedLanguages)
+        self.defaultGenerationProfile = try c.decode(TTSGenerationProfile.self, forKey: .defaultGenerationProfile)
+        self.supportsStreaming = try c.decodeIfPresent(Bool.self, forKey: .supportsStreaming) ?? true
+        self.peakMemoryMB = try c.decodeIfPresent(Int.self, forKey: .peakMemoryMB)
+        self.minimumDeviceClass = try c.decodeIfPresent(TTSDeviceClass.self, forKey: .minimumDeviceClass)
+    }
+}
+
+public extension TTSModelDescriptor {
+    /// Returns `true` when this model's known requirements fit the profile.
+    /// Models with no recorded capability data (peakMemoryMB / minimumDeviceClass)
+    /// are treated as "unknown → allow", since we can't prove they will fail.
+    func isSupported(on profile: TTSDeviceProfile) -> Bool {
+        if let minClass = capabilities.minimumDeviceClass, profile.deviceClass < minClass {
+            return false
+        }
+        if let peak = capabilities.peakMemoryMB, profile.physicalMemoryMB < peak {
+            return false
+        }
+        return true
+    }
+}
+
+extension TTSDeviceClass: Comparable {
+    public static func < (lhs: TTSDeviceClass, rhs: TTSDeviceClass) -> Bool {
+        lhs.memoryRank < rhs.memoryRank
     }
 }
 

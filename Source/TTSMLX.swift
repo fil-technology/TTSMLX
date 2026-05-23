@@ -14,7 +14,9 @@ public enum TTSMLX {
                     supportsReferenceAudio: false,
                     supportsLanguageList: true,
                     supportedLanguages: [.english],
-                    defaultGenerationProfile: .balanced
+                    defaultGenerationProfile: .balanced,
+                    peakMemoryMB: 400,
+                    minimumDeviceClass: .iPhone
                 )
             ),
             modelURL: URL(string: "https://huggingface.co/Marvis-AI/marvis-tts-250m-v0.2-MLX-8bit")
@@ -31,7 +33,12 @@ public enum TTSMLX {
                     supportsReferenceAudio: false,
                     supportsLanguageList: true,
                     supportedLanguages: [.english],
-                    defaultGenerationProfile: .fast
+                    defaultGenerationProfile: .fast,
+                    // Despite the "pocket" name, the non-streaming Pocket TTS path
+                    // peaks around ~600MB resident during generation, which OOMs
+                    // current iPhones under audio playback load. Gate to iPad/Mac.
+                    peakMemoryMB: 600,
+                    minimumDeviceClass: .iPad
                 )
             ),
             modelURL: URL(string: "https://huggingface.co/mlx-community/pocket-tts")
@@ -48,7 +55,9 @@ public enum TTSMLX {
                     supportsReferenceAudio: false,
                     supportsLanguageList: true,
                     supportedLanguages: [.english],
-                    defaultGenerationProfile: .balanced
+                    defaultGenerationProfile: .balanced,
+                    peakMemoryMB: 220,
+                    minimumDeviceClass: .iPhone
                 )
             ),
             modelURL: URL(string: "https://huggingface.co/mlx-community/Soprano-80M-bf16")
@@ -65,7 +74,9 @@ public enum TTSMLX {
                     supportsReferenceAudio: false,
                     supportsLanguageList: true,
                     supportedLanguages: [.english],
-                    defaultGenerationProfile: .balanced
+                    defaultGenerationProfile: .balanced,
+                    peakMemoryMB: 500,
+                    minimumDeviceClass: .iPhone
                 )
             ),
             modelURL: URL(string: "https://huggingface.co/mlx-community/VyvoTTS-EN-Beta-4bit")
@@ -82,7 +93,10 @@ public enum TTSMLX {
                     supportsReferenceAudio: false,
                     supportsLanguageList: true,
                     supportedLanguages: [.english],
-                    defaultGenerationProfile: .highQuality
+                    defaultGenerationProfile: .highQuality,
+                    // 3B params in bf16 → ~6GB resident. Mac-only in practice.
+                    peakMemoryMB: 6_000,
+                    minimumDeviceClass: .mac
                 )
             ),
             modelURL: URL(string: "https://huggingface.co/mlx-community/orpheus-3b-0.1-ft-bf16")
@@ -99,7 +113,9 @@ public enum TTSMLX {
                     supportsReferenceAudio: false,
                     supportsLanguageList: true,
                     supportedLanguages: [.english, .spanish, .french, .german, .italian, .portuguese, .dutch, .polish, .turkish, .russian, .japanese, .korean, .chinese, .arabic, .hindi],
-                    defaultGenerationProfile: .highQuality
+                    defaultGenerationProfile: .highQuality,
+                    peakMemoryMB: 800,
+                    minimumDeviceClass: .iPad
                 )
             ),
             modelURL: URL(string: "https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit")
@@ -135,6 +151,32 @@ public enum TTSMLX {
     public static let plannedModels: [TTSModelCatalogEntry] = modelCatalog.filter { $0.supportStage == .planned }
 
     public static let defaultModels: [TTSModelDescriptor] = supportedModels
+
+    /// Pick the most capable validated model that fits the device profile.
+    ///
+    /// "Most capable" is approximated by ranking on `defaultGenerationProfile`
+    /// (`highQuality` > `balanced` > `fast`) and then by `peakMemoryMB`
+    /// (larger model wins as a tiebreaker, since it fit). Returns `nil` only
+    /// if the catalog is empty.
+    public static func recommendedModel(for profile: TTSDeviceProfile) -> TTSModelDescriptor? {
+        let candidates = supportedModels.filter { $0.isSupported(on: profile) }
+        let pool = candidates.isEmpty ? supportedModels : candidates
+
+        let qualityRank: (TTSGenerationProfile) -> Int = { profile in
+            switch profile {
+            case .fast: return 0
+            case .balanced: return 1
+            case .highQuality: return 2
+            }
+        }
+
+        return pool.max { a, b in
+            let qa = qualityRank(a.capabilities.defaultGenerationProfile)
+            let qb = qualityRank(b.capabilities.defaultGenerationProfile)
+            if qa != qb { return qa < qb }
+            return (a.capabilities.peakMemoryMB ?? 0) < (b.capabilities.peakMemoryMB ?? 0)
+        }
+    }
 }
 
 private extension TTSMLX {
