@@ -309,20 +309,26 @@ public actor TTSSpeechSynthesizer {
         let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { throw TTSError.emptyText }
 
-        let textChunks = chunker.chunks(for: normalized)
-        guard !textChunks.isEmpty else { throw TTSError.emptyText }
+        // Use chunkInfos against the ORIGINAL text so emitted character ranges
+        // map directly to what the caller passed in (matches their highlight
+        // overlay coordinates).
+        let chunkInfos = chunker.chunkInfos(for: text)
+        guard !chunkInfos.isEmpty else { throw TTSError.emptyText }
 
         let (stream, continuation) = AsyncThrowingStream<TTSAudioBufferChunk, Error>.makeStream()
-        let total = textChunks.count
+        let total = chunkInfos.count
         let synthesizer = self
+        let modelID = model.id
 
         Task { @MainActor in
             do {
-                for (index, chunkText) in textChunks.enumerated() {
+                for (index, info) in chunkInfos.enumerated() {
                     try Task.checkCancellation()
+                    let chunkStartedAt = Date()
+                    var didEmitChunkStart = false
 
                     let chunkStream = try await synthesizer.synthesizeStream(
-                        chunkText,
+                        info.text,
                         using: model,
                         options: options,
                         progressHandler: { update in
@@ -341,8 +347,21 @@ public actor TTSSpeechSynthesizer {
 
                     for try await pcmChunk in chunkStream {
                         try Task.checkCancellation()
+                        if !didEmitChunkStart, pcmChunk.buffer.frameLength > 0 {
+                            didEmitChunkStart = true
+                            await synthesizer.emitFromMain(.chunkStarted(
+                                modelID: modelID,
+                                chunkIndex: index,
+                                characterRange: info.characterRange
+                            ))
+                        }
                         continuation.yield(pcmChunk)
                     }
+                    await synthesizer.emitFromMain(.chunkFinished(
+                        modelID: modelID,
+                        chunkIndex: index,
+                        duration: Date().timeIntervalSince(chunkStartedAt)
+                    ))
                 }
                 progressHandler?(.init(
                     stage: .completed,
@@ -367,6 +386,129 @@ public actor TTSSpeechSynthesizer {
         let base = Double(chunkIndex) / Double(chunkCount)
         guard let chunkFraction else { return base }
         return base + (chunkFraction / Double(chunkCount))
+    }
+
+    /// Pre-generate the entire text into a single combined audio file before
+    /// playback. Unlike ``synthesizeLong``, this returns *after* every chunk
+    /// has been written to disk — appropriate for "download for offline" UX
+    /// where the caller wants one file, not a buffer stream.
+    ///
+    /// The output is a WAV. If `outputURL` already exists, it's overwritten.
+    @MainActor
+    public func synthesizeAll(
+        _ text: String,
+        using model: TTSModelDescriptor = TTSMLX.defaultModels[0],
+        options: TTSSynthesisOptions = .init(),
+        into outputURL: URL,
+        chunker: TTSTextChunker = .init(),
+        progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)? = nil
+    ) async throws -> TTSAudioFile {
+        let stream = try await synthesizeLong(
+            text,
+            using: model,
+            options: options,
+            chunker: chunker,
+            progressHandler: progressHandler
+        )
+
+        let finalURL = outputURL.pathExtension.lowercased() == "wav"
+            ? outputURL
+            : outputURL.appendingPathExtension("wav")
+        let parentDirectory = finalURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: parentDirectory, withIntermediateDirectories: true)
+        if FileManager.default.fileExists(atPath: finalURL.path) {
+            try FileManager.default.removeItem(at: finalURL)
+        }
+
+        var audioFile: AVAudioFile?
+        var sampleRate: Int = 0
+        for try await chunk in stream {
+            let buffer = chunk.buffer
+            guard buffer.frameLength > 0 else { continue }
+            if audioFile == nil {
+                let format = buffer.format
+                sampleRate = chunk.sampleRate
+                audioFile = try AVAudioFile(
+                    forWriting: finalURL,
+                    settings: format.settings,
+                    commonFormat: format.commonFormat,
+                    interleaved: format.isInterleaved
+                )
+            }
+            try audioFile?.write(from: buffer)
+        }
+        audioFile = nil
+
+        return TTSAudioFile(
+            url: finalURL,
+            modelID: model.id,
+            language: options.language,
+            voice: options.voice,
+            sampleRate: sampleRate
+        )
+    }
+
+    /// Get a synthesizer fully ready to play: warm up the model **and**
+    /// pre-generate the first chunk so the first tap on Play hands the user
+    /// audio immediately from cache instead of waiting for inference.
+    ///
+    /// `initialText` should be the first paragraph/sentence the user will
+    /// hear. The full text isn't generated here — call `synthesizeLong` or
+    /// `synthesizeAll` separately for the rest, or hand the remainder to
+    /// ``TTSPrefetchQueue``.
+    ///
+    /// Returns the cached URL of the first chunk's audio, suitable for a
+    /// pre-warmed AVAudioPlayer.
+    @MainActor
+    public func prepareForPlayback(
+        using model: TTSModelDescriptor,
+        initialText: String,
+        options: TTSSynthesisOptions = .init(),
+        cache: TTSAudioCache,
+        chunker: TTSTextChunker = .init(),
+        progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)? = nil
+    ) async throws -> URL {
+        _ = try await warmUp(model, hfToken: options.hfToken, progressHandler: progressHandler)
+
+        let chunks = chunker.chunks(for: initialText)
+        guard let firstChunk = chunks.first else { throw TTSError.emptyText }
+
+        let key = await cache.key(modelID: model.id, voice: options.voice, text: firstChunk)
+        if let cachedURL = await cache.cachedURL(forKey: key) {
+            return cachedURL
+        }
+
+        let handle = await cache.reserveWrite(forKey: key)
+        let stream = try await synthesizeStream(
+            firstChunk,
+            using: model,
+            options: options,
+            progressHandler: progressHandler
+        )
+
+        var audioFile: AVAudioFile?
+        do {
+            for try await chunk in stream {
+                let buffer = chunk.buffer
+                guard buffer.frameLength > 0 else { continue }
+                if audioFile == nil {
+                    let format = buffer.format
+                    audioFile = try AVAudioFile(
+                        forWriting: handle.temporaryURL,
+                        settings: format.settings,
+                        commonFormat: format.commonFormat,
+                        interleaved: format.isInterleaved
+                    )
+                }
+                try audioFile?.write(from: buffer)
+            }
+            audioFile = nil
+        } catch {
+            await cache.discard(handle)
+            throw error
+        }
+
+        return try await cache.finalize(handle)
     }
 #endif
 

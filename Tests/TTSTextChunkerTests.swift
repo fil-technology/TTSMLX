@@ -83,6 +83,50 @@ struct TTSTextChunkerTests {
         #expect(chunker.chunks(for: text) == [text])
     }
 
+    @Test("chunkInfos returns ranges that slice back to the chunk text")
+    func chunkInfoRangesRoundTrip() {
+        let chunker = TTSTextChunker(firstChunkCharacterLimit: 200, followupChunkCharacterLimit: 200)
+        let text = "First sentence. Second sentence! Third one?"
+        let infos = chunker.chunkInfos(for: text)
+        #expect(infos.count == 3)
+        for info in infos {
+            let start = text.index(text.startIndex, offsetBy: info.characterRange.lowerBound)
+            let end = text.index(text.startIndex, offsetBy: info.characterRange.upperBound)
+            #expect(String(text[start..<end]) == info.text)
+        }
+    }
+
+    @Test("chunkInfos preserves CRLF positions (no normalization)")
+    func chunkInfoNoNormalization() {
+        let chunker = TTSTextChunker(firstChunkCharacterLimit: 200, followupChunkCharacterLimit: 200)
+        let text = "Hello\r\nWorld"
+        let infos = chunker.chunkInfos(for: text)
+        // Ranges must be valid in the ORIGINAL (CRLF) string, not a normalized copy.
+        for info in infos {
+            #expect(info.characterRange.upperBound <= text.count)
+            let start = text.index(text.startIndex, offsetBy: info.characterRange.lowerBound)
+            let end = text.index(text.startIndex, offsetBy: info.characterRange.upperBound)
+            #expect(String(text[start..<end]) == info.text)
+        }
+    }
+
+    @Test("chunkInfos returns empty for empty input")
+    func chunkInfoEmpty() {
+        #expect(TTSTextChunker().chunkInfos(for: "").isEmpty)
+    }
+
+    @Test("chunkInfos respects character budgets like chunks(for:)")
+    func chunkInfoBudgets() {
+        let chunker = TTSTextChunker(firstChunkCharacterLimit: 12, followupChunkCharacterLimit: 24)
+        let text = "Alpha bravo charlie delta echo foxtrot golf hotel india juliet"
+        let infos = chunker.chunkInfos(for: text)
+        #expect(!infos.isEmpty)
+        #expect(infos[0].text.count <= 12)
+        for info in infos.dropFirst() {
+            #expect(info.text.count <= 24)
+        }
+    }
+
     @Test("combinedFraction maps inner stream progress onto the outer one")
     func combinedFractionMath() {
         // start of chunk 0, no inner progress -> 0

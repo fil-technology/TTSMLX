@@ -39,6 +39,14 @@ public enum TTSDiagnostic: Sendable {
 
     /// A model's weights were dropped from memory.
     case modelUnloaded(modelID: String)
+
+    /// A long-form chunk just started yielding audio. `characterRange` maps
+    /// back into the original text passed to `synthesizeLong`, so apps can
+    /// highlight the currently-playing paragraph. Half-open Character offsets.
+    case chunkStarted(modelID: String, chunkIndex: Int, characterRange: Range<Int>)
+
+    /// A long-form chunk finished streaming all its buffers.
+    case chunkFinished(modelID: String, chunkIndex: Int, duration: TimeInterval)
 }
 
 public typealias TTSDiagnosticHandler = @Sendable (TTSDiagnostic) -> Void
