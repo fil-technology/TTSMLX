@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 @preconcurrency import MLX
 import MLXAudioCore
 import MLXAudioTTS
@@ -9,13 +10,107 @@ import MLXAudioTTS
 
 public actor TTSSpeechSynthesizer {
     private let modelStore: TTSModelStore
+    private var diagnosticHandler: TTSDiagnosticHandler?
+    nonisolated private let logger = Logger(subsystem: "technology.fil.ttsmlx", category: "Synthesizer")
+    /// IDs of models that have been warmed (downloaded + initial-loaded at
+    /// least once during this synthesizer's lifetime). Used by ``isLoaded(_:)``
+    /// and lifecycle diagnostics. The model instance itself is owned by the
+    /// upstream mlx-audio-swift runtime, not held here, because
+    /// `SpeechGenerationModel` isn't `Sendable` and can't be safely cached on
+    /// an actor while also being handed out to per-call generation code.
+    private var warmedModelIDs: Set<String> = []
 
-    public init(modelStore: TTSModelStore = TTSModelStore()) {
+    public init(
+        modelStore: TTSModelStore = TTSModelStore(),
+        diagnosticHandler: TTSDiagnosticHandler? = nil
+    ) {
         self.modelStore = modelStore
+        self.diagnosticHandler = diagnosticHandler
     }
 
     public func modelStoreInstance() -> TTSModelStore {
         modelStore
+    }
+
+    /// Replace the diagnostic handler. Pass `nil` to stop receiving events.
+    public func setDiagnosticHandler(_ handler: TTSDiagnosticHandler?) {
+        diagnosticHandler = handler
+    }
+
+    nonisolated private func log(_ message: String) {
+        logger.debug("\(message, privacy: .public)")
+    }
+
+    private func emit(_ event: TTSDiagnostic) {
+        diagnosticHandler?(event)
+    }
+
+    // MARK: - Lifecycle
+
+    /// Pre-warm a model: ensure it's downloaded and run the initial weight
+    /// load so that the first `synthesize` / `synthesizeStream` call doesn't
+    /// pay the cold-start cost. Subsequent calls still go through the upstream
+    /// runtime, but on-disk files are hot and parsing time drops accordingly.
+    ///
+    /// Returns `true` if this call did the work, `false` if the model was
+    /// already warmed during this synthesizer's lifetime.
+    @discardableResult
+    public func warmUp(
+        _ model: TTSModelDescriptor,
+        hfToken: String? = nil,
+        progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)? = nil
+    ) async throws -> Bool {
+        if warmedModelIDs.contains(model.id) { return false }
+        // Run the full prepareModel pipeline; discard the resulting instance.
+        // Upstream caching makes the next load cheaper without us retaining a
+        // reference here (see `warmedModelIDs` doc comment).
+        _ = try await prepareModel(
+            model,
+            options: TTSSynthesisOptions(hfToken: hfToken),
+            progressHandler: progressHandler
+        )
+        warmedModelIDs.insert(model.id)
+        log("warmUp: marked \(model.id) ready")
+        return true
+    }
+
+    /// `true` once ``warmUp(_:hfToken:progressHandler:)`` has run for the
+    /// model during this synthesizer's lifetime.
+    public func isLoaded(_ modelID: String) -> Bool {
+        warmedModelIDs.contains(modelID)
+    }
+
+    /// Mark a model as no longer warmed. Emits ``TTSDiagnostic/modelUnloaded``.
+    /// Does not currently free the upstream runtime's in-process weight cache
+    /// (mlx-audio-swift owns that); the next synthesize call will re-load.
+    public func unload(_ modelID: String) {
+        if warmedModelIDs.remove(modelID) != nil {
+            emit(.modelUnloaded(modelID: modelID))
+            log("unload: \(modelID)")
+        }
+    }
+
+    /// Clear every warmed-model marker.
+    public func unloadAll() {
+        let ids = Array(warmedModelIDs)
+        warmedModelIDs.removeAll()
+        for id in ids {
+            emit(.modelUnloaded(modelID: id))
+        }
+        log("unloadAll: \(ids.count) model(s)")
+    }
+
+    /// One-call helper for iOS memory-warning notifications. Clears the warmed
+    /// set and emits diagnostics; subsequent synthesize calls re-warm lazily.
+    public func handleMemoryWarning() {
+        log("memory warning received")
+        unloadAll()
+    }
+
+    /// Internal seam used by tests to populate the warmed set without invoking
+    /// MLX. Not part of the public API.
+    func _markWarmedInternal(_ modelID: String) {
+        warmedModelIDs.insert(modelID)
     }
 
     public func synthesize(
@@ -28,19 +123,10 @@ public actor TTSSpeechSynthesizer {
         guard !prompt.isEmpty else {
             throw TTSError.emptyText
         }
+        emit(.requestStarted(modelID: model.id, textLength: prompt.count))
+        log("synthesize start: model=\(model.id) chars=\(prompt.count)")
 
-        _ = try await modelStore.ensureDownloaded(
-            model,
-            hfToken: options.hfToken,
-            progressHandler: progressHandler
-        )
-        if let progressHandler {
-            await progressHandler(.init(
-                stage: .loadingModel,
-                message: "Preparing synthesis pipeline..."
-            ))
-        }
-        let loadedModel = try await MLXTTSModelLoader.load(descriptor: model, hfToken: options.hfToken)
+        let loadedModel = try await prepareModel(model, options: options, progressHandler: progressHandler)
 
         var parameters = loadedModel.defaultGenerationParameters
         options.generationProfile?.apply(to: &parameters)
@@ -62,15 +148,29 @@ public actor TTSSpeechSynthesizer {
                 message: "Generating audio..."
             ))
         }
-        let samples = try await Self.generateSamples(
-            model: loadedModel,
-            text: prompt,
-            language: options.language?.identifier,
-            voice: options.voice?.identifier,
-            referenceAudio: referenceAudio,
-            referenceText: options.referenceText,
-            parameters: parameters
-        )
+
+        let generationStart = Date()
+        let samples: [Float]
+        do {
+            samples = try await Self.generateSamples(
+                model: loadedModel,
+                text: prompt,
+                language: options.language?.identifier,
+                voice: options.voice?.identifier,
+                referenceAudio: referenceAudio,
+                referenceText: options.referenceText,
+                parameters: parameters
+            )
+        } catch {
+            let wrapped = TTSError.wrap(error, modelID: model.id, stage: .generatingAudio)
+            emit(.errorOccurred(modelID: model.id, stage: .generatingAudio, error: wrapped))
+            throw wrapped
+        }
+        emit(.synthesisFinished(
+            modelID: model.id,
+            duration: Date().timeIntervalSince(generationStart),
+            sampleCount: samples.count
+        ))
 
         if let progressHandler {
             await progressHandler(.init(
@@ -122,25 +222,14 @@ public actor TTSSpeechSynthesizer {
         guard !prompt.isEmpty else {
             throw TTSError.emptyText
         }
+        await emitFromMain(.requestStarted(modelID: model.id, textLength: prompt.count))
 
-        _ = try await modelStore.ensureDownloaded(
-            model,
-            hfToken: options.hfToken,
-            progressHandler: progressHandler
-        )
-
-        if let progressHandler {
-            progressHandler(.init(
-                stage: .loadingModel,
-                message: "Preparing streaming pipeline..."
-            ))
-        }
-
-        let loadedModel = try await MLXTTSModelLoader.load(descriptor: model, hfToken: options.hfToken)
+        let loadedModel = try await prepareModel(model, options: options, progressHandler: progressHandler)
         let parameters = Self.makeParameters(for: loadedModel, options: options)
         let referenceAudio = try options.referenceAudio.map(Self.loadReferenceAudio)
         let sampleRate = loadedModel.sampleRate
         let voice = options.voice?.identifier
+        let modelID = model.id
 
         if let progressHandler {
             progressHandler(.init(
@@ -161,20 +250,188 @@ public actor TTSSpeechSynthesizer {
         )
 
         let (stream, continuation) = AsyncThrowingStream<TTSAudioBufferChunk, Error>.makeStream()
+        let synthesizer = self
+        let streamStart = Date()
         Task { @MainActor in
+            var bufferCount = 0
+            var firstBufferEmitted = false
             do {
                 for try await buffer in upstream {
+                    if !firstBufferEmitted, buffer.frameLength > 0 {
+                        firstBufferEmitted = true
+                        let latency = Date().timeIntervalSince(streamStart)
+                        await synthesizer.emitFromMain(
+                            .firstBufferYielded(modelID: modelID, latency: latency)
+                        )
+                    }
                     continuation.yield(.init(buffer: buffer, sampleRate: sampleRate))
+                    bufferCount += 1
                 }
                 progressHandler?(.init(stage: .completed, fractionCompleted: 1, message: "Streaming finished."))
+                await synthesizer.emitFromMain(.streamingFinished(
+                    modelID: modelID,
+                    duration: Date().timeIntervalSince(streamStart),
+                    bufferCount: bufferCount
+                ))
+                continuation.finish()
+            } catch {
+                let wrapped = TTSError.wrap(error, modelID: modelID, stage: .generatingAudio)
+                await synthesizer.emitFromMain(
+                    .errorOccurred(modelID: modelID, stage: .generatingAudio, error: wrapped)
+                )
+                continuation.finish(throwing: wrapped)
+            }
+        }
+        return stream
+    }
+
+    /// Helper to emit a diagnostic from a non-actor isolated context (e.g. the
+    /// `@MainActor` Task that drains the streaming continuation).
+    func emitFromMain(_ event: TTSDiagnostic) {
+        emit(event)
+    }
+
+    /// Streams synthesis for long-form text by splitting it into smaller chunks
+    /// before driving ``synthesizeStream(_:using:options:progressHandler:)``.
+    ///
+    /// The first chunk is sized for a fast time-to-first-buffer; subsequent
+    /// chunks use a larger budget. Buffers from every chunk are flattened into
+    /// the returned stream in order, so callers can treat the result the same
+    /// way they treat a single-shot ``synthesizeStream`` call.
+    @MainActor
+    public func synthesizeLong(
+        _ text: String,
+        using model: TTSModelDescriptor = TTSMLX.defaultModels[0],
+        options: TTSSynthesisOptions = .init(),
+        chunker: TTSTextChunker = .init(),
+        progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)? = nil
+    ) async throws -> AsyncThrowingStream<TTSAudioBufferChunk, Error> {
+        let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { throw TTSError.emptyText }
+
+        let textChunks = chunker.chunks(for: normalized)
+        guard !textChunks.isEmpty else { throw TTSError.emptyText }
+
+        let (stream, continuation) = AsyncThrowingStream<TTSAudioBufferChunk, Error>.makeStream()
+        let total = textChunks.count
+        let synthesizer = self
+
+        Task { @MainActor in
+            do {
+                for (index, chunkText) in textChunks.enumerated() {
+                    try Task.checkCancellation()
+
+                    let chunkStream = try await synthesizer.synthesizeStream(
+                        chunkText,
+                        using: model,
+                        options: options,
+                        progressHandler: { update in
+                            guard update.stage != .completed else { return }
+                            progressHandler?(.init(
+                                stage: update.stage,
+                                fractionCompleted: Self.combinedFraction(
+                                    chunkIndex: index,
+                                    chunkFraction: update.fractionCompleted,
+                                    chunkCount: total
+                                ),
+                                message: update.message
+                            ))
+                        }
+                    )
+
+                    for try await pcmChunk in chunkStream {
+                        try Task.checkCancellation()
+                        continuation.yield(pcmChunk)
+                    }
+                }
+                progressHandler?(.init(
+                    stage: .completed,
+                    fractionCompleted: 1,
+                    message: "Long-form synthesis finished."
+                ))
                 continuation.finish()
             } catch {
                 continuation.finish(throwing: error)
             }
         }
+
         return stream
     }
+
+    static func combinedFraction(
+        chunkIndex: Int,
+        chunkFraction: Double?,
+        chunkCount: Int
+    ) -> Double? {
+        guard chunkCount > 0 else { return nil }
+        let base = Double(chunkIndex) / Double(chunkCount)
+        guard let chunkFraction else { return base }
+        return base + (chunkFraction / Double(chunkCount))
+    }
 #endif
+
+    /// Centralizes the ensureDownloaded + load pipeline so that lifecycle
+    /// diagnostics (resolve, download, load) are emitted from one place and
+    /// caught errors are mapped to the right `TTSError` case. Consults the
+    /// in-memory model cache before re-loading from disk.
+    func prepareModel(
+        _ model: TTSModelDescriptor,
+        options: TTSSynthesisOptions,
+        progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)?
+    ) async throws -> sending any SpeechGenerationModel {
+        let resolveStart = Date()
+        let wasInstalled = await modelStore.isInstalled(model.id)
+        emit(.modelResolveFinished(
+            modelID: model.id,
+            wasInstalled: wasInstalled,
+            duration: Date().timeIntervalSince(resolveStart)
+        ))
+
+        if !wasInstalled {
+            emit(.modelDownloadStarted(modelID: model.id))
+        }
+        let downloadStart = Date()
+        do {
+            _ = try await modelStore.ensureDownloaded(
+                model,
+                hfToken: options.hfToken,
+                progressHandler: progressHandler
+            )
+        } catch {
+            let wrapped = TTSError.wrap(error, modelID: model.id, stage: .downloadingModel)
+            emit(.errorOccurred(modelID: model.id, stage: .downloadingModel, error: wrapped))
+            throw wrapped
+        }
+        if !wasInstalled {
+            emit(.modelDownloadFinished(
+                modelID: model.id,
+                duration: Date().timeIntervalSince(downloadStart)
+            ))
+        }
+
+        if let progressHandler {
+            await progressHandler(.init(
+                stage: .loadingModel,
+                message: "Preparing synthesis pipeline..."
+            ))
+        }
+        emit(.modelLoadStarted(modelID: model.id))
+        let loadStart = Date()
+        let loaded: any SpeechGenerationModel
+        do {
+            loaded = try await MLXTTSModelLoader.load(descriptor: model, hfToken: options.hfToken)
+        } catch {
+            let wrapped = TTSError.wrap(error, modelID: model.id, stage: .loadingModel)
+            emit(.errorOccurred(modelID: model.id, stage: .loadingModel, error: wrapped))
+            throw wrapped
+        }
+        emit(.modelLoadFinished(
+            modelID: model.id,
+            duration: Date().timeIntervalSince(loadStart)
+        ))
+        warmedModelIDs.insert(model.id)
+        return loaded
+    }
 }
 
 private extension TTSSpeechSynthesizer {
