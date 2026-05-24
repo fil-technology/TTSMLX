@@ -24,6 +24,73 @@ final class LoadedModelBox: @unchecked Sendable {
     init(_ model: any SpeechGenerationModel) { self.model = model }
 }
 
+/// Simple `Bool` behind an `NSLock`. Used for state that the actor and
+/// the synchronous notification observer both need to touch.
+final class LockedBool: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Bool
+    init(_ initial: Bool) { self.value = initial }
+    func withLock<T>(_ body: (inout Bool) -> T) -> T {
+        lock.lock(); defer { lock.unlock() }
+        return body(&value)
+    }
+}
+
+/// Synchronously-accessible shutdown coordinator shared between the
+/// notification observer (which runs on the main thread when the OS
+/// posts `willResignActive` / `didEnterBackground` / scene-deactivation
+/// events) and the streaming drain Tasks (which run on the synthesizer
+/// actor and on `@MainActor`). Both sides need to see the shutdown
+/// signal *immediately*, without going through actor-hop scheduling —
+/// that's why this is a class with an `NSLock` rather than actor state.
+///
+/// The Metal-in-background crash that motivates this design happens when
+/// MLX submits a Metal command buffer between when the notification
+/// observer fires and when our cooperative cancellation lands at the
+/// next `await` checkpoint. By gating MLX-submitting code paths on
+/// `isShuttingDown`, we close that window: streaming Tasks check the
+/// flag synchronously before every upstream iteration and throw
+/// `CancellationError` if it's set, so no further MLX work is
+/// submitted past the notification.
+final class TTSLifecycleCoordinator: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _isShuttingDown = false
+    private var _tasks: [UUID: Task<Void, Never>] = [:]
+
+    var isShuttingDown: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return _isShuttingDown
+    }
+
+    func setShuttingDown(_ value: Bool) {
+        lock.lock(); defer { lock.unlock() }
+        _isShuttingDown = value
+    }
+
+    func track(id: UUID, _ task: Task<Void, Never>) {
+        lock.lock(); defer { lock.unlock() }
+        _tasks[id] = task
+    }
+
+    func untrack(id: UUID) {
+        lock.lock(); defer { lock.unlock() }
+        _tasks.removeValue(forKey: id)
+    }
+
+    /// Cancel every tracked Task synchronously and return how many were
+    /// cancelled. Safe to call from any thread; the cancellations
+    /// propagate to the Tasks' cooperative-cancellation checkpoints.
+    @discardableResult
+    func cancelAllTasks() -> Int {
+        lock.lock()
+        let snapshot = _tasks
+        _tasks.removeAll()
+        lock.unlock()
+        for task in snapshot.values { task.cancel() }
+        return snapshot.count
+    }
+}
+
 public actor TTSSpeechSynthesizer {
     private let modelStore: TTSModelStore
     private var diagnosticHandler: TTSDiagnosticHandler?
@@ -38,14 +105,10 @@ public actor TTSSpeechSynthesizer {
     private var loadedModels: [String: LoadedModelBox] = [:]
     private var warmedModelIDs: Set<String> = []
 
-    /// In-flight generation Tasks spawned by streaming methods. Tracked so
-    /// they can be cancelled on app backgrounding (or explicit
-    /// ``cancelAllInFlight()``). Cancellation is cooperative — each Task
-    /// checks `Task.isCancelled` at MLX-stream iteration boundaries, then
-    /// finishes its `AsyncThrowingStream` continuation with a
-    /// `CancellationError` so the consumer sees a clean error rather than a
-    /// crash.
-    private var inFlightTasks: [UUID: Task<Void, Never>] = [:]
+    /// Shared shutdown coordinator. Owned by this synthesizer, observed by
+    /// the notification block and read synchronously by every drain Task
+    /// before submitting MLX work. See ``TTSLifecycleCoordinator``.
+    nonisolated let lifecycle = TTSLifecycleCoordinator()
 
     /// When `false` (the default), in-flight generation is cancelled the
     /// moment the app enters the background. Set to `true` only if the
@@ -54,7 +117,13 @@ public actor TTSSpeechSynthesizer {
     /// assertion, MLX Metal command-buffer submissions from the background
     /// crash the process with
     /// `kIOGPUCommandBufferCallbackErrorBackgroundExecutionNotPermitted`.
-    public var allowsBackgroundGeneration: Bool = false
+    ///
+    /// Nonisolated so the notification observer can read it on the main
+    /// thread without an actor hop.
+    public nonisolated var allowsBackgroundGeneration: Bool {
+        get { _allowsBackgroundGeneration.withLock { $0 } }
+        set { _allowsBackgroundGeneration.withLock { $0 = newValue } }
+    }
 
     public init(
         modelStore: TTSModelStore = TTSModelStore(),
@@ -62,46 +131,72 @@ public actor TTSSpeechSynthesizer {
     ) {
         self.modelStore = modelStore
         self.diagnosticHandler = diagnosticHandler
-        // Block-style notification observer because we need a SYNCHRONOUS
-        // entry point on the main thread to call `Stream.gpu.synchronize()`
-        // before iOS clamps Metal access. The async-iterator variant we used
-        // previously deferred the work through Task scheduling, which routinely
-        // arrived too late — Metal command buffers submitted by the
-        // in-flight `generate()` were already in flight and fired in
-        // background, crashing the process.
+        // Three observers cover the three ways iOS signals "you're about to
+        // lose GPU access": application-level `willResignActive` (still the
+        // most reliable on UIApplication-based apps), the scene equivalent
+        // `UIScene.willDeactivateNotification` (modern scene-based apps may
+        // skip the application notification), and `didEnterBackground` as
+        // last-resort backup. All three route through the same handler.
         //
-        // We listen to `willResignActive` (the earliest signal — fires before
-        // `didEnterBackground` and while Metal access is still permitted).
-        // The block:
-        //   1. Calls `Stream.gpu.synchronize()` SYNCHRONOUSLY on the main
-        //      thread. This blocks until every queued GPU command finishes,
-        //      so by the time the OS proceeds with backgrounding nothing is
-        //      in flight to be rejected.
-        //   2. Dispatches an async task to cancel the tracked drain Tasks.
-        //      Cooperative cancellation lands at their next `await`.
+        // The handler runs SYNCHRONOUSLY on the main thread because Metal
+        // restrictions can clamp at any subsequent run-loop turn. Order
+        // matters:
+        //   1. Set `isShuttingDown = true`. Every drain Task checks this
+        //      synchronously before each upstream iteration, so no new MLX
+        //      work will be submitted past this point.
+        //   2. Cancel all tracked Tasks synchronously. They'll exit at
+        //      their next cooperative-cancellation checkpoint.
+        //   3. `Stream.gpu.synchronize()` — block until all currently
+        //      queued Metal command buffers complete. By the time the OS
+        //      proceeds with the lifecycle transition, nothing is pending
+        //      to be rejected.
+        //   4. Dispatch the `cancelledByBackground` diagnostic
+        //      asynchronously (observers don't need it sync).
         //
-        // We accept that the observer leaks into NotificationCenter when the
-        // synthesizer deallocates (NotificationCenter holds the block
-        // strongly until removal, but the block's `[weak self]` capture lets
-        // self deallocate normally). In practice synthesizers live for the
-        // app lifetime, so this never matters.
+        // We accept that observers leak into NotificationCenter when the
+        // synthesizer deallocates — the `[weak self]` capture means the
+        // block becomes a no-op, and synthesizers typically live for the
+        // app's lifetime.
         #if canImport(UIKit) && !os(watchOS)
-        NotificationCenter.default.addObserver(
-            forName: UIApplication.willResignActiveNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            // Drain pending GPU work while Metal is still allowed.
+        let coordinator = lifecycle
+        let allowReader = _allowsBackgroundGeneration
+        let handler: @Sendable (Notification) -> Void = { [weak self] _ in
+            // Honor opt-in: apps with their own beginBackgroundTask can
+            // continue generating. They take responsibility for OS limits.
+            guard !allowReader.withLock({ $0 }) else { return }
+            coordinator.setShuttingDown(true)
+            let count = coordinator.cancelAllTasks()
             Stream.gpu.synchronize()
-            guard let self else { return }
-            Task {
-                if await !self.allowsBackgroundGeneration {
-                    await self.cancelAllInFlight(reason: .background)
-                }
+            if count > 0, let self {
+                Task { await self.emit(.cancelledByBackground(cancelledCount: count)) }
             }
+        }
+        let resumeHandler: @Sendable (Notification) -> Void = { _ in
+            coordinator.setShuttingDown(false)
+        }
+
+        for name in [
+            UIApplication.willResignActiveNotification,
+            UIApplication.didEnterBackgroundNotification,
+            UIScene.willDeactivateNotification,
+            UIScene.didEnterBackgroundNotification
+        ] {
+            NotificationCenter.default.addObserver(
+                forName: name, object: nil, queue: .main, using: handler
+            )
+        }
+        for name in [
+            UIApplication.didBecomeActiveNotification,
+            UIScene.didActivateNotification
+        ] {
+            NotificationCenter.default.addObserver(
+                forName: name, object: nil, queue: .main, using: resumeHandler
+            )
         }
         #endif
     }
+
+    nonisolated private let _allowsBackgroundGeneration = LockedBool(false)
 
     /// Cancel every in-flight generation Task. Streams that were in progress
     /// finish with a `CancellationError`; future `synthesize*` calls are
@@ -109,10 +204,8 @@ public actor TTSSpeechSynthesizer {
     /// in response to a backgrounding notification, so observers can show
     /// "paused — app backgrounded" UX.
     public func cancelAllInFlight(reason: CancellationReason = .explicit) {
-        guard !inFlightTasks.isEmpty else { return }
-        let count = inFlightTasks.count
-        for task in inFlightTasks.values { task.cancel() }
-        inFlightTasks.removeAll()
+        let count = lifecycle.cancelAllTasks()
+        guard count > 0 else { return }
         log("cancelAllInFlight: cancelled \(count) task(s) reason=\(reason)")
         if reason == .background {
             emit(.cancelledByBackground(cancelledCount: count))
@@ -125,11 +218,11 @@ public actor TTSSpeechSynthesizer {
     }
 
     fileprivate func trackTask(id: UUID, _ task: Task<Void, Never>) {
-        inFlightTasks[id] = task
+        lifecycle.track(id: id, task)
     }
 
     fileprivate func untrackTask(id: UUID) {
-        inFlightTasks.removeValue(forKey: id)
+        lifecycle.untrack(id: id)
     }
 
     public func modelStoreInstance() -> TTSModelStore {
@@ -430,6 +523,7 @@ public actor TTSSpeechSynthesizer {
         // actor — that's why MLX setup and the drain loop both live inside
         // this Task rather than crossing the boundary from the synthesizer
         // actor.
+        let lifecycle = self.lifecycle
         let drainTask = Task { @MainActor in
             defer {
                 Task { [synthesizer] in await synthesizer.untrackTask(id: taskID) }
@@ -439,6 +533,7 @@ public actor TTSSpeechSynthesizer {
             var firstBufferEmitted = false
             do {
                 try Task.checkCancellation()
+                if lifecycle.isShuttingDown { throw CancellationError() }
                 let loadedModel = loadedBox.model
                 let parameters = Self.makeParameters(for: loadedModel, options: capturedOptions)
                 let referenceAudio = try capturedOptions.referenceAudio.map(Self.loadReferenceAudio)
@@ -458,6 +553,9 @@ public actor TTSSpeechSynthesizer {
                     streamingInterval: capturedOptions.streamingInterval
                 )
                 for try await buffer in upstream {
+                    // Gate every iteration on the shared shutdown flag so no
+                    // further MLX work is submitted past a background signal.
+                    if lifecycle.isShuttingDown { throw CancellationError() }
                     if buffer.frameLength == 0 {
                         emptyBufferCount += 1
                         continue
@@ -543,6 +641,7 @@ public actor TTSSpeechSynthesizer {
         let modelID = model.id
         let taskID = UUID()
 
+        let lifecycle = self.lifecycle
         let drainTask = Task { @MainActor in
             defer {
                 Task { [synthesizer] in await synthesizer.untrackTask(id: taskID) }
@@ -550,6 +649,7 @@ public actor TTSSpeechSynthesizer {
             do {
                 for (index, info) in chunkInfos.enumerated() {
                     try Task.checkCancellation()
+                    if lifecycle.isShuttingDown { throw CancellationError() }
                     synthesizer.info("synthesizeLong[\(modelID)]: chunk \(index + 1)/\(total) chars=\(info.text.count)")
                     let chunkStartedAt = Date()
                     var didEmitChunkStart = false
@@ -574,6 +674,7 @@ public actor TTSSpeechSynthesizer {
 
                     for try await pcmChunk in chunkStream {
                         try Task.checkCancellation()
+                        if lifecycle.isShuttingDown { throw CancellationError() }
                         if !didEmitChunkStart, pcmChunk.buffer.frameLength > 0 {
                             didEmitChunkStart = true
                             await synthesizer.emit(.chunkStarted(
@@ -791,6 +892,7 @@ public actor TTSSpeechSynthesizer {
         let (stream, continuation) = AsyncThrowingStream<TTSAudioBufferChunk, Error>.makeStream()
         let synthesizer = self
         let taskID = UUID()
+        let lifecycle = self.lifecycle
 
         let drainTask = Task { @MainActor in
             defer {
@@ -799,6 +901,7 @@ public actor TTSSpeechSynthesizer {
             do {
                 for (index, info) in chunkInfos.enumerated() {
                     try Task.checkCancellation()
+                    if lifecycle.isShuttingDown { throw CancellationError() }
                     let chunkFilename = String(format: "chunks/%03d.wav", index)
                     let chunkURL = subBundleURL.appendingPathComponent(chunkFilename, isDirectory: false)
                     let entry = workingEntries[index]
@@ -899,11 +1002,13 @@ public actor TTSSpeechSynthesizer {
         var audioFile: AVAudioFile?
         var frameCount: AVAudioFramePosition = 0
         var chunkSampleRate: Double = 0
+        let lifecycle = synthesizer.lifecycle
         let chunkStream = try await synthesizer.synthesizeStream(
             info.text, using: model, options: options, progressHandler: nil
         )
         for try await pcm in chunkStream {
             try Task.checkCancellation()
+            if lifecycle.isShuttingDown { throw CancellationError() }
             let buffer = pcm.buffer
             guard buffer.frameLength > 0 else { continue }
             if !didEmitChunkStart {
@@ -1015,9 +1120,11 @@ public actor TTSSpeechSynthesizer {
         var entries: [TTSPreparedNarrationManifest.ChunkEntry] = []
         entries.reserveCapacity(chunkInfos.count)
         var detectedSampleRate: Int = 0
+        let lifecycle = self.lifecycle
 
         for (index, info) in chunkInfos.enumerated() {
             try Task.checkCancellation()
+            if lifecycle.isShuttingDown { throw CancellationError() }
             let filename = String(format: "chunks/%03d.wav", index)
             let chunkURL = subBundleURL.appendingPathComponent(filename, isDirectory: false)
 
@@ -1034,6 +1141,7 @@ public actor TTSSpeechSynthesizer {
             do {
                 for try await chunk in stream {
                     try Task.checkCancellation()
+                    if lifecycle.isShuttingDown { throw CancellationError() }
                     let buffer = chunk.buffer
                     guard buffer.frameLength > 0 else { continue }
                     if audioFile == nil {
