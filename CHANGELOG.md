@@ -6,6 +6,22 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- `TTSPlaybackController.currentTime: TimeInterval` — wall-clock seconds of
+  audio actually rendered for the current session. Respects `seek(to:)` for
+  file playback. Resets on `stop()`.
+- `TTSPlaybackController.duration: TimeInterval?` — total length for file
+  playback; `nil` for stream playback (length unknown until the stream ends).
+- `TTSPlaybackController.timePulse(interval:)` — `AsyncStream<TimeInterval>`
+  that ticks playback position while audio is active. Finishes when state
+  becomes `.stopped` or `.idle`. Multiple independent subscribers supported.
+- `TTSPlaybackController.seek(to:)` — seek inside the currently playing file.
+  Preserves prior playing/paused state; seeking at or past `duration` finishes
+  playback as if it had played to the end. Throws
+  `TTSPlaybackController.PlaybackError.seekUnsupportedForStream` for stream
+  playback (no addressable timeline).
+
 ## [0.3.3] - 2026-04-04
 
 ### Changed
