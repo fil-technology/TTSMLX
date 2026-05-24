@@ -62,25 +62,39 @@ public actor TTSSpeechSynthesizer {
     ) {
         self.modelStore = modelStore
         self.diagnosticHandler = diagnosticHandler
-        // The lifecycle observer is fire-and-forget: a fresh Task that holds
-        // a weak reference to self and exits its loop once self deallocates.
-        // We deliberately do NOT store the Task as `self.lifecycleObserver`
-        // because Swift 6 strict concurrency rejects assigning a Task that
-        // captures `self` into an actor's `var` from the nonisolated init.
-        // The trade-off: the observer Task lives until the next
-        // `didEnterBackgroundNotification` arrives after deallocation, at
-        // which point the `guard let self` returns and the loop ends.
-        // Synthesizers typically live for the app's lifetime, so this is a
-        // non-issue in practice.
+        // Block-style notification observer because we need a SYNCHRONOUS
+        // entry point on the main thread to call `Stream.gpu.synchronize()`
+        // before iOS clamps Metal access. The async-iterator variant we used
+        // previously deferred the work through Task scheduling, which routinely
+        // arrived too late — Metal command buffers submitted by the
+        // in-flight `generate()` were already in flight and fired in
+        // background, crashing the process.
+        //
+        // We listen to `willResignActive` (the earliest signal — fires before
+        // `didEnterBackground` and while Metal access is still permitted).
+        // The block:
+        //   1. Calls `Stream.gpu.synchronize()` SYNCHRONOUSLY on the main
+        //      thread. This blocks until every queued GPU command finishes,
+        //      so by the time the OS proceeds with backgrounding nothing is
+        //      in flight to be rejected.
+        //   2. Dispatches an async task to cancel the tracked drain Tasks.
+        //      Cooperative cancellation lands at their next `await`.
+        //
+        // We accept that the observer leaks into NotificationCenter when the
+        // synthesizer deallocates (NotificationCenter holds the block
+        // strongly until removal, but the block's `[weak self]` capture lets
+        // self deallocate normally). In practice synthesizers live for the
+        // app lifetime, so this never matters.
         #if canImport(UIKit) && !os(watchOS)
-        Task { [weak self] in
-            let notifications = await MainActor.run {
-                NotificationCenter.default.notifications(
-                    named: UIApplication.didEnterBackgroundNotification
-                )
-            }
-            for await _ in notifications {
-                guard let self else { return }
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.willResignActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            // Drain pending GPU work while Metal is still allowed.
+            Stream.gpu.synchronize()
+            guard let self else { return }
+            Task {
                 if await !self.allowsBackgroundGeneration {
                     await self.cancelAllInFlight(reason: .background)
                 }
