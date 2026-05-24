@@ -1103,7 +1103,7 @@ public actor TTSSpeechSynthesizer {
         let chunks = chunker.chunks(for: initialText)
         guard let firstChunk = chunks.first else { throw TTSError.emptyText }
 
-        let key = await cache.key(modelID: model.id, voice: options.voice, text: firstChunk)
+        let key = cache.key(modelID: model.id, voice: options.voice, text: firstChunk)
         if let cachedURL = await cache.cachedURL(forKey: key) {
             return cachedURL
         }
