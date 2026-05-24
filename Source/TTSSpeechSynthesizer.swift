@@ -7,6 +7,9 @@ import MLXAudioTTS
 #if canImport(AVFoundation)
 @preconcurrency import AVFoundation
 #endif
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// Holds a loaded `SpeechGenerationModel` so the actor can keep weights
 /// resident across calls. The upstream type isn't `Sendable`, but the
@@ -35,12 +38,85 @@ public actor TTSSpeechSynthesizer {
     private var loadedModels: [String: LoadedModelBox] = [:]
     private var warmedModelIDs: Set<String> = []
 
+    /// In-flight generation Tasks spawned by streaming methods. Tracked so
+    /// they can be cancelled on app backgrounding (or explicit
+    /// ``cancelAllInFlight()``). Cancellation is cooperative — each Task
+    /// checks `Task.isCancelled` at MLX-stream iteration boundaries, then
+    /// finishes its `AsyncThrowingStream` continuation with a
+    /// `CancellationError` so the consumer sees a clean error rather than a
+    /// crash.
+    private var inFlightTasks: [UUID: Task<Void, Never>] = [:]
+    /// Observes app-lifecycle notifications. Cancelled in `deinit`.
+    private var lifecycleObserver: Task<Void, Never>?
+
+    /// When `false` (the default), in-flight generation is cancelled the
+    /// moment the app enters the background. Set to `true` only if the
+    /// caller owns its own `UIApplication.beginBackgroundTask` assertion
+    /// and wants to keep generating past backgrounding — without that
+    /// assertion, MLX Metal command-buffer submissions from the background
+    /// crash the process with
+    /// `kIOGPUCommandBufferCallbackErrorBackgroundExecutionNotPermitted`.
+    public var allowsBackgroundGeneration: Bool = false
+
     public init(
         modelStore: TTSModelStore = TTSModelStore(),
         diagnosticHandler: TTSDiagnosticHandler? = nil
     ) {
         self.modelStore = modelStore
         self.diagnosticHandler = diagnosticHandler
+        #if canImport(UIKit) && !os(watchOS)
+        self.lifecycleObserver = Task { [weak self] in
+            await self?.observeAppBackground()
+        }
+        #endif
+    }
+
+    deinit {
+        lifecycleObserver?.cancel()
+    }
+
+    #if canImport(UIKit) && !os(watchOS)
+    private func observeAppBackground() async {
+        let notifications = await MainActor.run {
+            NotificationCenter.default.notifications(
+                named: UIApplication.didEnterBackgroundNotification
+            )
+        }
+        for await _ in notifications {
+            if Task.isCancelled { return }
+            guard !allowsBackgroundGeneration else { continue }
+            cancelAllInFlight(reason: .background)
+        }
+    }
+    #endif
+
+    /// Cancel every in-flight generation Task. Streams that were in progress
+    /// finish with a `CancellationError`; future `synthesize*` calls are
+    /// unaffected. Emits ``TTSDiagnostic/cancelledByBackground`` when called
+    /// in response to a backgrounding notification, so observers can show
+    /// "paused — app backgrounded" UX.
+    public func cancelAllInFlight(reason: CancellationReason = .explicit) {
+        guard !inFlightTasks.isEmpty else { return }
+        let count = inFlightTasks.count
+        for task in inFlightTasks.values { task.cancel() }
+        inFlightTasks.removeAll()
+        log("cancelAllInFlight: cancelled \(count) task(s) reason=\(reason)")
+        if reason == .background {
+            emit(.cancelledByBackground(cancelledCount: count))
+        }
+    }
+
+    public enum CancellationReason: Sendable, Hashable {
+        case background
+        case explicit
+    }
+
+    fileprivate func trackTask(id: UUID, _ task: Task<Void, Never>) {
+        inFlightTasks[id] = task
+    }
+
+    fileprivate func untrackTask(id: UUID) {
+        inFlightTasks.removeValue(forKey: id)
     }
 
     public func modelStoreInstance() -> TTSModelStore {
@@ -332,6 +408,7 @@ public actor TTSSpeechSynthesizer {
         let (stream, continuation) = AsyncThrowingStream<TTSAudioBufferChunk, Error>.makeStream()
         let synthesizer = self
         let streamStart = Date()
+        let taskID = UUID()
         // Drainer stays on MainActor so the user-facing `progressHandler`
         // (which is `@MainActor`) can be called synchronously and so the
         // upstream MLX `generatePCMBufferStream` (also MainActor-isolated)
@@ -340,11 +417,15 @@ public actor TTSSpeechSynthesizer {
         // actor — that's why MLX setup and the drain loop both live inside
         // this Task rather than crossing the boundary from the synthesizer
         // actor.
-        Task { @MainActor in
+        let drainTask = Task { @MainActor in
+            defer {
+                Task { [synthesizer] in await synthesizer.untrackTask(id: taskID) }
+            }
             var bufferCount = 0
             var emptyBufferCount = 0
             var firstBufferEmitted = false
             do {
+                try Task.checkCancellation()
                 let loadedModel = loadedBox.model
                 let parameters = Self.makeParameters(for: loadedModel, options: capturedOptions)
                 let referenceAudio = try capturedOptions.referenceAudio.map(Self.loadReferenceAudio)
@@ -396,6 +477,9 @@ public actor TTSSpeechSynthesizer {
                     bufferCount: bufferCount
                 ))
                 continuation.finish()
+            } catch is CancellationError {
+                synthesizer.info("synthesizeStream[\(modelID)]: CANCELLED")
+                continuation.finish(throwing: CancellationError())
             } catch {
                 synthesizer.logError("synthesizeStream.upstream", modelID: modelID, stage: "generatingAudio", error: error)
                 let wrapped = TTSError.wrap(error, modelID: modelID, stage: .generatingAudio)
@@ -405,6 +489,7 @@ public actor TTSSpeechSynthesizer {
                 continuation.finish(throwing: wrapped)
             }
         }
+        trackTask(id: taskID, drainTask)
         return stream
     }
 
@@ -443,8 +528,12 @@ public actor TTSSpeechSynthesizer {
         let total = chunkInfos.count
         let synthesizer = self
         let modelID = model.id
+        let taskID = UUID()
 
-        Task { @MainActor in
+        let drainTask = Task { @MainActor in
+            defer {
+                Task { [synthesizer] in await synthesizer.untrackTask(id: taskID) }
+            }
             do {
                 for (index, info) in chunkInfos.enumerated() {
                     try Task.checkCancellation()
@@ -505,11 +594,15 @@ public actor TTSSpeechSynthesizer {
                 ))
                 synthesizer.info("synthesizeLong[\(modelID)]: ALL \(total) chunks FINISHED")
                 continuation.finish()
+            } catch is CancellationError {
+                synthesizer.info("synthesizeLong[\(modelID)]: CANCELLED")
+                continuation.finish(throwing: CancellationError())
             } catch {
                 synthesizer.logError("synthesizeLong.chunkLoop", modelID: modelID, stage: "generatingAudio", error: error)
                 continuation.finish(throwing: error)
             }
         }
+        trackTask(id: taskID, drainTask)
 
         return stream
     }
@@ -675,8 +768,12 @@ public actor TTSSpeechSynthesizer {
 
         let (stream, continuation) = AsyncThrowingStream<TTSAudioBufferChunk, Error>.makeStream()
         let synthesizer = self
+        let taskID = UUID()
 
-        Task { @MainActor in
+        let drainTask = Task { @MainActor in
+            defer {
+                Task { [synthesizer] in await synthesizer.untrackTask(id: taskID) }
+            }
             do {
                 for (index, info) in chunkInfos.enumerated() {
                     try Task.checkCancellation()
@@ -755,6 +852,7 @@ public actor TTSSpeechSynthesizer {
                 continuation.finish(throwing: error)
             }
         }
+        trackTask(id: taskID, drainTask)
         return stream
     }
 

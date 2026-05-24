@@ -33,6 +33,14 @@ public enum TTSDiagnostic: Sendable {
     /// generations" without re-deriving it from timings.
     case modelLoadServedFromCache(modelID: String)
 
+    /// In-flight generation was cancelled because the host app entered the
+    /// background, and ``TTSSpeechSynthesizer/allowsBackgroundGeneration``
+    /// is `false` (the default). Consumers should treat any subsequent
+    /// `CancellationError` thrown by an in-flight stream as expected.
+    /// `cancelledCount` is the number of generation Tasks that were
+    /// terminated.
+    case cancelledByBackground(cancelledCount: Int)
+
     /// The model emitted its first audible PCM buffer (streaming) or sample.
     case firstBufferYielded(modelID: String, latency: TimeInterval)
 
