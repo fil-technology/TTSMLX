@@ -25,6 +25,14 @@ public enum TTSDiagnostic: Sendable {
     /// MLX finished materializing model weights into memory.
     case modelLoadFinished(modelID: String, duration: TimeInterval)
 
+    /// The synthesizer reused a previously-loaded model instance instead of
+    /// running the MLX load pipeline. Emitted in place of
+    /// ``modelResolveFinished`` / ``modelLoadStarted`` / ``modelLoadFinished``
+    /// when the instance was already resident from a prior call. Lets
+    /// consumers tell "first generation of the session" from "subsequent
+    /// generations" without re-deriving it from timings.
+    case modelLoadServedFromCache(modelID: String)
+
     /// The model emitted its first audible PCM buffer (streaming) or sample.
     case firstBufferYielded(modelID: String, latency: TimeInterval)
 

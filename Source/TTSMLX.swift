@@ -236,7 +236,6 @@ public enum TTSMLX {
     /// Throws ``TTSError/unsupportedModel(_:)`` when the device has no
     /// validated model that fits (extremely unlikely — even a 1GB device
     /// will fit Soprano at 220MB peak).
-    @MainActor
     public static func bake(
         _ text: String,
         voice: TTSVoice? = nil,
