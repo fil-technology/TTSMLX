@@ -236,7 +236,16 @@ public final class TTSPlaybackController {
                 guard let self else { return }
                 let s = self.state
                 if s == .stopped { return }
-                if s == .idle {
+                // Only flush+return on idle when the upstream stream has
+                // actually finished. Mid-stream `.idle` is transient — the
+                // AVAudioPlayerNode briefly drains its queue between chunk
+                // arrivals while we wait for MLX to deliver the next
+                // chunk's buffers. Flushing the known timeline there fires
+                // `onWord` for every word we've received metadata for
+                // (which includes words far past the live playback edge),
+                // killing the highlight cursor for the rest of the
+                // session.
+                if s == .idle, streamingFinished {
                     for i in (firedThrough + 1)..<timeline.count {
                         onWord(timeline[i])
                     }
@@ -247,9 +256,6 @@ public final class TTSPlaybackController {
                       timeline[firedThrough + 1].offset <= t {
                     firedThrough += 1
                     onWord(timeline[firedThrough])
-                }
-                if streamingFinished, firedThrough + 1 >= timeline.count, s == .idle {
-                    return
                 }
                 try? await Task.sleep(nanoseconds: 30_000_000)
             }
