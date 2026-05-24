@@ -8,6 +8,8 @@ public struct TTSModelDescriptor: Sendable, Hashable, Identifiable, Codable {
     public let suggestedVoices: [TTSVoice]
     public let capabilities: TTSModelCapabilities
     public let metadata: TTSModelMetadata?
+    public let modelURL: URL?
+    public let files: [String]?
 
     public init(
         id: String,
@@ -16,7 +18,9 @@ public struct TTSModelDescriptor: Sendable, Hashable, Identifiable, Codable {
         supportedLanguages: [TTSLanguage] = [],
         suggestedVoices: [TTSVoice] = [],
         capabilities: TTSModelCapabilities = .init(),
-        metadata: TTSModelMetadata? = nil
+        metadata: TTSModelMetadata? = nil,
+        modelURL: URL? = nil,
+        files: [String]? = nil
     ) {
         self.id = id
         self.displayName = displayName ?? id
@@ -25,6 +29,8 @@ public struct TTSModelDescriptor: Sendable, Hashable, Identifiable, Codable {
         self.suggestedVoices = suggestedVoices
         self.capabilities = capabilities
         self.metadata = metadata
+        self.modelURL = modelURL
+        self.files = files
     }
 }
 

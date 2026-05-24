@@ -135,6 +135,8 @@ public enum TTSError: LocalizedError, @unchecked Sendable {
     /// The Hugging Face API was unreachable. Distinct from ``httpError`` (4xx/5xx)
     /// because callers usually want to retry on connectivity, not on 401/404.
     case networkUnavailable(underlying: Error?)
+    /// Direct downloading of a specific model file from a static host failed.
+    case modelDownloadFailed(file: String, status: Int)
 
     public var errorDescription: String? {
         switch self {
@@ -163,6 +165,8 @@ public enum TTSError: LocalizedError, @unchecked Sendable {
                 return "Network unavailable: \(underlying.localizedDescription)"
             }
             return "Network unavailable."
+        case let .modelDownloadFailed(file, status):
+            return "Downloading file '\(file)' failed with HTTP status \(status)."
         }
     }
 }

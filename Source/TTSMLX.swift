@@ -41,7 +41,24 @@ public enum TTSMLX {
                     // and regressed iPhone users who ran Pocket TTS fine in 0.3.
                     peakMemoryMB: 600,
                     minimumDeviceClass: .iPhone
-                )
+                ),
+                modelURL: URL(string: "https://huggingface.co/mlx-community/pocket-tts"),
+                files: [
+                    "config.json",
+                    "README.md",
+                    "special_tokens_map.json",
+                    "tokenizer.json",
+                    "tokenizer_config.json",
+                    "model.safetensors",
+                    "embeddings/alba.safetensors",
+                    "embeddings/azelma.safetensors",
+                    "embeddings/cosette.safetensors",
+                    "embeddings/eponine.safetensors",
+                    "embeddings/fantine.safetensors",
+                    "embeddings/javert.safetensors",
+                    "embeddings/jean.safetensors",
+                    "embeddings/marius.safetensors"
+                ]
             ),
             modelURL: URL(string: "https://huggingface.co/mlx-community/pocket-tts")
         ),
@@ -60,7 +77,17 @@ public enum TTSMLX {
                     defaultGenerationProfile: .balanced,
                     peakMemoryMB: 220,
                     minimumDeviceClass: .iPhone
-                )
+                ),
+                modelURL: URL(string: "https://huggingface.co/mlx-community/Soprano-80M-bf16"),
+                files: [
+                    "config.json",
+                    "README.md",
+                    "special_tokens_map.json",
+                    "tokenizer.json",
+                    "tokenizer_config.json",
+                    "model.safetensors",
+                    "model.safetensors.index.json"
+                ]
             ),
             modelURL: URL(string: "https://huggingface.co/mlx-community/Soprano-80M-bf16")
         ),
