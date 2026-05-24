@@ -37,6 +37,44 @@ struct TTSPrefetchQueueTests {
         #expect(await queue.queueDepth == 0)
     }
 
+    @Test("replace() drops the pending queue and enqueues a new set")
+    func replaceSwapsQueue() async throws {
+        let cacheDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("PrefetchTest-\(UUID().uuidString)", isDirectory: true)
+        let cache = try TTSAudioCache(directoryURL: cacheDir)
+        let synth = TTSSpeechSynthesizer()
+        // Keep the policy permissive so items aren't paused before we check.
+        let queue = TTSPrefetchQueue(
+            synthesizer: synth,
+            cache: cache,
+            policy: .init(thermalCutoff: .critical, pauseOnLowPowerMode: false, maxQueuedItems: 100)
+        )
+
+        let model = TTSMLX.supportedModels[0]
+        let originalVoice: TTSVoice = "alice"
+        let switchedVoice: TTSVoice = "bob"
+
+        let original = (0..<5).map {
+            TTSPrefetchRequest(text: "chunk-\($0)", model: model, voice: originalVoice)
+        }
+        let replacement = (0..<3).map {
+            TTSPrefetchRequest(text: "chunk-\($0)", model: model, voice: switchedVoice)
+        }
+
+        await queue.enqueue(original)
+        // Snapshot pre-replace depth: up to 5 pending + up to 1 in-flight.
+        let preDepth = await queue.queueDepth
+        #expect(preDepth >= 1)
+
+        await queue.replace(replacement)
+        // After replace, pending should only reflect the new (de-duped) set.
+        // In-flight may still be a leftover from the original; bound depth.
+        let postDepth = await queue.queueDepth
+        #expect(postDepth <= replacement.count + 1)
+
+        await queue.cancelAll()
+    }
+
     @Test("maxQueuedItems caps the pending list")
     func capRespected() async throws {
         let cacheDir = FileManager.default.temporaryDirectory

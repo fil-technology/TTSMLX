@@ -25,22 +25,11 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
   playback crosses each word boundary. Pitch-preserving speed control still
   applies; word callbacks remain in sync at any rate because both
   `currentTime` and the word timeline are expressed in source-audio seconds.
-- `TTSSpeechSynthesizer.events()` — typed `AsyncStream<TTSDiagnostic>` of
-  every diagnostic the synthesizer emits. Prefer over the closure handler in
-  SwiftUI consumers — drives a `for await event in await synthesizer.events()`
-  loop without bridging through `NotificationCenter`. Each call returns an
-  independent stream; the closure handler still fires in parallel.
-- `TTSWordTiming { characterRange: Range<Int>, offset: TimeInterval,
-  duration: TimeInterval }` — one word's timing within a chunk. Ranges are in
-  the original input coordinate space so consumers can drop a highlight
-  straight on the source text.
-- `TTSChunkInfo.wordTimings(forDuration:)` — character-proportional word
-  timings for a chunk that tile exactly to the supplied duration (no rounding
-  drift on the final word). Useful for word-level highlight overlays without
-  per-token model callbacks.
-- `TTSDiagnostic.chunkTimings(modelID:chunkIndex:timings:)` — emitted by
-  `synthesizeLong` right after `.chunkFinished` once the chunk's actual
-  duration is known.
+- `TTSPrefetchQueue.replace(_:)` — atomic cancel-and-enqueue helper for
+  voice or model switches. The in-flight item finishes on the previous
+  configuration; pending items are dropped and replaced with the new
+  request set. Cache keys include voice, so previously-prefetched audio for
+  the old voice stays valid.
 - `TTSPlaybackController.currentTime: TimeInterval` — wall-clock seconds of
   audio actually rendered for the current session. Respects `seek(to:)` for
   file playback. Resets on `stop()`.
@@ -54,6 +43,22 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
   playback as if it had played to the end. Throws
   `TTSPlaybackController.PlaybackError.seekUnsupportedForStream` for stream
   playback (no addressable timeline).
+- `TTSWordTiming { characterRange: Range<Int>, offset: TimeInterval,
+  duration: TimeInterval }` — one word's timing within a chunk. Ranges are in
+  the original input coordinate space so consumers can drop a highlight
+  straight on the source text.
+- `TTSChunkInfo.wordTimings(forDuration:)` — character-proportional word
+  timings for a chunk that tile exactly to the supplied duration (no rounding
+  drift on the final word). Useful for word-level highlight overlays without
+  per-token model callbacks.
+- `TTSDiagnostic.chunkTimings(modelID:chunkIndex:timings:)` — emitted by
+  `synthesizeLong` right after `.chunkFinished` once the chunk's actual
+  duration is known.
+- `TTSSpeechSynthesizer.events()` — typed `AsyncStream<TTSDiagnostic>` of
+  every diagnostic the synthesizer emits. Prefer over the closure handler in
+  SwiftUI consumers — drives a `for await event in await synthesizer.events()`
+  loop without bridging through `NotificationCenter`. Each call returns an
+  independent stream; the closure handler still fires in parallel.
 
 ## [0.3.3] - 2026-04-04
 
