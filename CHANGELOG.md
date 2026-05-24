@@ -6,6 +6,44 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-05-24
+
+### Fixed
+
+- **Catalog regression on iPhone.** `Pocket-TTS` was hard-gated to
+  `minimumDeviceClass: .iPad` in 0.4 / 0.5.0 based on conservative
+  paranoia, not measured data. ReadMeBook shipped Pocket-TTS on iPhone
+  through 0.3 with no OOM reports. Lowered to `.iPhone`; the existing
+  `peakMemoryMB: 600` is the correct gate and trivially passes on any
+  modern iPhone (6–8GB RAM). Same fix applied to `Qwen3-TTS` (was `.iPad`
+  without a documented non-memory reason; now `.iPhone`).
+
+### Changed
+
+- `Orpheus` keeps `minimumDeviceClass: .mac` but the catalog entry now
+  documents **why**: a 6GB resident peak leaves <1GB headroom on 8GB
+  iPhones / iPads, and iOS will jetsam-kill the app under background
+  memory pressure even though `physicalMemoryMB` nominally fits. Gate
+  lifts only with empirical iOS-side validation.
+- `TTSModelCapabilities.peakMemoryMB` and `.minimumDeviceClass` doc
+  comments now state the principle explicitly: use `peakMemoryMB` for
+  memory pressure, use `minimumDeviceClass` **only** for non-memory
+  reasons (ANE-only kernels, missing GPU features, jetsam headroom
+  tighter than memory alone can express). Class gates set without a
+  comment justifying the non-memory reason are treated as bugs.
+- `Docs/0.5-migration.md` adds a "fallback fragility" note: when
+  `isSupported(on:) == false` rasterizes into the app's fallback engine,
+  that fallback path needs to be as robust as the primary — including
+  defensive writes to `MPNowPlayingInfoCenter`, which has its own
+  dispatch-queue constraints and crashes under
+  `_dispatch_assert_queue_fail` when written from the wrong queue.
+
+### Added
+
+- Catalog-intent regression test (`TTSDeviceProfileTests`): every
+  validated model that advertises `minimumDeviceClass: .iPhone` must fit
+  a 6GB iPhone profile. Catches silent re-regression of over-gating.
+
 ## [0.5.0] - 2026-05-24
 
 ### Added

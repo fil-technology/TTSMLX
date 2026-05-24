@@ -34,11 +34,13 @@ public enum TTSMLX {
                     supportsLanguageList: true,
                     supportedLanguages: [.english],
                     defaultGenerationProfile: .fast,
-                    // Despite the "pocket" name, the non-streaming Pocket TTS path
-                    // peaks around ~600MB resident during generation, which OOMs
-                    // current iPhones under audio playback load. Gate to iPad/Mac.
+                    // Pocket TTS peaks ~600MB resident during generation. That
+                    // fits comfortably on modern iPhones (6–8GB RAM) so the
+                    // `physicalMemoryMB` check is the right gate; the previous
+                    // hard `minimumDeviceClass: .iPad` was overly conservative
+                    // and regressed iPhone users who ran Pocket TTS fine in 0.3.
                     peakMemoryMB: 600,
-                    minimumDeviceClass: .iPad
+                    minimumDeviceClass: .iPhone
                 )
             ),
             modelURL: URL(string: "https://huggingface.co/mlx-community/pocket-tts")
@@ -94,7 +96,15 @@ public enum TTSMLX {
                     supportsLanguageList: true,
                     supportedLanguages: [.english],
                     defaultGenerationProfile: .highQuality,
-                    // 3B params in bf16 → ~6GB resident. Mac-only in practice.
+                    // 3B params in bf16 → ~6GB resident peak.
+                    //
+                    // `.mac` gate is intentional and NOT redundant with
+                    // `peakMemoryMB`: on an 8GB iPhone or iPad, 6GB resident
+                    // leaves ~1GB headroom for the OS + app + audio buffers,
+                    // which iOS will jetsam-kill under background memory
+                    // pressure even though `physicalMemoryMB` nominally fits.
+                    // Lift this gate only after empirical iOS-side validation
+                    // shows the app survives a full chapter at peak.
                     peakMemoryMB: 6_000,
                     minimumDeviceClass: .mac
                 )
@@ -114,8 +124,14 @@ public enum TTSMLX {
                     supportsLanguageList: true,
                     supportedLanguages: [.english, .spanish, .french, .german, .italian, .portuguese, .dutch, .polish, .turkish, .russian, .japanese, .korean, .chinese, .arabic, .hindi],
                     defaultGenerationProfile: .highQuality,
+                    // Qwen3-TTS 0.6B at 8-bit peaks ~800MB resident. That fits
+                    // comfortably on any modern iPhone (6–8GB RAM); the
+                    // `physicalMemoryMB` check is the right gate. The previous
+                    // hard `minimumDeviceClass: .iPad` had no documented
+                    // non-memory reason and inherited the same conservative
+                    // paranoia that regressed Pocket TTS for iPhone users.
                     peakMemoryMB: 800,
-                    minimumDeviceClass: .iPad
+                    minimumDeviceClass: .iPhone
                 )
             ),
             modelURL: URL(string: "https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit")
