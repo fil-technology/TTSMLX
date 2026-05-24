@@ -121,6 +121,59 @@ Use `synthesize(...)` when you want a finished WAV file.
 Use `synthesizeStream(...)` when you want lower-latency playback and chunk-by-chunk delivery.
 The current wrapper treats streaming as a buffer-delivery API: it does not surface a persisted file artifact for streamed runs, even if future upstream runtimes save one internally.
 
+## Reader-app flow — one call
+
+For a reader-style UI (chapter text + playback + word highlighting), the canonical setup is:
+
+```swift
+let cache = try TTSAudioCache(directoryURL: documentsDir.appending(path: "Bundles"))
+let playback = TTSPlaybackController()
+let synthesizer = TTSSpeechSynthesizer()
+
+// Once, after the model finishes downloading (e.g. end of onboarding):
+try await synthesizer.warmUp(model)        // keeps weights resident — first Play is instant
+
+// Each chapter:
+try await synthesizer.speakStreaming(
+    chapterText,
+    using: model,
+    options: .init(voice: .alba, language: .english),
+    cache: cache,
+    playback: playback,
+    onWord: { word in highlight.current = word.characterRange },
+    onPlaybackEnd: { /* next chapter, etc */ }
+)
+```
+
+`speakStreaming` wires up `streamAndCacheNarration` + `play(stream:synthesizer:onWord:)` for you, so highlights are driven by actual playback time (not generation events) and cached chunks replay instantly on subsequent calls. Voice switching uses per-voice sub-bundles inside the same `cache.narrationBundle(...)` URL — switch to voice B mid-chapter and back, and voice A's cached chunks survive intact.
+
+## Background playback continuity
+
+iOS does not allow MLX/Metal GPU compute in the background. Audio *playback* is allowed; GPU *compute* is not. This is enforced by the OS regardless of background-task assertions, `BGProcessingTask`, audio entitlements, etc. The framework auto-cancels in-flight generation on `willResignActive` / `willDeactivate` / `didEnterBackground` (emitting `TTSDiagnostic.cancelledByBackground`) so the app doesn't crash with `kIOGPUCommandBufferCallbackErrorBackgroundExecutionNotPermitted`.
+
+Two implications:
+
+- **Live streaming + background lock**: audio plays from whatever was already scheduled into AVAudioEngine when the app backgrounded — typically seconds, not minutes. When that runs out, silence until the user foregrounds and the app calls `speakStreaming(...)` again to resume. Cached chunks replay instantly; generation picks up where it left off.
+- **Indefinite background playback**: use `prepareNarration(...)` to fully pre-bake a chapter to disk while the app is in foreground, then play the resulting `TTSPreparedNarration` via `TTSPlaybackController.play(narration:onWord:)`. That path is MLX-free at playback time and survives any number of background/foreground cycles. Typical baking time: ~5–10× audio duration on iPhone (a 30-minute chapter bakes in 2–5 minutes). The right UX is a "Download for offline" button per chapter.
+
+## Lifecycle hooks
+
+```swift
+// Drop cached weights when the OS warns about memory pressure:
+NotificationCenter.default.addObserver(
+    forName: UIApplication.didReceiveMemoryWarningNotification,
+    object: nil, queue: .main
+) { [weak synthesizer] _ in
+    Task { await synthesizer?.handleMemoryWarning() }
+}
+
+// Opt in to background generation only if you own a `beginBackgroundTask`
+// assertion AND understand that Metal compute will still be rejected by iOS:
+synthesizer.allowsBackgroundGeneration = true
+```
+
+The framework's `willResignActive` observer is registered automatically on init; you don't need to call `cancelAllInFlight()` from your own scene-lifecycle hooks unless you have additional cleanup beyond the framework's. Voice switching also evicts the cached model instance to ensure the new voice starts with clean state — a roughly 300 ms reload cost in exchange for not carrying voice-A's residual state into voice B.
+
 ## Demo App
 
 A small SwiftUI demo app is included at [DemoApp](DemoApp).

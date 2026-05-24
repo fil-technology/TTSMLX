@@ -104,6 +104,22 @@ public actor TTSSpeechSynthesizer {
     /// `Set<String>` to keep `isLoaded(_:)` O(1) without exposing the box.
     private var loadedModels: [String: LoadedModelBox] = [:]
     private var warmedModelIDs: Set<String> = []
+    /// Tracks the `(voice, language)` pair the cached `loadedModels[id]`
+    /// instance was last used with. If a subsequent call requests a
+    /// different pair, the cached instance is evicted and reloaded so the
+    /// model doesn't start the new voice/language session with residual
+    /// state from the prior one. We patched MimiAdapter to fully reset its
+    /// caches between calls — this is belt-and-suspenders against any
+    /// other latent state in upstream layers (FlowLM, ProjectedTransformer,
+    /// rotary embeddings, etc.) that we don't know about. Reloading
+    /// weights from the local cache takes ~300ms; switching voices and
+    /// hearing voice-A still sound like voice-A is worth it.
+    private var lastVariantByModel: [String: ModelVariant] = [:]
+
+    private struct ModelVariant: Hashable {
+        let voice: String?
+        let language: String?
+    }
 
     /// Shared shutdown coordinator. Owned by this synthesizer, observed by
     /// the notification block and read synchronously by every drain Task
@@ -354,6 +370,7 @@ public actor TTSSpeechSynthesizer {
     public func unload(_ modelID: String) {
         let droppedInstance = loadedModels.removeValue(forKey: modelID) != nil
         let droppedMarker = warmedModelIDs.remove(modelID) != nil
+        lastVariantByModel.removeValue(forKey: modelID)
         if droppedInstance || droppedMarker {
             emit(.modelUnloaded(modelID: modelID))
             log("unload: \(modelID) instance=\(droppedInstance) marker=\(droppedMarker)")
@@ -365,6 +382,7 @@ public actor TTSSpeechSynthesizer {
         let ids = Array(warmedModelIDs.union(loadedModels.keys))
         loadedModels.removeAll()
         warmedModelIDs.removeAll()
+        lastVariantByModel.removeAll()
         for id in ids {
             emit(.modelUnloaded(modelID: id))
         }
@@ -848,6 +866,65 @@ public actor TTSSpeechSynthesizer {
         )
     }
 
+#if canImport(AVFoundation)
+    /// One-call helper that handles the entire foreground reading flow:
+    /// streams `text` into the cache, plays the result through the supplied
+    /// playback controller with playback-driven word highlighting, and
+    /// returns when the stream finishes or the user backgrounds the app.
+    ///
+    /// This is the right call for most reader UIs. It collapses what would
+    /// otherwise be four wired-up calls (`streamAndCacheNarration` →
+    /// `play(stream:synthesizer:onWord:)` → manual event subscription
+    /// removal → CancellationError handling) into one. Cached chunks
+    /// inside the bundle are reused — switching voice mid-chapter and
+    /// switching back is instant because each voice has its own
+    /// sub-bundle (see ``TTSAudioCache/availableVariants(modelID:text:)``).
+    ///
+    /// Background continuity note: when the app backgrounds, iOS forbids
+    /// MLX/Metal compute, so the framework cancels in-flight generation
+    /// (`TTSDiagnostic.cancelledByBackground` is emitted). Already-scheduled
+    /// audio buffers play out from the AVAudioEngine queue, then silence.
+    /// For indefinite background playback, pre-bake the chapter with
+    /// ``prepareNarration(_:using:options:into:chunker:progressHandler:)``
+    /// and play the resulting `TTSPreparedNarration` via
+    /// ``TTSPlaybackController/play(narration:onWord:onPlaybackEnd:)`` —
+    /// that path is MLX-free at playback time and survives any number of
+    /// foreground/background cycles.
+    ///
+    /// Throws `CancellationError` when the synthesizer's drain Task is
+    /// cancelled by the OS background hand-off. Other errors come from
+    /// the synthesis pipeline (model load, MLX runtime, disk I/O). The
+    /// caller can simply call `speakStreaming(...)` again to resume —
+    /// the cache will replay everything that finished generating before
+    /// the cancellation and pick up generation at the first missing chunk.
+    public func speakStreaming(
+        _ text: String,
+        using model: TTSModelDescriptor = TTSMLX.defaultModels[0],
+        options: TTSSynthesisOptions = .init(),
+        cache: TTSAudioCache,
+        playback: TTSPlaybackController,
+        chunker: TTSTextChunker = .init(),
+        onWord: (@MainActor (TTSWordTiming) -> Void)? = nil,
+        onPlaybackEnd: (@MainActor () -> Void)? = nil,
+        progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)? = nil
+    ) async throws {
+        let stream = try await streamAndCacheNarration(
+            text,
+            using: model,
+            options: options,
+            cache: cache,
+            chunker: chunker,
+            progressHandler: progressHandler
+        )
+        try await playback.play(
+            stream: stream,
+            synthesizer: self,
+            onWord: onWord,
+            onPlaybackEnd: onPlaybackEnd
+        )
+    }
+#endif
+
     public func streamAndCacheNarration(
         _ text: String,
         using model: TTSModelDescriptor = TTSMLX.defaultModels[0],
@@ -1321,13 +1398,28 @@ public actor TTSSpeechSynthesizer {
     ) async throws -> LoadedModelBox {
         info("prepareModel: ENTRY \(model.id) wasWarmed=\(warmedModelIDs.contains(model.id))")
 
+        let requestedVariant = ModelVariant(
+            voice: options.voice?.identifier,
+            language: options.language?.identifier
+        )
+
         // Cache hit: weights are resident from a prior call. Skip resolve,
-        // download, and MLX load entirely — emit a single served-from-cache
-        // event so consumers can tell this generation reused warm weights.
+        // download, and MLX load entirely — but only if the requested
+        // voice/language matches the variant the cached instance was last
+        // used with. If it changed, evict the cached instance and force a
+        // fresh load so the new variant starts from a known-clean model
+        // state (see note on `lastVariantByModel`).
         if let cached = loadedModels[model.id] {
-            info("prepareModel: CACHE HIT for \(model.id) sampleRate=\(cached.model.sampleRate)")
-            emit(.modelLoadServedFromCache(modelID: model.id))
-            return cached
+            if lastVariantByModel[model.id] == requestedVariant {
+                info("prepareModel: CACHE HIT for \(model.id) sampleRate=\(cached.model.sampleRate) variant=\(requestedVariant.voice ?? "auto").\(requestedVariant.language ?? "auto")")
+                emit(.modelLoadServedFromCache(modelID: model.id))
+                return cached
+            }
+            let prior = lastVariantByModel[model.id]
+            info("prepareModel: EVICTING cached \(model.id) — variant changed (\(prior?.voice ?? "auto").\(prior?.language ?? "auto") → \(requestedVariant.voice ?? "auto").\(requestedVariant.language ?? "auto"))")
+            loadedModels.removeValue(forKey: model.id)
+            warmedModelIDs.remove(model.id)
+            emit(.modelUnloaded(modelID: model.id))
         }
 
         let resolveStart = Date()
@@ -1391,6 +1483,7 @@ public actor TTSSpeechSynthesizer {
         let box = LoadedModelBox(loaded)
         loadedModels[model.id] = box
         warmedModelIDs.insert(model.id)
+        lastVariantByModel[model.id] = requestedVariant
         return box
     }
 }
