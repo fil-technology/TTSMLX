@@ -6,6 +6,8 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-05-24
+
 ### Added
 
 - `TTSPreparedNarration` + `TTSPreparedNarrationManifest` — self-contained,
@@ -59,6 +61,81 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
   SwiftUI consumers — drives a `for await event in await synthesizer.events()`
   loop without bridging through `NotificationCenter`. Each call returns an
   independent stream; the closure handler still fires in parallel.
+
+## [0.4.0] - 2026-05-23
+
+Distribution note: this release continues to use a local-path dependency on
+`../mlx-audio-swift` during active fork development. Tagging is for internal
+tracking and downstream consumers who already vendor the sibling fork. See
+`Docs/mlx-audio-fork.md` for the workflow.
+
+### Added
+
+- `TTSTextChunker` with `chunks(for:)` (string-only) and `chunkInfos(for:)`
+  (position-aware — returns ranges into the original input so apps can map
+  "currently-playing chunk" back to the source text for highlighting).
+- `TTSAudioCache` actor — content-addressable on-disk cache with SHA-256 keys
+  over `(modelID|voice|text)`, atomic `.part` writes, `AVAudioFile` validity
+  check, and `prune(toMaxBytes:)` (purges abandoned `.part` files first,
+  then oldest by mtime).
+- `TTSDiagnostic` event enum and `TTSDiagnosticHandler` typealias. Events
+  cover request start, model resolve/download/load, first-buffer latency,
+  per-chunk start/finish, streaming/synthesis finished, error, and unload.
+- `os.Logger` integration on the synthesizer (subsystem
+  `technology.fil.ttsmlx`).
+- `TTSDeviceClass` (iPhone/iPad/mac, `Comparable` by memory rank) and
+  `TTSDeviceProfile.current` (reads `UIDevice` + `ProcessInfo.physicalMemory`).
+- `TTSModelCapabilities.peakMemoryMB` and `.minimumDeviceClass`, populated
+  with empirical values for every validated catalog entry (Pocket TTS now
+  gated to iPad/Mac, Orpheus to Mac, etc.).
+- `TTSModelDescriptor.isSupported(on:)` and `TTSMLX.recommendedModel(for:)`
+  for device-aware model selection.
+- `TTSError` cases: `.deviceUnsupported`, `.outOfMemory`, `.modelLoadFailed`,
+  `.generationFailed`, `.networkUnavailable`; plus
+  `TTSError.wrap(_:modelID:stage:)` that maps raw `Error`s and `NSURLError`s
+  into the right typed case.
+- `TTSSpeechSynthesizer.synthesizeLong(_:using:options:chunker:)` — streams
+  audio for long-form text by chunking, flattens per-chunk streams into a
+  single `AsyncThrowingStream`. Emits `.chunkStarted(characterRange:)` and
+  `.chunkFinished` diagnostics per chunk.
+- `TTSSpeechSynthesizer.synthesizeAll(_:into:)` — pre-generates the entire
+  text to a single combined WAV file (offline / "download for later" mode).
+- `TTSSpeechSynthesizer.prepareForPlayback(using:initialText:cache:)` —
+  warms the model and pre-generates the first chunk into the supplied
+  `TTSAudioCache` so the first tap on Play is instant.
+- `TTSSpeechSynthesizer.warmUp(_:)`, `isLoaded(_:)`, `unload(_:)`,
+  `unloadAll()`, `handleMemoryWarning()` lifecycle API for iOS memory
+  pressure.
+- `TTSSpeechSynthesizer.init(modelStore:diagnosticHandler:)` and
+  `setDiagnosticHandler(_:)` so consumers can subscribe to lifecycle events.
+- `TTSPrefetchQueue` actor — background queue that fills `TTSAudioCache`
+  while playback continues. Honors `ProcessInfo.thermalState` (pauses on
+  `.serious` by default) and `isLowPowerModeEnabled`. Configurable via
+  `TTSPrefetchPolicy`.
+- `TTSPlaybackController` (`@MainActor`) — `AVAudioEngine` +
+  `AVAudioUnitTimePitch` wrapper with pitch-preserving rate control
+  clamped to 0.5–2.0×, pause/resume/stop, and stream-or-file playback
+  entry points.
+
+### Changed
+
+- Pinned all remote dependencies to exact validated versions so
+  `swift package resolve` cannot silently drift:
+  - `mlx-swift` `.exact("0.31.3")` (was `from: "0.30.6"`)
+  - `mlx-swift-lm` `.exact("2.31.3")` (was `from: "2.30.6"` — held on the
+    2.x line because 3.x decouples `MLXLMCommon` from `Tokenizers` and
+    `Hub`, which the local `mlx-audio-swift` fork still imports directly)
+  - `swift-huggingface` `.exact("0.8.1")`
+- `TTSModelCapabilities` decoding now tolerates older encoded values
+  (the new `peakMemoryMB` and `minimumDeviceClass` fields are
+  `decodeIfPresent`).
+
+### Fixed
+
+- Caught errors in the synthesizer are now classified by stage (download
+  vs load vs generation) and wrapped into the right `TTSError` case, so
+  consumers can distinguish network failures from model failures without
+  inspecting error strings.
 
 ## [0.3.3] - 2026-04-04
 

@@ -13,6 +13,15 @@ Small Swift package for text-to-speech with Hugging Face models running through 
 - Lazy model download and cache management
 - Voice and language selection when the model supports them
 - Reference-audio voice cloning hooks
+- Content-addressable `TTSAudioCache` + background `TTSPrefetchQueue` with thermal/Low-Power-Mode gating
+- `TTSPlaybackController` with pitch-preserving speed control (0.5×–2.0×), `currentTime`/`duration`/`seek(to:)`, and a `timePulse` async stream for scrubber UIs
+- Per-chunk and per-word timing diagnostics for highlight overlays (`TTSDiagnostic.chunkTimings`, `TTSChunkInfo.wordTimings(forDuration:)`)
+- Typed `synthesizer.events()` `AsyncStream<TTSDiagnostic>` for SwiftUI consumers
+- `TTSPreparedNarration` bundles — ship pre-generated audio + word timings with the app, play back instantly without MLX or model download (useful for onboarding voiceovers)
+- Device-aware model selection (`TTSModelDescriptor.isSupported(on:)`, `TTSMLX.recommendedModel(for:)`)
+- Typed errors (`.deviceUnsupported`, `.outOfMemory`, `.modelLoadFailed`, `.generationFailed`, `.networkUnavailable`) and a stage-aware `TTSError.wrap(...)`
+
+See [Docs/0.5-migration.md](Docs/0.5-migration.md) for the consumer-app upgrade briefing for the 0.5 additions.
 
 ## Supported Models
 
@@ -82,7 +91,7 @@ print(result.url)
 Add `TTSMLX` to your Swift package dependencies:
 
 ```swift
-.package(url: "https://github.com/fil-technology/TTSMLX.git", from: "0.3.0")
+.package(url: "https://github.com/fil-technology/TTSMLX.git", from: "0.5.0")
 ```
 
 Then depend on the `TTSMLX` product in your target.
