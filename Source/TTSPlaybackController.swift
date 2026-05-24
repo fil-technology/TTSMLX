@@ -150,6 +150,113 @@ public final class TTSPlaybackController {
         }
     }
 
+    /// Play a streaming synthesis result with **playback-driven** word
+    /// highlighting. The framework's `chunkStarted` / `chunkFinished` /
+    /// `chunkTimings` events fire when the synthesizer *generates* a chunk,
+    /// not when its audio reaches the speaker — so using them directly for
+    /// highlighting makes the cursor lead the audio by however long the
+    /// playback queue has buffered ahead. For streams in particular, the
+    /// gap accumulates and the highlight ends up pointing at words the
+    /// listener hasn't reached yet (often: completely different text).
+    ///
+    /// This overload solves that by subscribing to the synthesizer's
+    /// `events()` stream internally, building an absolute-time timeline as
+    /// `chunkFinished` + `chunkTimings` events arrive, and firing `onWord`
+    /// based on the player's actual `currentTime`. Behaviorally it's the
+    /// same model the prebaked-narration path already uses.
+    ///
+    /// Call this *immediately* after `streamAndCacheNarration(...)` /
+    /// `synthesizeLong(...)` returns: the events stream is established
+    /// here, so events emitted between those two calls are missed.
+    /// Worst-case effect is missed highlights for the first chunk if
+    /// generation completed before subscription — for live MLX generation
+    /// that gap is microseconds; for fully-cached replay the existing
+    /// `play(narration:onWord:)` path is the right tool and doesn't have
+    /// this race.
+    public func play(
+        stream: AsyncThrowingStream<TTSAudioBufferChunk, Error>,
+        synthesizer: TTSSpeechSynthesizer,
+        onWord: (@MainActor (TTSWordTiming) -> Void)? = nil,
+        onPlaybackEnd: (@MainActor () -> Void)? = nil
+    ) async throws {
+        if let onWord {
+            let events = await synthesizer.events()
+            startStreamWordObserver(events: events, onWord: onWord)
+        }
+        try await play(stream: stream, onPlaybackEnd: onPlaybackEnd)
+    }
+
+    private func startStreamWordObserver(
+        events: AsyncStream<TTSDiagnostic>,
+        onWord: @escaping @MainActor (TTSWordTiming) -> Void
+    ) {
+        // Two concurrent loops sharing a tiny piece of state: the timeline
+        // builder (consumes events, appends word entries with absolute
+        // offsets) and the poller (samples `currentTime`, fires onWord
+        // callbacks for crossed words). Both live on the @MainActor.
+        //
+        // We track chunk durations as they finish; when `chunkTimings`
+        // arrives we sum every prior chunk's duration to derive the
+        // absolute offset of each word. Out-of-order events are tolerated.
+        let observer = Task { @MainActor [weak self] in
+            var chunkDurations: [Int: TimeInterval] = [:]
+            var timeline: [TTSWordTiming] = []
+            var firedThrough = -1
+            var streamingFinished = false
+
+            let collector = Task { @MainActor in
+                for await event in events {
+                    if Task.isCancelled { return }
+                    switch event {
+                    case let .chunkFinished(_, chunkIndex, duration):
+                        chunkDurations[chunkIndex] = duration
+                    case let .chunkTimings(_, chunkIndex, timings):
+                        let priorTotal = chunkDurations
+                            .filter { $0.key < chunkIndex }
+                            .values.reduce(0, +)
+                        for timing in timings {
+                            timeline.append(TTSWordTiming(
+                                characterRange: timing.characterRange,
+                                offset: priorTotal + timing.offset,
+                                duration: timing.duration
+                            ))
+                        }
+                    case .streamingFinished:
+                        streamingFinished = true
+                        return
+                    default:
+                        break
+                    }
+                }
+            }
+
+            defer { collector.cancel() }
+
+            while !Task.isCancelled {
+                guard let self else { return }
+                let s = self.state
+                if s == .stopped { return }
+                if s == .idle {
+                    for i in (firedThrough + 1)..<timeline.count {
+                        onWord(timeline[i])
+                    }
+                    return
+                }
+                let t = self.currentTime
+                while (firedThrough + 1) < timeline.count,
+                      timeline[firedThrough + 1].offset <= t {
+                    firedThrough += 1
+                    onWord(timeline[firedThrough])
+                }
+                if streamingFinished, firedThrough + 1 >= timeline.count, s == .idle {
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 30_000_000)
+            }
+        }
+        narrationWordObserver = observer
+    }
+
     /// Play an entire cached audio file. Stops any in-flight scheduled buffers
     /// first. Useful when you have a file from ``TTSAudioCache`` and don't
     /// need streaming.
