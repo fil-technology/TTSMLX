@@ -113,6 +113,77 @@ struct TTSWordTimingTests {
     }
 }
 
+@Suite("TTSSpeechSynthesizer.events")
+struct TTSEventStreamTests {
+    @Test("events() stream receives every emitted diagnostic")
+    func receivesEmittedEvents() async {
+        let synthesizer = TTSSpeechSynthesizer()
+        let stream = await synthesizer.events()
+        let collector = Task {
+            var collected: [TTSDiagnostic] = []
+            for await event in stream {
+                collected.append(event)
+                if collected.count >= 2 { break }
+            }
+            return collected
+        }
+        // Emit via the lifecycle path (unload is the smallest emitter).
+        await synthesizer._markWarmedInternal("model-a")
+        await synthesizer.unload("model-a")
+        await synthesizer._markWarmedInternal("model-b")
+        await synthesizer.unload("model-b")
+        let events = await collector.value
+        #expect(events.count == 2)
+        if case let .modelUnloaded(id) = events[0] {
+            #expect(id == "model-a")
+        } else {
+            Issue.record("expected modelUnloaded, got \(events[0])")
+        }
+    }
+
+    @Test("multiple independent subscribers each get every event")
+    func multipleSubscribers() async {
+        let synthesizer = TTSSpeechSynthesizer()
+        let streamA = await synthesizer.events()
+        let streamB = await synthesizer.events()
+        let a = Task { var n = 0; for await _ in streamA { n += 1; if n == 1 { break } }; return n }
+        let b = Task { var n = 0; for await _ in streamB { n += 1; if n == 1 { break } }; return n }
+        await synthesizer._markWarmedInternal("m")
+        await synthesizer.unload("m")
+        let countA = await a.value
+        let countB = await b.value
+        #expect(countA == 1)
+        #expect(countB == 1)
+    }
+
+    @Test("closure handler still fires alongside the stream")
+    func closureHandlerCoexistsWithStream() async {
+        let box = Box<Int>(0)
+        let synthesizer = TTSSpeechSynthesizer(diagnosticHandler: { _ in
+            Task { @MainActor in box.value += 1 }
+        })
+        let stream = await synthesizer.events()
+        let collector = Task {
+            for await _ in stream { return }
+        }
+        await synthesizer._markWarmedInternal("m")
+        await synthesizer.unload("m")
+        _ = await collector.value
+        // Give the @MainActor closure-counter a tick to run.
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        let final = await MainActor.run { box.value }
+        #expect(final == 1)
+    }
+}
+
+/// Tiny thread-confined box so the closure handler can mutate a counter
+/// without crossing actor boundaries inside its `@Sendable` closure.
+@MainActor
+final class Box<T> {
+    var value: T
+    nonisolated init(_ value: T) where T: Sendable { self.value = value }
+}
+
 @Suite("TTSError.errorDescription")
 struct TTSErrorDescriptionTests {
     @Test("descriptions include the model id and reason where appropriate")

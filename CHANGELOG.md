@@ -8,6 +8,11 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ### Added
 
+- `TTSSpeechSynthesizer.events()` — typed `AsyncStream<TTSDiagnostic>` of
+  every diagnostic the synthesizer emits. Prefer over the closure handler in
+  SwiftUI consumers — drives a `for await event in await synthesizer.events()`
+  loop without bridging through `NotificationCenter`. Each call returns an
+  independent stream; the closure handler still fires in parallel.
 - `TTSWordTiming { characterRange: Range<Int>, offset: TimeInterval,
   duration: TimeInterval }` — one word's timing within a chunk. Ranges are in
   the original input coordinate space so consumers can drop a highlight

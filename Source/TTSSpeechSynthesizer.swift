@@ -11,6 +11,7 @@ import MLXAudioTTS
 public actor TTSSpeechSynthesizer {
     private let modelStore: TTSModelStore
     private var diagnosticHandler: TTSDiagnosticHandler?
+    private var eventContinuations: [UUID: AsyncStream<TTSDiagnostic>.Continuation] = [:]
     nonisolated private let logger = Logger(subsystem: "technology.fil.ttsmlx", category: "Synthesizer")
     /// IDs of models that have been warmed (downloaded + initial-loaded at
     /// least once during this synthesizer's lifetime). Used by ``isLoaded(_:)``
@@ -37,12 +38,39 @@ public actor TTSSpeechSynthesizer {
         diagnosticHandler = handler
     }
 
+    /// A typed event stream of every ``TTSDiagnostic`` this synthesizer emits.
+    /// Prefer this over ``setDiagnosticHandler(_:)`` for SwiftUI consumers —
+    /// you can `for await event in await synthesizer.events()` without
+    /// bridging through `NotificationCenter` or a `@Sendable` closure.
+    ///
+    /// Each call returns an independent stream; the closure handler is still
+    /// invoked in parallel for callers that want both. Streams finish when
+    /// the consumer cancels iteration or when the synthesizer is deallocated.
+    public func events() -> AsyncStream<TTSDiagnostic> {
+        let (stream, continuation) = AsyncStream<TTSDiagnostic>.makeStream()
+        let id = UUID()
+        eventContinuations[id] = continuation
+        continuation.onTermination = { [weak self] _ in
+            Task { [weak self] in
+                await self?.removeEventContinuation(id: id)
+            }
+        }
+        return stream
+    }
+
+    private func removeEventContinuation(id: UUID) {
+        eventContinuations.removeValue(forKey: id)
+    }
+
     nonisolated private func log(_ message: String) {
         logger.debug("\(message, privacy: .public)")
     }
 
     private func emit(_ event: TTSDiagnostic) {
         diagnosticHandler?(event)
+        for continuation in eventContinuations.values {
+            continuation.yield(event)
+        }
     }
 
     // MARK: - Lifecycle
