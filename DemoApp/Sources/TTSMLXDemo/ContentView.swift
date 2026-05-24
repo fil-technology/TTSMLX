@@ -4,7 +4,7 @@ import TTSMLX
 struct ContentView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.openURL) private var openURL
-    @State private var model = DemoModel()
+    @Bindable var model: DemoModel
     @State private var isShowingIOSOptions = false
     @FocusState private var isComposerFocused: Bool
     @State private var hasShownComposerHint = false
