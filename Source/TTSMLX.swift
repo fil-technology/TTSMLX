@@ -193,6 +193,48 @@ public enum TTSMLX {
             return (a.capabilities.peakMemoryMB ?? 0) < (b.capabilities.peakMemoryMB ?? 0)
         }
     }
+
+#if canImport(AVFoundation)
+    /// One-call author-time helper: bake a narration bundle without
+    /// constructing a ``TTSSpeechSynthesizer`` and without picking a model.
+    /// Uses ``recommendedModel(for:)`` against the current device, then
+    /// delegates to
+    /// ``TTSSpeechSynthesizer/prepareNarration(_:using:options:into:chunker:progressHandler:)``.
+    ///
+    /// Intended for build scripts and dev panels that only want a one-liner
+    /// to produce an onboarding bundle. Callers that need to pin a specific
+    /// model (or share a single synthesizer with the live playback path)
+    /// should still use the synthesizer-instance API.
+    ///
+    /// Throws ``TTSError/unsupportedModel(_:)`` when the device has no
+    /// validated model that fits (extremely unlikely — even a 1GB device
+    /// will fit Soprano at 220MB peak).
+    @MainActor
+    public static func bake(
+        _ text: String,
+        voice: TTSVoice? = nil,
+        options: TTSSynthesisOptions = .init(),
+        into bundleURL: URL,
+        chunker: TTSTextChunker = .init(),
+        progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)? = nil
+    ) async throws -> TTSPreparedNarration {
+        let profile = TTSDeviceProfile.current
+        guard let model = recommendedModel(for: profile) else {
+            throw TTSError.unsupportedModel("No validated model fits the current device for bake().")
+        }
+        var bakeOptions = options
+        if let voice { bakeOptions.voice = voice }
+        let synthesizer = TTSSpeechSynthesizer()
+        return try await synthesizer.prepareNarration(
+            text,
+            using: model,
+            options: bakeOptions,
+            into: bundleURL,
+            chunker: chunker,
+            progressHandler: progressHandler
+        )
+    }
+#endif
 }
 
 private extension TTSMLX {

@@ -6,6 +6,28 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-05-24
+
+### Added
+
+- `TTSMLX.bake(_:voice:options:into:chunker:progressHandler:)` — top-level
+  one-call helper to produce a `TTSPreparedNarration` bundle without
+  constructing a `TTSSpeechSynthesizer` and without picking a model. Uses
+  `recommendedModel(for: .current)` against the device profile. For build
+  scripts, dev panels, and any author-time path that doesn't otherwise
+  need a synthesizer instance. The instance-method
+  `synthesizer.prepareNarration(...)` is still there for callers that want
+  to pin a specific model or share a synthesizer with the live path.
+
+### Changed
+
+- `TTSPlaybackController.currentTime` doc comment reworded. Previous
+  wording ("Rate-scaled: at 2× rate, two seconds of source audio render
+  per real second") was technically accurate but actively misleading
+  about the property that matters at the call site. Now leads with
+  "rate-independent source-audio seconds" — matching the migration doc
+  — and explains the implementation detail second, where it belongs.
+
 ## [0.5.1] - 2026-05-24
 
 ### Fixed

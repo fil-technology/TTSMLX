@@ -38,11 +38,22 @@ public final class TTSPlaybackController {
         set { timePitch.rate = max(0.5, min(2.0, newValue)) }
     }
 
-    /// Wall-clock seconds of audio the player has actually rendered for the
-    /// current session. Resets on ``stop()``. For file playback this respects
-    /// ``seek(to:)`` (the returned value is "position in file", not "time
-    /// since play started"). Rate-scaled: at 2× rate, two seconds of source
-    /// audio render per real second.
+    /// Position in the currently playing audio, measured in **source-audio
+    /// seconds** — i.e. seconds of the original recording, not wall-clock
+    /// seconds of playback. Resets on ``stop()``. For file playback this
+    /// respects ``seek(to:)`` (returned value is "position in file", not
+    /// "time since play started").
+    ///
+    /// **Rate-independent.** `rate = 1.5` makes audio play faster in real
+    /// time, but `currentTime` still reports source-audio seconds, so word
+    /// timings (which are also in source-audio seconds) stay correctly
+    /// aligned at any rate without re-derivation on the caller's side.
+    ///
+    /// (Implementation note: the value advances 2× faster per real second
+    /// at 2× rate. That's *how* it stays rate-independent — both the
+    /// player's sample-time and the source timeline are in the same units,
+    /// so the ratio is rate-invariant. Use this property directly to look
+    /// up word timings against ``TTSChunkInfo/wordTimings(forDuration:)``.)
     public var currentTime: TimeInterval {
         guard let nodeTime = playerNode.lastRenderTime,
               let playerTime = playerNode.playerTime(forNodeTime: nodeTime) else {
