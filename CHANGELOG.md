@@ -6,6 +6,33 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-05-24
+
+### Added
+
+- `TTSSpeechSynthesizer.streamAndCacheNarration(_:using:options:cacheBundleAt:chunker:progressHandler:)`
+  — runtime per-chunk progressive cache. Reuses the `TTSPreparedNarration`
+  bundle format (shipped in 0.5.0 for onboarding voiceovers) as a chapter-
+  level "generate once, replay forever" cache:
+  - Each chunk's WAV is finalized to disk the moment that chunk completes,
+    not at the end of the stream. Mid-stream cancellation (backgrounding,
+    watchdog, user tap) preserves every chunk done so far.
+  - Next call with the same `cacheBundleAt: URL` reads the manifest,
+    validates `model` / `voice` / `text` match, and replays cached chunks
+    **without invoking MLX**. Missing chunks fall through to generation.
+  - Mismatched manifests (different model, voice, or text) auto-wipe the
+    stale bundle so callers can use a stable `bundleURL` across switches
+    without manual invalidation.
+  - `chunkStarted` / `chunkFinished` / `chunkTimings` diagnostics fire for
+    cached chunks too, so highlight UIs don't need to distinguish replay
+    from generation.
+- `Docs/0.5.4-app-perf-brief.md` — consumer-app upgrade guide that
+  explains the "regenerates every time" symptom (cause: per-chapter cache
+  + background cancellation = lost in-flight writes), the new primitive,
+  and 6 additional app-side perf fixes (hand-rolled hash replacement,
+  warmUp on launch, prefetch window, AVAudioSession centralization,
+  per-buffer log/MainActor-hop removal).
+
 ## [0.5.3] - 2026-05-24
 
 ### Added

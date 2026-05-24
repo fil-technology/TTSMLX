@@ -576,6 +576,276 @@ public actor TTSSpeechSynthesizer {
         )
     }
 
+    /// Stream synthesis like ``synthesizeLong``, but cache progress to a
+    /// ``TTSPreparedNarration`` bundle **per-chunk** as you go. The same
+    /// bundle format we ship for onboarding voiceovers, used here as the
+    /// runtime cache.
+    ///
+    /// First call with a fresh `cacheBundleAt` URL: generates every chunk,
+    /// writes each chunk's WAV to `bundleURL/chunks/NNN.wav` and the
+    /// manifest **as soon as the chunk completes** (not after the whole
+    /// stream). If the stream is cancelled — backgrounding, watchdog,
+    /// user-tap — the chunks completed so far remain valid on disk.
+    ///
+    /// Next call with the same `bundleURL`: the framework reads the
+    /// manifest, verifies it matches the call's `model` / `voice` /
+    /// `text`, and replays each cached chunk **without invoking MLX**.
+    /// Missing chunks fall through to generation. This is the right
+    /// primitive for "generate once, replay forever, fast" chapter-level
+    /// flows — and it's resilient to mid-stream cancellation by
+    /// construction.
+    ///
+    /// If the existing manifest's `modelID` / `voice` / `sourceText`
+    /// don't match the call's arguments, the stale bundle is wiped and a
+    /// fresh one is started — so callers can pick `cacheBundleAt` from
+    /// any stable identifier (chapter id, hash of inputs, etc.) without
+    /// having to invalidate it themselves on voice/model switches.
+    ///
+    /// Diagnostics (`chunkStarted`, `chunkFinished`, `chunkTimings`) are
+    /// emitted whether the chunk replays from disk or generates fresh —
+    /// the consumer's highlight UI doesn't need to distinguish.
+    @MainActor
+    public func streamAndCacheNarration(
+        _ text: String,
+        using model: TTSModelDescriptor = TTSMLX.defaultModels[0],
+        options: TTSSynthesisOptions = .init(),
+        cacheBundleAt bundleURL: URL,
+        chunker: TTSTextChunker = .init(),
+        progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)? = nil
+    ) async throws -> AsyncThrowingStream<TTSAudioBufferChunk, Error> {
+        let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else {
+            await infoFromMain("streamAndCacheNarration: REJECTED empty text")
+            throw TTSError.emptyText
+        }
+        let chunkInfos = chunker.chunkInfos(for: text)
+        guard !chunkInfos.isEmpty else {
+            await infoFromMain("streamAndCacheNarration: REJECTED text produced zero chunks")
+            throw TTSError.emptyText
+        }
+
+        let modelID = model.id
+        let voiceID = options.voice?.identifier
+        let languageID = options.language?.identifier
+
+        let fileManager = FileManager.default
+        let chunksDir = bundleURL.appendingPathComponent("chunks", isDirectory: true)
+        try fileManager.createDirectory(at: chunksDir, withIntermediateDirectories: true)
+
+        // Load existing manifest, validate against this call's args. Mismatch
+        // (different model/voice/text) → wipe and start fresh, so a stable
+        // bundleURL can be used across voice/model switches without manual
+        // invalidation on the caller's side.
+        var workingManifest: TTSPreparedNarrationManifest
+        var workingEntries: [Int: TTSPreparedNarrationManifest.ChunkEntry] = [:]
+        if let existing = try? TTSPreparedNarration(importing: bundleURL).manifest,
+           existing.modelID == modelID,
+           existing.voice == voiceID,
+           existing.sourceText == text,
+           existing.chunks.count <= chunkInfos.count,
+           existing.chunks.allSatisfy({ entry in
+               entry.index < chunkInfos.count
+                   && entry.text == chunkInfos[entry.index].text
+           }) {
+            workingManifest = existing
+            for entry in existing.chunks { workingEntries[entry.index] = entry }
+        } else {
+            try? fileManager.removeItem(at: bundleURL)
+            try fileManager.createDirectory(at: chunksDir, withIntermediateDirectories: true)
+            workingManifest = TTSPreparedNarrationManifest(
+                modelID: modelID,
+                voice: voiceID,
+                language: languageID,
+                sourceText: text,
+                sampleRate: 0,
+                chunks: []
+            )
+        }
+
+        let cachedCount = workingEntries.count
+        let totalChunks = chunkInfos.count
+        await infoFromMain("streamAndCacheNarration: ENTRY model=\(modelID) chunks=\(totalChunks) cached=\(cachedCount)/\(totalChunks) bundle=\(bundleURL.lastPathComponent)")
+
+        let (stream, continuation) = AsyncThrowingStream<TTSAudioBufferChunk, Error>.makeStream()
+        let synthesizer = self
+
+        Task { @MainActor in
+            do {
+                for (index, info) in chunkInfos.enumerated() {
+                    try Task.checkCancellation()
+                    let chunkFilename = String(format: "chunks/%03d.wav", index)
+                    let chunkURL = bundleURL.appendingPathComponent(chunkFilename, isDirectory: false)
+                    let entry = workingEntries[index]
+                    let fileExists = fileManager.fileExists(atPath: chunkURL.path)
+
+                    if let entry, fileExists, entry.text == info.text,
+                       let chunkFile = try? AVAudioFile(forReading: chunkURL),
+                       chunkFile.length > 0,
+                       let buffer = AVAudioPCMBuffer(
+                           pcmFormat: chunkFile.processingFormat,
+                           frameCapacity: AVAudioFrameCount(chunkFile.length)
+                       ) {
+                        // ────── REPLAY PATH ──────
+                        await synthesizer.infoFromMain("streamAndCacheNarration[\(modelID)]: chunk \(index + 1)/\(totalChunks) REPLAY from cache")
+                        try chunkFile.read(into: buffer)
+                        let sampleRate = Int(chunkFile.processingFormat.sampleRate.rounded())
+                        await synthesizer.emitFromMain(.chunkStarted(
+                            modelID: modelID, chunkIndex: index,
+                            characterRange: info.characterRange
+                        ))
+                        continuation.yield(.init(buffer: buffer, sampleRate: sampleRate))
+                        await synthesizer.emitFromMain(.chunkFinished(
+                            modelID: modelID, chunkIndex: index,
+                            duration: entry.duration
+                        ))
+                        let liveTimings = entry.wordTimings.map { ser -> TTSWordTiming in
+                            let base = info.characterRange.lowerBound
+                            return TTSWordTiming(
+                                characterRange: (base + ser.characterRange.start)..<(base + ser.characterRange.end),
+                                offset: ser.offset,
+                                duration: ser.duration
+                            )
+                        }
+                        if !liveTimings.isEmpty {
+                            await synthesizer.emitFromMain(.chunkTimings(
+                                modelID: modelID, chunkIndex: index, timings: liveTimings
+                            ))
+                        }
+                    } else {
+                        // ────── GENERATION PATH ──────
+                        // Either the entry doesn't exist, the file doesn't
+                        // exist, the cached chunk text changed, or the cached
+                        // file is corrupt/empty. Drop any stale entry first.
+                        if entry != nil {
+                            workingEntries.removeValue(forKey: index)
+                            try? fileManager.removeItem(at: chunkURL)
+                            await synthesizer.warningFromMain("streamAndCacheNarration[\(modelID)]: chunk \(index + 1) cached file invalid, regenerating")
+                        }
+                        try await Self.generateAndPersist(
+                            index: index,
+                            info: info,
+                            model: model,
+                            options: options,
+                            modelID: modelID,
+                            chunkURL: chunkURL,
+                            chunkFilename: chunkFilename,
+                            bundleURL: bundleURL,
+                            workingManifest: &workingManifest,
+                            workingEntries: &workingEntries,
+                            continuation: continuation,
+                            synthesizer: synthesizer
+                        )
+                    }
+                }
+                await synthesizer.infoFromMain("streamAndCacheNarration[\(modelID)]: ALL \(totalChunks) chunks DONE (replayed=\(cachedCount) generated=\(totalChunks - cachedCount))")
+                progressHandler?(.init(stage: .completed, fractionCompleted: 1, message: "Synthesis + cache finished."))
+                continuation.finish()
+            } catch is CancellationError {
+                await synthesizer.infoFromMain("streamAndCacheNarration[\(modelID)]: CANCELLED. \(workingEntries.count)/\(totalChunks) chunks cached on disk for next call.")
+                continuation.finish(throwing: CancellationError())
+            } catch {
+                await synthesizer.logErrorFromMain("streamAndCacheNarration", modelID: modelID, stage: "generatingAudio", error: error)
+                continuation.finish(throwing: error)
+            }
+        }
+        return stream
+    }
+
+    /// Generation helper, factored out so both the fresh-chunk path and the
+    /// corrupt-cached-chunk-recovery path share one implementation.
+    @MainActor
+    private static func generateAndPersist(
+        index: Int,
+        info: TTSChunkInfo,
+        model: TTSModelDescriptor,
+        options: TTSSynthesisOptions,
+        modelID: String,
+        chunkURL: URL,
+        chunkFilename: String,
+        bundleURL: URL,
+        workingManifest: inout TTSPreparedNarrationManifest,
+        workingEntries: inout [Int: TTSPreparedNarrationManifest.ChunkEntry],
+        continuation: AsyncThrowingStream<TTSAudioBufferChunk, Error>.Continuation,
+        synthesizer: TTSSpeechSynthesizer
+    ) async throws {
+        await synthesizer.infoFromMain("streamAndCacheNarration[\(modelID)]: chunk \(index + 1) GENERATING")
+        var didEmitChunkStart = false
+        var audioFile: AVAudioFile?
+        var frameCount: AVAudioFramePosition = 0
+        var chunkSampleRate: Double = 0
+        let chunkStream = try await synthesizer.synthesizeStream(
+            info.text, using: model, options: options, progressHandler: nil
+        )
+        for try await pcm in chunkStream {
+            try Task.checkCancellation()
+            let buffer = pcm.buffer
+            guard buffer.frameLength > 0 else { continue }
+            if !didEmitChunkStart {
+                didEmitChunkStart = true
+                await synthesizer.emitFromMain(.chunkStarted(
+                    modelID: modelID, chunkIndex: index,
+                    characterRange: info.characterRange
+                ))
+            }
+            if audioFile == nil {
+                chunkSampleRate = buffer.format.sampleRate
+                audioFile = try AVAudioFile(
+                    forWriting: chunkURL,
+                    settings: buffer.format.settings,
+                    commonFormat: buffer.format.commonFormat,
+                    interleaved: buffer.format.isInterleaved
+                )
+            }
+            try audioFile?.write(from: buffer)
+            frameCount += AVAudioFramePosition(buffer.frameLength)
+            continuation.yield(pcm)
+        }
+        audioFile = nil
+        guard chunkSampleRate > 0, frameCount > 0 else {
+            throw TTSError.generationFailed(modelID: modelID, underlying: NSError(
+                domain: "streamAndCacheNarration", code: -1, userInfo: [
+                    NSLocalizedDescriptionKey: "Chunk \(index) produced no audio."
+                ]
+            ))
+        }
+        let duration = TimeInterval(frameCount) / chunkSampleRate
+        await synthesizer.emitFromMain(.chunkFinished(
+            modelID: modelID, chunkIndex: index, duration: duration
+        ))
+        let liveTimings = info.wordTimings(forDuration: duration)
+        if !liveTimings.isEmpty {
+            await synthesizer.emitFromMain(.chunkTimings(
+                modelID: modelID, chunkIndex: index, timings: liveTimings
+            ))
+        }
+        if workingManifest.sampleRate == 0 {
+            workingManifest.sampleRate = Int(chunkSampleRate.rounded())
+        }
+        let shifted = liveTimings.map { timing -> TTSPreparedNarrationManifest.SerializableWordTiming in
+            TTSPreparedNarrationManifest.SerializableWordTiming(
+                characterRange: TTSPreparedNarrationManifest.SerializableRange(
+                    start: timing.characterRange.lowerBound - info.characterRange.lowerBound,
+                    end: timing.characterRange.upperBound - info.characterRange.lowerBound
+                ),
+                offset: timing.offset,
+                duration: timing.duration
+            )
+        }
+        let newEntry = TTSPreparedNarrationManifest.ChunkEntry(
+            index: index,
+            audioFile: chunkFilename,
+            characterRange: TTSPreparedNarrationManifest.SerializableRange(info.characterRange),
+            text: info.text,
+            duration: duration,
+            wordTimings: shifted
+        )
+        workingEntries[index] = newEntry
+        workingManifest.chunks = workingEntries.keys.sorted().compactMap { workingEntries[$0] }
+        let narration = TTSPreparedNarration(manifest: workingManifest, baseURL: bundleURL)
+        try narration.writeManifest()
+        await synthesizer.infoFromMain("streamAndCacheNarration[\(modelID)]: chunk \(index + 1) PERSISTED (duration=\(String(format: "%.2f", duration))s)")
+    }
+
     /// Bake the entire `text` into a self-contained, redistributable
     /// ``TTSPreparedNarration`` bundle: per-chunk WAV files plus a manifest
     /// with word-level timings. Intended for **author-time** use (build
