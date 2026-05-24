@@ -235,4 +235,114 @@ public actor TTSAudioCache {
         let digest = SHA256.hash(data: Data(payload.utf8))
         return digest.map { String(format: "%02x", $0) }.joined()
     }
+
+    // MARK: - Managed narration bundles
+
+    /// Filesystem URL of the cache-managed narration bundle for
+    /// `(modelID, text)`. The hash intentionally omits voice/language —
+    /// each voice gets its own sub-bundle under `voices/<slug>/` inside
+    /// the returned directory, so swapping voices for the same chapter
+    /// reuses the same parent bundle.
+    ///
+    /// Does not create the directory. Pair with
+    /// ``TTSSpeechSynthesizer/streamAndCacheNarration(_:using:options:cache:chunker:progressHandler:)``
+    /// which derives this URL automatically.
+    public nonisolated func narrationBundle(
+        modelID: String,
+        text: String
+    ) -> URL {
+        let normalized = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let payload = "\(modelID)|\(normalized)"
+        let hash = Self.makeKey(payload: payload)
+        return directoryURL
+            .appendingPathComponent("bundles", isDirectory: true)
+            .appendingPathComponent("\(hash).\(TTSPreparedNarration.bundleExtension)", isDirectory: true)
+    }
+
+    /// Enumerates `(voice, language)` variants already baked for
+    /// `(modelID, text)` inside the cache-managed bundle. Returns an
+    /// empty array if no bundle exists yet.
+    public func availableVariants(
+        modelID: String,
+        text: String
+    ) -> [(voice: String?, language: String?, slug: String)] {
+        let bundleURL = narrationBundle(modelID: modelID, text: text)
+        guard fileManager.fileExists(atPath: bundleURL.path) else { return [] }
+        return TTSPreparedNarration.availableVariants(at: bundleURL)
+    }
+
+    /// Absorbs legacy narration bundles produced before the cache owned
+    /// the on-disk layout. Iterates `legacyRoot/*.ttsnarration/`,
+    /// recomputes each bundle's cache-managed URL from its manifest's
+    /// `modelID` + `sourceText`, and `moveItem`s it into place. Skips
+    /// entries whose destination already exists. Returns the number of
+    /// bundles moved.
+    @discardableResult
+    public func migrate(from legacyRoot: URL) async throws -> Int {
+        let suffix = "." + TTSPreparedNarration.bundleExtension
+        guard fileManager.fileExists(atPath: legacyRoot.path) else { return 0 }
+        let entries: [URL]
+        do {
+            entries = try fileManager.contentsOfDirectory(
+                at: legacyRoot,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            )
+        } catch {
+            return 0
+        }
+
+        var moved = 0
+        for entry in entries where entry.lastPathComponent.hasSuffix(suffix) {
+            var isDir: ObjCBool = false
+            guard fileManager.fileExists(atPath: entry.path, isDirectory: &isDir), isDir.boolValue else {
+                continue
+            }
+            guard let info = Self.legacyManifestInfo(at: entry) else { continue }
+            let destination = narrationBundle(modelID: info.modelID, text: info.sourceText)
+            if fileManager.fileExists(atPath: destination.path) { continue }
+            let parent = destination.deletingLastPathComponent()
+            try fileManager.createDirectory(at: parent, withIntermediateDirectories: true)
+            try fileManager.moveItem(at: entry, to: destination)
+            moved += 1
+        }
+        return moved
+    }
+
+    /// Inspects a legacy bundle directory and returns `(modelID, sourceText)`
+    /// from its first available manifest — either the root-level
+    /// `manifest.json` (single-voice legacy) or the first per-voice
+    /// sub-bundle under `voices/`.
+    private static func legacyManifestInfo(at bundleURL: URL) -> (modelID: String, sourceText: String)? {
+        let fm = FileManager.default
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let rootManifest = bundleURL.appendingPathComponent(TTSPreparedNarration.manifestFilename, isDirectory: false)
+        if let data = try? Data(contentsOf: rootManifest),
+           let manifest = try? decoder.decode(TTSPreparedNarrationManifest.self, from: data) {
+            return (manifest.modelID, manifest.sourceText)
+        }
+
+        let voicesDir = bundleURL.appendingPathComponent("voices", isDirectory: true)
+        guard let subs = try? fm.contentsOfDirectory(
+            at: voicesDir,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else { return nil }
+
+        for sub in subs {
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: sub.path, isDirectory: &isDir), isDir.boolValue else { continue }
+            let subManifest = sub.appendingPathComponent(TTSPreparedNarration.manifestFilename, isDirectory: false)
+            guard let data = try? Data(contentsOf: subManifest),
+                  let manifest = try? decoder.decode(TTSPreparedNarrationManifest.self, from: data)
+            else { continue }
+            return (manifest.modelID, manifest.sourceText)
+        }
+        return nil
+    }
 }

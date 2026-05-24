@@ -115,6 +115,76 @@ struct TTSAudioCacheTests {
         #expect(evictedB == nil)
     }
 
+    @Test("narrationBundle is deterministic and excludes voice")
+    func narrationBundleDeterministic() async throws {
+        let cache = try makeCache()
+        let a = cache.narrationBundle(modelID: "m", text: "hello world")
+        let b = cache.narrationBundle(modelID: "m", text: "hello world")
+        let c = cache.narrationBundle(modelID: "m", text: "  hello world\r\n")
+        #expect(a == b)
+        #expect(a == c)
+        #expect(a.lastPathComponent.hasSuffix(".\(TTSPreparedNarration.bundleExtension)"))
+        let parent = a.deletingLastPathComponent()
+        #expect(parent.lastPathComponent == "bundles")
+        // No voice in the path — same URL regardless of voice argument
+        // (voice isn't even an input here, but verify uniqueness on text).
+        let d = cache.narrationBundle(modelID: "m", text: "different text")
+        let e = cache.narrationBundle(modelID: "other", text: "hello world")
+        #expect(a != d)
+        #expect(a != e)
+        // Caller doesn't need to create it; verify directory is absent.
+        #expect(!FileManager.default.fileExists(atPath: a.path))
+    }
+
+    @Test("availableVariants is empty for fresh cache, populated after baking voices")
+    func availableVariantsRoundTrip() async throws {
+        let cache = try makeCache()
+        let modelID = "m"
+        let text = "Hello world from TTSMLX"
+        let empty = await cache.availableVariants(modelID: modelID, text: text)
+        #expect(empty.isEmpty)
+
+        // Hand-write two sub-bundles inside the cache-managed location.
+        let bundleURL = cache.narrationBundle(modelID: modelID, text: text)
+        try FileManager.default.createDirectory(at: bundleURL, withIntermediateDirectories: true)
+        try writeManifestSubBundle(at: bundleURL, modelID: modelID, voice: "jean", text: text)
+        try writeManifestSubBundle(at: bundleURL, modelID: modelID, voice: "alba", text: text)
+
+        let variants = await cache.availableVariants(modelID: modelID, text: text)
+        let voices = Set(variants.compactMap(\.voice))
+        #expect(voices.contains("jean"))
+        #expect(voices.contains("alba"))
+    }
+
+    @Test("migrate(from:) moves legacy bundles, is idempotent")
+    func migrateLegacyBundles() async throws {
+        let cache = try makeCache()
+        let legacyRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TTSAudioCacheLegacy-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: legacyRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: legacyRoot) }
+
+        // Build a legacy bundle (sub-bundle layout) at an arbitrary path.
+        let legacyBundle = legacyRoot.appendingPathComponent("chapter-1.\(TTSPreparedNarration.bundleExtension)", isDirectory: true)
+        let modelID = "m"
+        let text = "Hello world from TTSMLX"
+        try FileManager.default.createDirectory(at: legacyBundle, withIntermediateDirectories: true)
+        try writeManifestSubBundle(at: legacyBundle, modelID: modelID, voice: "jean", text: text)
+
+        let moved = try await cache.migrate(from: legacyRoot)
+        #expect(moved == 1)
+
+        // Destination bundle now exists in cache layout.
+        let destination = cache.narrationBundle(modelID: modelID, text: text)
+        #expect(FileManager.default.fileExists(atPath: destination.path))
+        // Legacy source is gone (moveItem).
+        #expect(!FileManager.default.fileExists(atPath: legacyBundle.path))
+
+        // Second call: nothing to move.
+        let movedAgain = try await cache.migrate(from: legacyRoot)
+        #expect(movedAgain == 0)
+    }
+
     @Test("prune purges abandoned .part files first")
     func prunePurgesPartFiles() async throws {
         let cache = try makeCache()
@@ -171,4 +241,26 @@ private func le32(_ value: UInt32) -> Data {
 
 private func le16(_ value: UInt16) -> Data {
     withUnsafeBytes(of: value.littleEndian) { Data($0) }
+}
+
+/// Writes a minimal sub-bundle manifest (no audio chunks) at
+/// `bundleURL/voices/<slug>/manifest.json`. Empty chunk list — enough
+/// for `availableVariants` / migration discovery.
+private func writeManifestSubBundle(
+    at bundleURL: URL,
+    modelID: String,
+    voice: String?,
+    text: String
+) throws {
+    let sub = TTSPreparedNarration.subBundleURL(in: bundleURL, voice: voice, language: nil)
+    try FileManager.default.createDirectory(at: sub, withIntermediateDirectories: true)
+    let manifest = TTSPreparedNarrationManifest(
+        modelID: modelID,
+        voice: voice,
+        language: nil,
+        sourceText: text,
+        sampleRate: 22_050,
+        chunks: []
+    )
+    try TTSPreparedNarration(manifest: manifest, baseURL: sub).writeManifest()
 }

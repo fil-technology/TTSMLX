@@ -282,6 +282,60 @@ struct TTSStreamAndCacheNarrationTests {
         #expect(count3 == 2)
     }
 
+    @Test("cache: overload writes into the cache-managed location and supports voice switching")
+    func cacheOverloadManagedLocation() async throws {
+        let cacheDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ttsmlx-managedcache-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: cacheDir) }
+        let cache = try TTSAudioCache(directoryURL: cacheDir)
+
+        let modelID = "test/model"
+        let sourceText = "Hello world from TTSMLX"
+        let managedURL = cache.narrationBundle(modelID: modelID, text: sourceText)
+
+        // Pre-bake voice A in the cache-managed bundle's sub-bundle.
+        try FileManager.default.createDirectory(
+            at: managedURL.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        try Self.buildHandSubBundle(
+            at: managedURL, modelID: modelID, voice: "jean",
+            language: nil, sourceText: sourceText
+        )
+        try Self.buildHandSubBundle(
+            at: managedURL, modelID: modelID, voice: "alba",
+            language: nil, sourceText: sourceText
+        )
+
+        let synthesizer = TTSSpeechSynthesizer()
+        let model = TTSModelDescriptor(id: modelID, capabilities: .init(isRuntimeSupported: true))
+        let chunker = TTSTextChunker(firstChunkCharacterLimit: 11, followupChunkCharacterLimit: 11)
+
+        // Voice A — full replay via cache: overload.
+        let streamA = try await synthesizer.streamAndCacheNarration(
+            sourceText, using: model,
+            options: TTSSynthesisOptions(voice: TTSVoice("jean")),
+            cache: cache, chunker: chunker
+        )
+        var aCount = 0
+        for try await _ in streamA { aCount += 1 }
+        #expect(aCount == 2)
+
+        // Switch to voice B — replay, both variants preserved.
+        let streamB = try await synthesizer.streamAndCacheNarration(
+            sourceText, using: model,
+            options: TTSSynthesisOptions(voice: TTSVoice("alba")),
+            cache: cache, chunker: chunker
+        )
+        var bCount = 0
+        for try await _ in streamB { bCount += 1 }
+        #expect(bCount == 2)
+
+        let variants = await cache.availableVariants(modelID: modelID, text: sourceText)
+        let voices = Set(variants.compactMap(\.voice))
+        #expect(voices.contains("jean"))
+        #expect(voices.contains("alba"))
+    }
+
     @Test("legacy layout is auto-migrated into the matching sub-bundle")
     func legacyLayoutMigrates() async throws {
         let bundleURL = try Self.tempBundle()

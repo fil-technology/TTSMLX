@@ -176,6 +176,7 @@ struct BakeBundleSheet: View {
     @State private var voiceMode: VoiceMode = .automatic
     @State private var filename: String = "chapter-1"
     @State private var mode: DemoModel.BakeMode = .oneShot
+    @State private var useManagedCache: Bool = false
     @State private var isBaking = false
     @State private var errorMessage: String?
 
@@ -227,6 +228,9 @@ struct BakeBundleSheet: View {
                         Text(DemoModel.BakeMode.streamCache.title).tag(DemoModel.BakeMode.streamCache)
                     }
                     .pickerStyle(.segmented)
+                    if mode == .streamCache {
+                        Toggle("Use managed cache", isOn: $useManagedCache)
+                    }
                 }
 
                 if isBaking {
@@ -295,7 +299,8 @@ struct BakeBundleSheet: View {
                 model: descriptor,
                 voice: voice,
                 filename: filename,
-                mode: mode
+                mode: mode,
+                useManagedCache: useManagedCache
             )
             dismiss()
         } catch {

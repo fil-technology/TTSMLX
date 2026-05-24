@@ -130,6 +130,11 @@ final class DemoModel {
     let playbackController = TTSPlaybackController()
     private let synthesizer = TTSSpeechSynthesizer()
     private let store = TTSModelStore()
+    let bundleCache: TTSAudioCache = {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let dir = docs.appendingPathComponent("ManagedBundleCache", isDirectory: true)
+        return (try? TTSAudioCache(directoryURL: dir))!
+    }()
     private var audioPlayer: AVAudioPlayer?
     private var streamingEngine: AVAudioEngine?
     private var streamingNode: AVAudioPlayerNode?
@@ -1047,7 +1052,14 @@ final class DemoModel {
         return entries.sorted { $0.modifiedAt > $1.modifiedAt }
     }
 
-    func bake(text: String, model: TTSModelDescriptor, voice: TTSVoice?, filename: String, mode: BakeMode) async throws {
+    func bake(
+        text: String,
+        model: TTSModelDescriptor,
+        voice: TTSVoice?,
+        filename: String,
+        mode: BakeMode,
+        useManagedCache: Bool = false
+    ) async throws {
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanName = filename.trimmingCharacters(in: .whitespacesAndNewlines)
         let bundleName: String
@@ -1087,15 +1099,28 @@ final class DemoModel {
                 }
             )
         case .streamCache:
-            let stream = try await synthesizer.streamAndCacheNarration(
-                trimmedText,
-                using: model,
-                options: opts,
-                cacheBundleAt: bundleURL,
-                progressHandler: { update in
-                    self.apply(progress: update)
-                }
-            )
+            let stream: AsyncThrowingStream<TTSAudioBufferChunk, Error>
+            if useManagedCache {
+                stream = try await synthesizer.streamAndCacheNarration(
+                    trimmedText,
+                    using: model,
+                    options: opts,
+                    cache: bundleCache,
+                    progressHandler: { update in
+                        self.apply(progress: update)
+                    }
+                )
+            } else {
+                stream = try await synthesizer.streamAndCacheNarration(
+                    trimmedText,
+                    using: model,
+                    options: opts,
+                    cacheBundleAt: bundleURL,
+                    progressHandler: { update in
+                        self.apply(progress: update)
+                    }
+                )
+            }
             for try await _ in stream {}
         }
         status = "Baked \(bundleName)"

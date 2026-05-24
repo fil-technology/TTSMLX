@@ -819,6 +819,35 @@ public actor TTSSpeechSynthesizer {
     /// Diagnostics (`chunkStarted`, `chunkFinished`, `chunkTimings`) are
     /// emitted whether the chunk replays from disk or generates fresh —
     /// the consumer's highlight UI doesn't need to distinguish.
+    /// Sibling of ``streamAndCacheNarration(_:using:options:cacheBundleAt:chunker:progressHandler:)``
+    /// that lets the framework own the on-disk location. The URL is
+    /// derived from ``TTSAudioCache/narrationBundle(modelID:text:)`` —
+    /// callers no longer need to compute a stable path for each chapter.
+    ///
+    /// Use this when the bundle is purely a runtime cache. Use the
+    /// `cacheBundleAt:` variant when the bundle is also a deliverable
+    /// (export, distribution, debug inspection).
+    public func streamAndCacheNarration(
+        _ text: String,
+        using model: TTSModelDescriptor = TTSMLX.defaultModels[0],
+        options: TTSSynthesisOptions = .init(),
+        cache: TTSAudioCache,
+        chunker: TTSTextChunker = .init(),
+        progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)? = nil
+    ) async throws -> AsyncThrowingStream<TTSAudioBufferChunk, Error> {
+        let bundleURL = cache.narrationBundle(modelID: model.id, text: text)
+        let parent = bundleURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        return try await streamAndCacheNarration(
+            text,
+            using: model,
+            options: options,
+            cacheBundleAt: bundleURL,
+            chunker: chunker,
+            progressHandler: progressHandler
+        )
+    }
+
     public func streamAndCacheNarration(
         _ text: String,
         using model: TTSModelDescriptor = TTSMLX.defaultModels[0],
