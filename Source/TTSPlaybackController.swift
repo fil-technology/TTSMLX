@@ -89,6 +89,13 @@ public final class TTSPlaybackController {
     /// the bundle's total length and drives the word-callback observer task.
     private var narrationTotalDuration: TimeInterval?
     private var narrationWordObserver: Task<Void, Never>?
+    /// Bumped every time a `play(...)` method starts a new session. Used
+    /// so a long-running `for try await chunk in stream` loop from a
+    /// prior call can detect that a newer session has taken over (e.g.
+    /// the user switched voice or speed and a new stream is being
+    /// scheduled) and bail out cleanly instead of continuing to schedule
+    /// stale buffers onto the audio engine.
+    private var sessionToken: Int = 0
     nonisolated private let logger = Logger(subsystem: "technology.fil.ttsmlx", category: "Playback")
 
     public init(rate: Float = 1.0) {
@@ -129,13 +136,42 @@ public final class TTSPlaybackController {
         stream: AsyncThrowingStream<TTSAudioBufferChunk, Error>,
         onPlaybackEnd: (@MainActor () -> Void)? = nil
     ) async throws {
-        logger.info("play(stream:): ENTRY state=\(String(describing: self.state), privacy: .public)")
+        // Stop any prior session so this call doesn't stack onto a still-
+        // running playback (the classic voice-change-mid-stream glitch),
+        // then claim a fresh session before consuming the stream.
+        stop()
+        let myToken = beginSession()
+        try await drainStream(stream, token: myToken, onPlaybackEnd: onPlaybackEnd)
+    }
+
+    /// Bump and return the new session token. Stays a single source of
+    /// truth so every public play(...) entry point invalidates older
+    /// sessions consistently.
+    private func beginSession() -> Int {
+        sessionToken += 1
+        return sessionToken
+    }
+
+    /// Pure stream-drain loop, no stop() or session bump — those must be
+    /// handled by the caller exactly once per public play(...) entry. The
+    /// loop bails early if a newer session has taken over so stale buffers
+    /// from a superseded call don't reach the audio engine.
+    private func drainStream(
+        _ stream: AsyncThrowingStream<TTSAudioBufferChunk, Error>,
+        token myToken: Int,
+        onPlaybackEnd: (@MainActor () -> Void)?
+    ) async throws {
+        logger.info("play(stream:): ENTRY state=\(String(describing: self.state), privacy: .public) token=\(myToken, privacy: .public)")
         self.onPlaybackEnd = onPlaybackEnd
         currentFile = nil
         seekFrameOffset = 0
         var consumed = 0
         do {
             for try await chunk in stream {
+                if sessionToken != myToken {
+                    logger.info("play(stream:): superseded by token=\(self.sessionToken, privacy: .public); exiting")
+                    return
+                }
                 try schedule(chunk)
                 consumed += 1
             }
@@ -179,11 +215,16 @@ public final class TTSPlaybackController {
         onWord: (@MainActor (TTSWordTiming) -> Void)? = nil,
         onPlaybackEnd: (@MainActor () -> Void)? = nil
     ) async throws {
+        // Same stop+session ordering as the simple play(stream:) overload —
+        // but stop() must happen *before* startStreamWordObserver, otherwise
+        // stop() would cancel the observer we just registered.
+        stop()
+        let myToken = beginSession()
         if let onWord {
             let events = await synthesizer.events()
             startStreamWordObserver(events: events, onWord: onWord)
         }
-        try await play(stream: stream, onPlaybackEnd: onPlaybackEnd)
+        try await drainStream(stream, token: myToken, onPlaybackEnd: onPlaybackEnd)
     }
 
     private func startStreamWordObserver(
