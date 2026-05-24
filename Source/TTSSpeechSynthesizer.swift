@@ -46,8 +46,6 @@ public actor TTSSpeechSynthesizer {
     /// `CancellationError` so the consumer sees a clean error rather than a
     /// crash.
     private var inFlightTasks: [UUID: Task<Void, Never>] = [:]
-    /// Observes app-lifecycle notifications. Cancelled in `deinit`.
-    private var lifecycleObserver: Task<Void, Never>?
 
     /// When `false` (the default), in-flight generation is cancelled the
     /// moment the app enters the background. Set to `true` only if the
@@ -64,31 +62,32 @@ public actor TTSSpeechSynthesizer {
     ) {
         self.modelStore = modelStore
         self.diagnosticHandler = diagnosticHandler
+        // The lifecycle observer is fire-and-forget: a fresh Task that holds
+        // a weak reference to self and exits its loop once self deallocates.
+        // We deliberately do NOT store the Task as `self.lifecycleObserver`
+        // because Swift 6 strict concurrency rejects assigning a Task that
+        // captures `self` into an actor's `var` from the nonisolated init.
+        // The trade-off: the observer Task lives until the next
+        // `didEnterBackgroundNotification` arrives after deallocation, at
+        // which point the `guard let self` returns and the loop ends.
+        // Synthesizers typically live for the app's lifetime, so this is a
+        // non-issue in practice.
         #if canImport(UIKit) && !os(watchOS)
-        self.lifecycleObserver = Task { [weak self] in
-            await self?.observeAppBackground()
+        Task { [weak self] in
+            let notifications = await MainActor.run {
+                NotificationCenter.default.notifications(
+                    named: UIApplication.didEnterBackgroundNotification
+                )
+            }
+            for await _ in notifications {
+                guard let self else { return }
+                if await !self.allowsBackgroundGeneration {
+                    await self.cancelAllInFlight(reason: .background)
+                }
+            }
         }
         #endif
     }
-
-    deinit {
-        lifecycleObserver?.cancel()
-    }
-
-    #if canImport(UIKit) && !os(watchOS)
-    private func observeAppBackground() async {
-        let notifications = await MainActor.run {
-            NotificationCenter.default.notifications(
-                named: UIApplication.didEnterBackgroundNotification
-            )
-        }
-        for await _ in notifications {
-            if Task.isCancelled { return }
-            guard !allowsBackgroundGeneration else { continue }
-            cancelAllInFlight(reason: .background)
-        }
-    }
-    #endif
 
     /// Cancel every in-flight generation Task. Streams that were in progress
     /// finish with a `CancellationError`; future `synthesize*` calls are
