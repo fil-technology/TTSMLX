@@ -8,6 +8,17 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ### Added
 
+- `TTSWordTiming { characterRange: Range<Int>, offset: TimeInterval,
+  duration: TimeInterval }` — one word's timing within a chunk. Ranges are in
+  the original input coordinate space so consumers can drop a highlight
+  straight on the source text.
+- `TTSChunkInfo.wordTimings(forDuration:)` — character-proportional word
+  timings for a chunk that tile exactly to the supplied duration (no rounding
+  drift on the final word). Useful for word-level highlight overlays without
+  per-token model callbacks.
+- `TTSDiagnostic.chunkTimings(modelID:chunkIndex:timings:)` — emitted by
+  `synthesizeLong` right after `.chunkFinished` once the chunk's actual
+  duration is known.
 - `TTSPlaybackController.currentTime: TimeInterval` — wall-clock seconds of
   audio actually rendered for the current session. Respects `seek(to:)` for
   file playback. Resets on `stop()`.

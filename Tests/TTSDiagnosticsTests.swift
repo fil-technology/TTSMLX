@@ -60,6 +60,59 @@ struct TTSErrorWrapTests {
     }
 }
 
+@Suite("TTSWordTiming")
+struct TTSWordTimingTests {
+    @Test("returns one timing per whitespace-separated word")
+    func wordCount() {
+        let info = TTSChunkInfo(text: "Hello world from TTSMLX", characterRange: 0..<23)
+        let timings = info.wordTimings(forDuration: 1.0)
+        #expect(timings.count == 4)
+    }
+
+    @Test("timings tile exactly to the chunk duration (no rounding drift)")
+    func tilesExactly() {
+        let info = TTSChunkInfo(text: "alpha beta gamma delta", characterRange: 0..<22)
+        let duration: TimeInterval = 1.234
+        let timings = info.wordTimings(forDuration: duration)
+        let last = timings.last!
+        #expect(abs((last.offset + last.duration) - duration) < 1e-9)
+    }
+
+    @Test("ranges are in the ORIGINAL input coordinate space")
+    func rangesInOriginal() {
+        // Simulate a chunk that starts at offset 100 in the original text.
+        let info = TTSChunkInfo(text: "one two", characterRange: 100..<107)
+        let timings = info.wordTimings(forDuration: 1.0)
+        #expect(timings[0].characterRange == 100..<103)
+        #expect(timings[1].characterRange == 104..<107)
+    }
+
+    @Test("zero or negative duration yields an empty array")
+    func emptyForZeroDuration() {
+        let info = TTSChunkInfo(text: "hello", characterRange: 0..<5)
+        #expect(info.wordTimings(forDuration: 0).isEmpty)
+        #expect(info.wordTimings(forDuration: -1).isEmpty)
+    }
+
+    @Test("whitespace-only chunk returns an empty array")
+    func emptyForWhitespace() {
+        let info = TTSChunkInfo(text: "   \n\t  ", characterRange: 0..<7)
+        #expect(info.wordTimings(forDuration: 1.0).isEmpty)
+    }
+
+    @Test("offsets are monotonically non-decreasing and non-negative")
+    func monotonic() {
+        let info = TTSChunkInfo(text: "a bb ccc dddd eeeee", characterRange: 0..<19)
+        let timings = info.wordTimings(forDuration: 2.0)
+        var prev: TimeInterval = -1
+        for t in timings {
+            #expect(t.offset >= prev)
+            #expect(t.duration >= 0)
+            prev = t.offset
+        }
+    }
+}
+
 @Suite("TTSError.errorDescription")
 struct TTSErrorDescriptionTests {
     @Test("descriptions include the model id and reason where appropriate")

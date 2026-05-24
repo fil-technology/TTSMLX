@@ -47,6 +47,13 @@ public enum TTSDiagnostic: Sendable {
 
     /// A long-form chunk finished streaming all its buffers.
     case chunkFinished(modelID: String, chunkIndex: Int, duration: TimeInterval)
+
+    /// Word-level timings for a long-form chunk, emitted right after
+    /// ``chunkFinished`` once the actual duration is known. Timings are
+    /// proportional to character weight; ranges are in the original input.
+    /// Use these to drive word-by-word highlight UIs without per-token
+    /// callbacks from the model. See ``TTSChunkInfo/wordTimings(forDuration:)``.
+    case chunkTimings(modelID: String, chunkIndex: Int, timings: [TTSWordTiming])
 }
 
 public typealias TTSDiagnosticHandler = @Sendable (TTSDiagnostic) -> Void

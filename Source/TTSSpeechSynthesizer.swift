@@ -357,11 +357,20 @@ public actor TTSSpeechSynthesizer {
                         }
                         continuation.yield(pcmChunk)
                     }
+                    let chunkDuration = Date().timeIntervalSince(chunkStartedAt)
                     await synthesizer.emitFromMain(.chunkFinished(
                         modelID: modelID,
                         chunkIndex: index,
-                        duration: Date().timeIntervalSince(chunkStartedAt)
+                        duration: chunkDuration
                     ))
+                    let timings = info.wordTimings(forDuration: chunkDuration)
+                    if !timings.isEmpty {
+                        await synthesizer.emitFromMain(.chunkTimings(
+                            modelID: modelID,
+                            chunkIndex: index,
+                            timings: timings
+                        ))
+                    }
                 }
                 progressHandler?(.init(
                     stage: .completed,
