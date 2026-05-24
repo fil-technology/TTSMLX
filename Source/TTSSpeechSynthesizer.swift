@@ -485,6 +485,137 @@ public actor TTSSpeechSynthesizer {
         )
     }
 
+    /// Bake the entire `text` into a self-contained, redistributable
+    /// ``TTSPreparedNarration`` bundle: per-chunk WAV files plus a manifest
+    /// with word-level timings. Intended for **author-time** use (build
+    /// scripts, demo apps) — the resulting bundle plays at runtime with
+    /// ``TTSPlaybackController/play(narration:onWord:onPlaybackEnd:)`` and
+    /// does **not** require MLX or the model to be loaded.
+    ///
+    /// The bundle is written atomically: each chunk is generated, measured,
+    /// and converted into a manifest entry before the manifest is flushed to
+    /// disk. If generation fails mid-way the partial directory is left in
+    /// place for inspection (no auto-cleanup, since author-time runs are
+    /// usually run by hand).
+    ///
+    /// - Parameter into: Directory URL for the bundle (e.g. ending in
+    ///   `.ttsnarration`). Created if missing.
+    @MainActor
+    public func prepareNarration(
+        _ text: String,
+        using model: TTSModelDescriptor = TTSMLX.defaultModels[0],
+        options: TTSSynthesisOptions = .init(),
+        into bundleURL: URL,
+        chunker: TTSTextChunker = .init(),
+        progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)? = nil
+    ) async throws -> TTSPreparedNarration {
+        let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { throw TTSError.emptyText }
+        let chunkInfos = chunker.chunkInfos(for: text)
+        guard !chunkInfos.isEmpty else { throw TTSError.emptyText }
+
+        let fileManager = FileManager.default
+        let chunksDirectory = bundleURL.appendingPathComponent("chunks", isDirectory: true)
+        try fileManager.createDirectory(at: chunksDirectory, withIntermediateDirectories: true)
+
+        var entries: [TTSPreparedNarrationManifest.ChunkEntry] = []
+        entries.reserveCapacity(chunkInfos.count)
+        var detectedSampleRate: Int = 0
+
+        for (index, info) in chunkInfos.enumerated() {
+            try Task.checkCancellation()
+            let filename = String(format: "chunks/%03d.wav", index)
+            let chunkURL = bundleURL.appendingPathComponent(filename, isDirectory: false)
+
+            let stream = try await synthesizeStream(
+                info.text,
+                using: model,
+                options: options,
+                progressHandler: progressHandler
+            )
+
+            var audioFile: AVAudioFile?
+            var frameCount: AVAudioFramePosition = 0
+            var chunkSampleRate: Double = 0
+            do {
+                for try await chunk in stream {
+                    try Task.checkCancellation()
+                    let buffer = chunk.buffer
+                    guard buffer.frameLength > 0 else { continue }
+                    if audioFile == nil {
+                        let format = buffer.format
+                        chunkSampleRate = format.sampleRate
+                        audioFile = try AVAudioFile(
+                            forWriting: chunkURL,
+                            settings: format.settings,
+                            commonFormat: format.commonFormat,
+                            interleaved: format.isInterleaved
+                        )
+                    }
+                    try audioFile?.write(from: buffer)
+                    frameCount += AVAudioFramePosition(buffer.frameLength)
+                }
+                audioFile = nil
+            } catch {
+                audioFile = nil
+                throw error
+            }
+
+            guard chunkSampleRate > 0, frameCount > 0 else {
+                throw TTSError.generationFailed(
+                    modelID: model.id,
+                    underlying: NSError(domain: "TTSPreparedNarration", code: -1, userInfo: [
+                        NSLocalizedDescriptionKey: "Chunk \(index) produced no audio."
+                    ])
+                )
+            }
+
+            let duration = TimeInterval(frameCount) / chunkSampleRate
+            let liveTimings = info.wordTimings(forDuration: duration)
+            let serialized = liveTimings.map { TTSPreparedNarrationManifest.SerializableWordTiming($0) }
+                .map { timing -> TTSPreparedNarrationManifest.SerializableWordTiming in
+                    // Re-anchor character ranges so they're relative to the
+                    // chunk's own text rather than the original input. The
+                    // runtime path can resolve back to the original via
+                    // `chunk.characterRange.start + word.characterRange.start`.
+                    let shifted = TTSPreparedNarrationManifest.SerializableRange(
+                        start: timing.characterRange.start - info.characterRange.lowerBound,
+                        end: timing.characterRange.end - info.characterRange.lowerBound
+                    )
+                    return TTSPreparedNarrationManifest.SerializableWordTiming(
+                        characterRange: shifted,
+                        offset: timing.offset,
+                        duration: timing.duration
+                    )
+                }
+
+            if detectedSampleRate == 0 {
+                detectedSampleRate = Int(chunkSampleRate.rounded())
+            }
+
+            entries.append(TTSPreparedNarrationManifest.ChunkEntry(
+                index: index,
+                audioFile: filename,
+                characterRange: TTSPreparedNarrationManifest.SerializableRange(info.characterRange),
+                text: info.text,
+                duration: duration,
+                wordTimings: serialized
+            ))
+        }
+
+        let manifest = TTSPreparedNarrationManifest(
+            modelID: model.id,
+            voice: options.voice?.identifier,
+            language: options.language?.identifier,
+            sourceText: text,
+            sampleRate: detectedSampleRate,
+            chunks: entries
+        )
+        let narration = TTSPreparedNarration(manifest: manifest, baseURL: bundleURL)
+        try narration.writeManifest()
+        return narration
+    }
+
     /// Get a synthesizer fully ready to play: warm up the model **and**
     /// pre-generate the first chunk so the first tap on Play hands the user
     /// audio immediately from cache instead of waiting for inference.

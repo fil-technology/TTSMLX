@@ -8,6 +8,23 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ### Added
 
+- `TTSPreparedNarration` + `TTSPreparedNarrationManifest` — self-contained,
+  redistributable bundle of pre-generated audio plus word-level timings.
+  Layout: directory with `manifest.json` + `chunks/NNN.wav`. Versioned schema
+  (`schemaVersion: 1`). Plays at runtime without MLX, the model, or a network
+  — designed for onboarding voiceovers, sample chapters, and reproducible
+  demos. `TTSPreparedNarrationError` covers manifest-missing / malformed /
+  schema-too-new / chunk-audio-missing.
+- `TTSSpeechSynthesizer.prepareNarration(_:using:options:into:chunker:progressHandler:)`
+  — author-time helper that chunks text, generates per-chunk WAVs into the
+  bundle, measures each chunk's duration, computes word timings, and writes
+  the manifest atomically.
+- `TTSPlaybackController.play(narration:onWord:onPlaybackEnd:)` — runtime
+  helper that schedules every chunk's WAV in order, reports `duration` as
+  the bundle total, and fires `onWord` callbacks against `currentTime` as
+  playback crosses each word boundary. Pitch-preserving speed control still
+  applies; word callbacks remain in sync at any rate because both
+  `currentTime` and the word timeline are expressed in source-audio seconds.
 - `TTSSpeechSynthesizer.events()` — typed `AsyncStream<TTSDiagnostic>` of
   every diagnostic the synthesizer emits. Prefer over the closure handler in
   SwiftUI consumers — drives a `for await event in await synthesizer.events()`
