@@ -6,6 +6,23 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- `startCharacterOffset: Int = 0` parameter on both
+  `streamAndCacheNarration` overloads and on `speakStreaming`. When
+  non-zero, the drain loop skips every chunk whose
+  `characterRange.upperBound <= startCharacterOffset` before any I/O or
+  event emission — no `chunkStarted` / `chunkFinished` / `chunkTimings`
+  fire for skipped chunks. The first chunk that straddles or exceeds
+  the offset is yielded normally for both REPLAY and GENERATION paths.
+  Cached chunks before the offset stay on disk untouched and remain
+  valid for a future call at offset 0. Audio still starts at the
+  beginning of the first yielded chunk (no sub-chunk seek API exists
+  yet), so a saved within-chunk pause position replays a short prefix
+  of that chunk before live sync catches up — but resume granularity
+  is now sub-chunk (~5–20 s window) rather than full-chunk (potentially
+  minutes).
+
 ## [0.6.0] - 2026-05-24
 
 A perf + reliability + ergonomics release. Live streaming now keeps

@@ -837,6 +837,18 @@ public actor TTSSpeechSynthesizer {
     /// Diagnostics (`chunkStarted`, `chunkFinished`, `chunkTimings`) are
     /// emitted whether the chunk replays from disk or generates fresh —
     /// the consumer's highlight UI doesn't need to distinguish.
+    ///
+    /// Pass `startCharacterOffset` to resume mid-text. Chunks whose
+    /// `characterRange.upperBound <= startCharacterOffset` are skipped
+    /// before any I/O or event emission — they emit no `chunkStarted` /
+    /// `chunkFinished` / `chunkTimings`. The first chunk that straddles
+    /// or exceeds the offset is yielded normally, whether it's a REPLAY
+    /// or GENERATION iteration. Cached chunks that fall before the
+    /// offset stay on disk untouched and remain valid for a future call
+    /// at offset 0. Audio still starts at the beginning of the first
+    /// yielded chunk — TTSMLX has no sub-chunk seek today — so callers
+    /// using a saved within-chunk position will hear a short replay of
+    /// the chunk prefix before live sync catches up.
     /// Sibling of ``streamAndCacheNarration(_:using:options:cacheBundleAt:chunker:progressHandler:)``
     /// that lets the framework own the on-disk location. The URL is
     /// derived from ``TTSAudioCache/narrationBundle(modelID:text:)`` —
@@ -851,6 +863,7 @@ public actor TTSSpeechSynthesizer {
         options: TTSSynthesisOptions = .init(),
         cache: TTSAudioCache,
         chunker: TTSTextChunker = .init(),
+        startCharacterOffset: Int = 0,
         progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)? = nil
     ) async throws -> AsyncThrowingStream<TTSAudioBufferChunk, Error> {
         let bundleURL = cache.narrationBundle(modelID: model.id, text: text)
@@ -862,6 +875,7 @@ public actor TTSSpeechSynthesizer {
             options: options,
             cacheBundleAt: bundleURL,
             chunker: chunker,
+            startCharacterOffset: startCharacterOffset,
             progressHandler: progressHandler
         )
     }
@@ -904,6 +918,7 @@ public actor TTSSpeechSynthesizer {
         cache: TTSAudioCache,
         playback: TTSPlaybackController,
         chunker: TTSTextChunker = .init(),
+        startCharacterOffset: Int = 0,
         onWord: (@MainActor (TTSWordTiming) -> Void)? = nil,
         onPlaybackEnd: (@MainActor () -> Void)? = nil,
         progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)? = nil
@@ -914,6 +929,7 @@ public actor TTSSpeechSynthesizer {
             options: options,
             cache: cache,
             chunker: chunker,
+            startCharacterOffset: startCharacterOffset,
             progressHandler: progressHandler
         )
         try await playback.play(
@@ -931,6 +947,7 @@ public actor TTSSpeechSynthesizer {
         options: TTSSynthesisOptions = .init(),
         cacheBundleAt bundleURL: URL,
         chunker: TTSTextChunker = .init(),
+        startCharacterOffset: Int = 0,
         progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)? = nil
     ) async throws -> AsyncThrowingStream<TTSAudioBufferChunk, Error> {
         let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -993,21 +1010,37 @@ public actor TTSSpeechSynthesizer {
 
         let cachedCount = workingEntries.count
         let totalChunks = chunkInfos.count
-        info("streamAndCacheNarration: ENTRY model=\(modelID) chunks=\(totalChunks) cached=\(cachedCount)/\(totalChunks) bundle=\(bundleURL.lastPathComponent)")
+        let offsetLog = startCharacterOffset > 0 ? " startCharacterOffset=\(startCharacterOffset)" : ""
+        info("streamAndCacheNarration: ENTRY model=\(modelID) chunks=\(totalChunks) cached=\(cachedCount)/\(totalChunks) bundle=\(bundleURL.lastPathComponent)\(offsetLog)")
 
         let (stream, continuation) = AsyncThrowingStream<TTSAudioBufferChunk, Error>.makeStream()
         let synthesizer = self
         let taskID = UUID()
         let lifecycle = self.lifecycle
+        let resumeOffset = max(0, startCharacterOffset)
 
         let drainTask = Task { @MainActor in
             defer {
                 Task { [synthesizer] in await synthesizer.untrackTask(id: taskID) }
             }
             do {
+                var skippedCount = 0
                 for (index, info) in chunkInfos.enumerated() {
                     try Task.checkCancellation()
                     if lifecycle.isShuttingDown { throw CancellationError() }
+                    // Skip chunks fully before the resume offset. Skipped
+                    // chunks emit no chunkStarted / chunkFinished /
+                    // chunkTimings — they're invisible to the consumer. The
+                    // check sits *before* any I/O so cached files on disk
+                    // stay untouched and remain valid for a future call at
+                    // offset 0.
+                    if info.characterRange.upperBound <= resumeOffset {
+                        skippedCount += 1
+                        continue
+                    }
+                    if skippedCount > 0, index == skippedCount {
+                        synthesizer.info("streamAndCacheNarration[\(modelID)]: SKIPPED \(skippedCount) chunk(s) before offset \(resumeOffset); resuming at chunk \(index + 1)/\(totalChunks)")
+                    }
                     let chunkFilename = String(format: "chunks/%03d.wav", index)
                     let chunkURL = subBundleURL.appendingPathComponent(chunkFilename, isDirectory: false)
                     let entry = workingEntries[index]

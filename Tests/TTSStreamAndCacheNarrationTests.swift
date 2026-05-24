@@ -370,6 +370,103 @@ struct TTSStreamAndCacheNarrationTests {
         #expect(!fm.fileExists(atPath: bundleURL.appendingPathComponent("chunks").path))
     }
 
+    @Test("startCharacterOffset=0 is a no-op: every chunk yielded")
+    func startOffsetZeroNoOp() async throws {
+        let bundleURL = try Self.tempBundle()
+        defer { try? FileManager.default.removeItem(at: bundleURL) }
+        try Self.buildHandBundle(
+            at: bundleURL, modelID: "test/model", voice: "tara",
+            sourceText: "Hello world from TTSMLX"
+        )
+        let synthesizer = TTSSpeechSynthesizer()
+        let model = TTSModelDescriptor(id: "test/model", capabilities: .init(isRuntimeSupported: true))
+        let chunker = TTSTextChunker(firstChunkCharacterLimit: 11, followupChunkCharacterLimit: 11)
+
+        let stream = try await synthesizer.streamAndCacheNarration(
+            "Hello world from TTSMLX", using: model,
+            options: TTSSynthesisOptions(voice: TTSVoice("tara")),
+            cacheBundleAt: bundleURL, chunker: chunker,
+            startCharacterOffset: 0
+        )
+        var count = 0
+        for try await _ in stream { count += 1 }
+        #expect(count == 2)
+    }
+
+    @Test("startCharacterOffset within first chunk yields both chunks")
+    func startOffsetWithinFirstChunk() async throws {
+        let bundleURL = try Self.tempBundle()
+        defer { try? FileManager.default.removeItem(at: bundleURL) }
+        try Self.buildHandBundle(
+            at: bundleURL, modelID: "test/model", voice: "tara",
+            sourceText: "Hello world from TTSMLX"
+        )
+        let synthesizer = TTSSpeechSynthesizer()
+        let model = TTSModelDescriptor(id: "test/model", capabilities: .init(isRuntimeSupported: true))
+        let chunker = TTSTextChunker(firstChunkCharacterLimit: 11, followupChunkCharacterLimit: 11)
+
+        // Offset 5: chunk 0 ends at upperBound=11 > 5, so it straddles and gets yielded.
+        let stream = try await synthesizer.streamAndCacheNarration(
+            "Hello world from TTSMLX", using: model,
+            options: TTSSynthesisOptions(voice: TTSVoice("tara")),
+            cacheBundleAt: bundleURL, chunker: chunker,
+            startCharacterOffset: 5
+        )
+        var count = 0
+        for try await _ in stream { count += 1 }
+        #expect(count == 2)
+    }
+
+    @Test("startCharacterOffset past first chunk skips it; second chunk yields")
+    func startOffsetSkipsFirstChunk() async throws {
+        let bundleURL = try Self.tempBundle()
+        defer { try? FileManager.default.removeItem(at: bundleURL) }
+        try Self.buildHandBundle(
+            at: bundleURL, modelID: "test/model", voice: "tara",
+            sourceText: "Hello world from TTSMLX"
+        )
+        let synthesizer = TTSSpeechSynthesizer()
+        let model = TTSModelDescriptor(id: "test/model", capabilities: .init(isRuntimeSupported: true))
+        let chunker = TTSTextChunker(firstChunkCharacterLimit: 11, followupChunkCharacterLimit: 11)
+
+        // Subscribe to events BEFORE call so we can assert no chunkStarted for index 0.
+        let events = await synthesizer.events()
+        let collector = Task { @MainActor () -> [Int] in
+            var startedIndices: [Int] = []
+            for await event in events {
+                if case let .chunkStarted(_, idx, _) = event {
+                    startedIndices.append(idx)
+                }
+                if case .streamingFinished = event { break }
+            }
+            return startedIndices
+        }
+
+        // chunk 0 upperBound=11; offset=12 makes 11 <= 12 → skip. chunk 1 yielded.
+        let stream = try await synthesizer.streamAndCacheNarration(
+            "Hello world from TTSMLX", using: model,
+            options: TTSSynthesisOptions(voice: TTSVoice("tara")),
+            cacheBundleAt: bundleURL, chunker: chunker,
+            startCharacterOffset: 12
+        )
+        var count = 0
+        for try await _ in stream { count += 1 }
+        #expect(count == 1)
+
+        // Skipped chunks emit no chunkStarted. The only chunkStarted seen
+        // should be for index 1.
+        // Synthesizer doesn't emit streamingFinished for streamAndCacheNarration,
+        // so we cancel the collector explicitly.
+        collector.cancel()
+        let startedIndices = await collector.value
+        #expect(!startedIndices.contains(0))
+
+        // Skipped chunk's cached file stays on disk for future offset=0 calls.
+        let fm = FileManager.default
+        let sub = TTSPreparedNarration.subBundleURL(in: bundleURL, voice: "tara", language: nil)
+        #expect(fm.fileExists(atPath: sub.appendingPathComponent("chunks/000.wav").path))
+    }
+
     // MARK: - Helpers
 
     static func tempBundle() throws -> URL {
