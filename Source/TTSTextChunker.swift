@@ -21,6 +21,83 @@ public struct TTSChunkInfo: Sendable, Hashable {
         self.text = text
         self.characterRange = characterRange
     }
+
+    /// Split this chunk's text into word-level timings, proportional to each
+    /// word's non-whitespace character count.
+    ///
+    /// MLX TTS models don't expose per-token timing consistently, so the
+    /// library falls back to a character-proportional estimate against the
+    /// chunk's measured `duration`. Quality is good enough for word-level
+    /// highlight overlays — at typical speech rates, character count tracks
+    /// word duration to within roughly ±15%.
+    ///
+    /// Returned ranges are in the **original input** coordinate space — same
+    /// as ``characterRange`` — so callers can map them straight onto the
+    /// source string without offset arithmetic. Pure whitespace chunks return
+    /// an empty array.
+    public func wordTimings(forDuration duration: TimeInterval) -> [TTSWordTiming] {
+        guard duration > 0, !text.isEmpty else { return [] }
+        let characters = Array(text)
+        let chunkStart = characterRange.lowerBound
+
+        // Identify word spans (half-open character offsets within the chunk).
+        var words: [Range<Int>] = []
+        var wordStart: Int? = nil
+        for (i, ch) in characters.enumerated() {
+            if ch.isWhitespace {
+                if let s = wordStart { words.append(s..<i); wordStart = nil }
+            } else if wordStart == nil {
+                wordStart = i
+            }
+        }
+        if let s = wordStart { words.append(s..<characters.count) }
+        guard !words.isEmpty else { return [] }
+
+        let totalWeight = words.reduce(0) { $0 + ($1.upperBound - $1.lowerBound) }
+        guard totalWeight > 0 else { return [] }
+        let weightedSecond = duration / Double(totalWeight)
+
+        // Walk words once, accumulating offset so timings tile [0, duration]
+        // without rounding drift.
+        var timings: [TTSWordTiming] = []
+        timings.reserveCapacity(words.count)
+        var cursor: TimeInterval = 0
+        for (index, span) in words.enumerated() {
+            let weight = Double(span.upperBound - span.lowerBound)
+            let raw = weight * weightedSecond
+            // For the last word, soak up any rounding remainder so the chunk
+            // tiles exactly. Avoids "missing 3ms at the end" highlight bugs.
+            let wordDuration = (index == words.count - 1)
+                ? max(0, duration - cursor)
+                : raw
+            timings.append(TTSWordTiming(
+                characterRange: (chunkStart + span.lowerBound)..<(chunkStart + span.upperBound),
+                offset: cursor,
+                duration: wordDuration
+            ))
+            cursor += wordDuration
+        }
+        return timings
+    }
+}
+
+/// One word's timing within a chunk. Emitted by
+/// ``TTSChunkInfo/wordTimings(forDuration:)`` and the synthesizer's
+/// ``TTSDiagnostic/chunkTimings(modelID:chunkIndex:timings:)`` event.
+///
+/// `characterRange` is in the **original input** coordinate space (same as
+/// ``TTSChunkInfo/characterRange``), so apps can drop a highlight straight on
+/// the source text. `offset` is relative to the chunk's first audible buffer.
+public struct TTSWordTiming: Sendable, Hashable {
+    public let characterRange: Range<Int>
+    public let offset: TimeInterval
+    public let duration: TimeInterval
+
+    public init(characterRange: Range<Int>, offset: TimeInterval, duration: TimeInterval) {
+        self.characterRange = characterRange
+        self.offset = offset
+        self.duration = duration
+    }
 }
 
 /// Splits long text into TTS-friendly chunks.

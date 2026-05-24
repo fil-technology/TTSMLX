@@ -117,6 +117,22 @@ public actor TTSPrefetchQueue {
         workTask?.cancel()
     }
 
+    /// Atomically swap the pending queue. Drops every queued item, leaves the
+    /// in-flight item alone (it'll finish, then the new queue takes over).
+    /// Use this for voice or model switches mid-session — the new requests'
+    /// cache keys differ (voice is part of the key) so previously-prefetched
+    /// audio for the old voice stays cached and doesn't get regenerated.
+    ///
+    /// Returns the number of newly enqueued items after de-dup against the
+    /// cache. The currently-running generation, if any, finishes on the old
+    /// voice; the next chunk plays in the new voice.
+    @discardableResult
+    public func replace(_ requests: [TTSPrefetchRequest]) async -> Int {
+        pending.removeAll()
+        await enqueue(requests)
+        return pending.count
+    }
+
     // MARK: - Internals
 
     private func startIfNeeded() {

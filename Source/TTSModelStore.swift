@@ -697,11 +697,25 @@ private extension TTSModelStore {
 
     static func defaultModelCacheRoots() -> [URL] {
         let home = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+        #if os(iOS) || os(tvOS) || os(watchOS) || os(visionOS)
+        return [
+            home.appendingPathComponent("Library/Caches/huggingface/hub", isDirectory: true),
+            home.appendingPathComponent("Library/Application Support/huggingface/hub", isDirectory: true)
+        ]
+        #else
+        let isSandboxed = ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil
+        if isSandboxed {
+            return [
+                home.appendingPathComponent("Library/Caches/huggingface/hub", isDirectory: true),
+                home.appendingPathComponent("Library/Application Support/huggingface/hub", isDirectory: true)
+            ]
+        }
         return [
             home.appendingPathComponent(".cache/huggingface/hub", isDirectory: true),
             home.appendingPathComponent("Library/Caches/huggingface/hub", isDirectory: true),
             home.appendingPathComponent("Library/Application Support/huggingface/hub", isDirectory: true)
         ]
+        #endif
     }
 
     func modelCacheRoots() -> [URL] {
@@ -728,11 +742,29 @@ private extension TTSModelStore {
         return total
     }
 
+}
+
+extension TTSModelStore {
     func downloadModelSnapshot(
         descriptor: TTSModelDescriptor,
         hfToken: String?,
         progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)?
     ) async throws {
+        if let baseURL = descriptor.modelURL, let files = descriptor.files {
+            let cacheRoot = modelCacheRoots().first ?? TTSModelStore.defaultModelCacheRoots().first!
+            let modelDirectory = cacheRoot
+                .appendingPathComponent("mlx-audio", isDirectory: true)
+                .appendingPathComponent(descriptor.id.replacingOccurrences(of: "/", with: "_"), isDirectory: true)
+
+            try await downloadDirect(
+                baseURL: baseURL,
+                files: files,
+                to: modelDirectory,
+                progressHandler: progressHandler
+            )
+            return
+        }
+
         guard let repoID = Repo.ID(rawValue: descriptor.id) else {
             throw TTSError.modelNotFound(descriptor.id)
         }
@@ -780,6 +812,99 @@ private extension TTSModelStore {
         )
     }
 
+    private func downloadDirect(
+        baseURL: URL,
+        files: [String],
+        to destinationDir: URL,
+        progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)?
+    ) async throws {
+        try fileManager.createDirectory(at: destinationDir, withIntermediateDirectories: true)
+
+        // 1. Fetch Content-Lengths via parallel HEAD requests to validate and sum lengths
+        var contentLengths: [String: Int64] = [:]
+        try await withThrowingTaskGroup(of: (String, Int64).self) { group in
+            for file in files {
+                let fileURL = baseURL.appendingPathComponent(file)
+                group.addTask {
+                    var request = URLRequest(url: fileURL)
+                    request.httpMethod = "HEAD"
+                    let (_, response) = try await self.session.data(for: request)
+                    guard let httpResponse = response as? HTTPURLResponse else {
+                        return (file, 0)
+                    }
+                    guard (200..<300).contains(httpResponse.statusCode) else {
+                        throw TTSError.modelDownloadFailed(file: file, status: httpResponse.statusCode)
+                    }
+                    let contentLength = httpResponse.expectedContentLength
+                    return (file, contentLength > 0 ? contentLength : 0)
+                }
+            }
+            for try await (file, length) in group {
+                contentLengths[file] = length
+            }
+        }
+
+        let totalUnitCount = contentLengths.values.reduce(0, +)
+        let completedBytes = SafeCounter()
+
+        // 2. Download files sequentially and track progress
+        for file in files {
+            let fileURL = baseURL.appendingPathComponent(file)
+            let destinationURL = destinationDir.appendingPathComponent(file)
+
+            try fileManager.createDirectory(at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+
+            let fileBytesWritten = SafeCounter()
+            let delegate = DownloadProgressDelegate { bytesWritten in
+                _ = fileBytesWritten.add(bytesWritten)
+                let currentCompleted = completedBytes.add(bytesWritten)
+
+                if let progressHandler {
+                    let fraction = totalUnitCount > 0 ? Double(currentCompleted) / Double(totalUnitCount) : nil
+                    let percent = fraction != nil ? "\(Int((fraction ?? 0) * 100))%" : "in progress"
+                    Task { @MainActor in
+                        progressHandler(.init(
+                            stage: .downloadingModel,
+                            fractionCompleted: fraction,
+                            message: "Downloading model files... \(percent)"
+                        ))
+                    }
+                }
+            }
+
+            let (tempURL, response) = try await session.download(for: URLRequest(url: fileURL), delegate: delegate)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw TTSError.invalidResponse
+            }
+            guard (200..<300).contains(httpResponse.statusCode) else {
+                throw TTSError.modelDownloadFailed(file: file, status: httpResponse.statusCode)
+            }
+
+            if fileManager.fileExists(atPath: destinationURL.path) {
+                try fileManager.removeItem(at: destinationURL)
+            }
+            try fileManager.moveItem(at: tempURL, to: destinationURL)
+
+            // Top-up progress for the completed file to handle protocols or mocks bypassing progress delegate
+            let fileSize = contentLengths[file] ?? 0
+            let remainingBytes = max(0, fileSize - fileBytesWritten.get())
+            if remainingBytes > 0 {
+                let currentCompleted = completedBytes.add(remainingBytes)
+                if let progressHandler {
+                    let fraction = totalUnitCount > 0 ? Double(currentCompleted) / Double(totalUnitCount) : nil
+                    let percent = fraction != nil ? "\(Int((fraction ?? 0) * 100))%" : "in progress"
+                    await progressHandler(.init(
+                        stage: .downloadingModel,
+                        fractionCompleted: fraction,
+                        message: "Downloading model files... \(percent)"
+                    ))
+                }
+            }
+        }
+    }
+}
+
+private extension TTSModelStore {
     func inferredRequiredExtension(for modelID: String) -> String {
         let lower = modelID.lowercased()
         if lower.contains("qwen3-tts") || lower.contains("qwen3_tts") {
@@ -842,5 +967,49 @@ private extension TTSModelStore {
         guard fileManager.fileExists(atPath: url.path) else { return nil }
         guard let data = try? Data(contentsOf: url) else { return nil }
         return try? JSONDecoder().decode(ModelConfig.self, from: data)
+    }
+}
+
+private final class DownloadProgressDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+    private let onProgress: @Sendable (Int64) -> Void
+
+    init(onProgress: @escaping @Sendable (Int64) -> Void) {
+        self.onProgress = onProgress
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didWriteData bytesWritten: Int64,
+        totalBytesWritten: Int64,
+        totalBytesExpectedToWrite: Int64
+    ) {
+        onProgress(bytesWritten)
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didFinishDownloadingTo location: URL
+    ) {
+        // Handled by URLSession.download async return
+    }
+}
+
+private final class SafeCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Int64 = 0
+
+    func add(_ amount: Int64) -> Int64 {
+        lock.lock()
+        defer { lock.unlock() }
+        value += amount
+        return value
+    }
+
+    func get() -> Int64 {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
     }
 }

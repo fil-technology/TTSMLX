@@ -126,8 +126,15 @@ final class DemoModel {
         selectedModel.capabilities.isRuntimeSupported
     }
 
+    let customModels = CustomModelRegistry()
+    let playbackController = TTSPlaybackController()
     private let synthesizer = TTSSpeechSynthesizer()
     private let store = TTSModelStore()
+    let bundleCache: TTSAudioCache = {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let dir = docs.appendingPathComponent("ManagedBundleCache", isDirectory: true)
+        return (try? TTSAudioCache(directoryURL: dir))!
+    }()
     private var audioPlayer: AVAudioPlayer?
     private var streamingEngine: AVAudioEngine?
     private var streamingNode: AVAudioPlayerNode?
@@ -171,7 +178,7 @@ final class DemoModel {
 
     var allModels: [TTSModelDescriptor] {
         var seen = Set<String>()
-        let merged = recommendedModels + searchedModels + installedModels.map(\.descriptor)
+        let merged = recommendedModels + searchedModels + installedModels.map(\.descriptor) + customModels.descriptors
         return merged.filter { seen.insert($0.id).inserted }
     }
 
@@ -928,6 +935,218 @@ final class DemoModel {
         guard !availableModelIDs.isEmpty else { return }
         guard availableModelIDs.contains(selectedModelID) == false else { return }
         selectedModelID = recommendedModels.first?.id ?? allModels.first?.id ?? selectedModelID
+    }
+
+    // MARK: - Bundles
+
+    enum BakeMode: Hashable {
+        case oneShot
+        case streamCache
+
+        var title: String {
+            switch self {
+            case .oneShot: return "One-shot bake"
+            case .streamCache: return "Stream + cache"
+            }
+        }
+    }
+
+    struct PreparedBundleEntry: Identifiable, Hashable {
+        /// Composite ID — same bundleURL can yield multiple variants.
+        let id: String
+        /// The bundle directory (the `.ttsnarration` root).
+        let bundleURL: URL
+        /// The sub-bundle URL (or `bundleURL` itself for legacy single-voice bundles).
+        let url: URL
+        let modelID: String
+        let voice: String?
+        let language: String?
+        let sourceText: String
+        let chunkCount: Int
+        let totalDuration: TimeInterval
+        let createdAt: Date
+        let modifiedAt: Date
+
+        var displayName: String { bundleURL.lastPathComponent }
+
+        var variantDescription: String {
+            let v = voice?.isEmpty == false ? voice! : "Automatic voice"
+            let l = language?.isEmpty == false ? language! : "Automatic language"
+            return "\(v) · \(l)"
+        }
+
+        var sourcePreview: String {
+            let trimmed = sourceText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.count <= 80 { return trimmed }
+            return String(trimmed.prefix(80)) + "..."
+        }
+    }
+
+    var bundlesDirectory: URL {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let url = docs.appendingPathComponent("Bundles", isDirectory: true)
+        if !FileManager.default.fileExists(atPath: url.path) {
+            try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        }
+        return url
+    }
+
+    func bakedBundles() -> [PreparedBundleEntry] {
+        let dir = bundlesDirectory
+        let fm = FileManager.default
+        let suffix = "." + TTSPreparedNarration.bundleExtension
+        guard let contents = try? fm.contentsOfDirectory(
+            at: dir,
+            includingPropertiesForKeys: [.contentModificationDateKey, .isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+        var entries: [PreparedBundleEntry] = []
+        for bundleURL in contents where bundleURL.lastPathComponent.hasSuffix(suffix) {
+            let variants = TTSPreparedNarration.availableVariants(at: bundleURL)
+            if variants.isEmpty {
+                // Legacy: try loading the root-level manifest.
+                guard let narration = try? TTSPreparedNarration(importing: bundleURL) else { continue }
+                let manifest = narration.manifest
+                let attrs = try? fm.attributesOfItem(atPath: bundleURL.path)
+                let modified = (attrs?[.modificationDate] as? Date) ?? manifest.createdAt
+                entries.append(PreparedBundleEntry(
+                    id: bundleURL.path,
+                    bundleURL: bundleURL,
+                    url: bundleURL,
+                    modelID: manifest.modelID,
+                    voice: manifest.voice,
+                    language: manifest.language,
+                    sourceText: manifest.sourceText,
+                    chunkCount: manifest.chunks.count,
+                    totalDuration: narration.totalDuration,
+                    createdAt: manifest.createdAt,
+                    modifiedAt: modified
+                ))
+                continue
+            }
+            for variant in variants {
+                let subURL = TTSPreparedNarration.subBundleURL(
+                    in: bundleURL, voice: variant.voice, language: variant.language
+                )
+                guard let narration = try? TTSPreparedNarration(importing: subURL) else { continue }
+                let manifest = narration.manifest
+                let attrs = try? fm.attributesOfItem(atPath: subURL.path)
+                let modified = (attrs?[.modificationDate] as? Date) ?? manifest.createdAt
+                entries.append(PreparedBundleEntry(
+                    id: subURL.path,
+                    bundleURL: bundleURL,
+                    url: subURL,
+                    modelID: manifest.modelID,
+                    voice: manifest.voice,
+                    language: manifest.language,
+                    sourceText: manifest.sourceText,
+                    chunkCount: manifest.chunks.count,
+                    totalDuration: narration.totalDuration,
+                    createdAt: manifest.createdAt,
+                    modifiedAt: modified
+                ))
+            }
+        }
+        return entries.sorted { $0.modifiedAt > $1.modifiedAt }
+    }
+
+    func bake(
+        text: String,
+        model: TTSModelDescriptor,
+        voice: TTSVoice?,
+        filename: String,
+        mode: BakeMode,
+        useManagedCache: Bool = false
+    ) async throws {
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanName = filename.trimmingCharacters(in: .whitespacesAndNewlines)
+        let bundleName: String
+        let suffix = "." + TTSPreparedNarration.bundleExtension
+        if cleanName.hasSuffix(suffix) {
+            bundleName = cleanName
+        } else {
+            bundleName = cleanName + suffix
+        }
+        let bundleURL = bundlesDirectory.appendingPathComponent(bundleName, isDirectory: true)
+
+        let opts = TTSSynthesisOptions(
+            voice: voice,
+            generationProfile: model.capabilities.defaultGenerationProfile
+        )
+
+        activityState = .generating
+        progressMessage = "Baking \(bundleName)..."
+        progressValue = 0
+        defer {
+            progressMessage = ""
+            progressValue = nil
+            if activityState == .generating {
+                activityState = .idle
+            }
+        }
+
+        switch mode {
+        case .oneShot:
+            _ = try await synthesizer.prepareNarration(
+                trimmedText,
+                using: model,
+                options: opts,
+                into: bundleURL,
+                progressHandler: { update in
+                    self.apply(progress: update)
+                }
+            )
+        case .streamCache:
+            let stream: AsyncThrowingStream<TTSAudioBufferChunk, Error>
+            if useManagedCache {
+                stream = try await synthesizer.streamAndCacheNarration(
+                    trimmedText,
+                    using: model,
+                    options: opts,
+                    cache: bundleCache,
+                    progressHandler: { update in
+                        self.apply(progress: update)
+                    }
+                )
+            } else {
+                stream = try await synthesizer.streamAndCacheNarration(
+                    trimmedText,
+                    using: model,
+                    options: opts,
+                    cacheBundleAt: bundleURL,
+                    progressHandler: { update in
+                        self.apply(progress: update)
+                    }
+                )
+            }
+            for try await _ in stream {}
+        }
+        status = "Baked \(bundleName)"
+    }
+
+    func playBundle(
+        at url: URL,
+        onWord: (@MainActor (TTSWordTiming) -> Void)? = nil,
+        onPlaybackEnd: (@MainActor () -> Void)? = nil
+    ) throws {
+        let narration = try TTSPreparedNarration(importing: url)
+        try playbackController.play(narration: narration, onWord: onWord, onPlaybackEnd: onPlaybackEnd)
+        status = "Playing \(url.lastPathComponent)"
+    }
+
+    func stopBundlePlayback() {
+        playbackController.stop()
+    }
+
+    func deleteBundle(at url: URL) {
+        do {
+            try FileManager.default.removeItem(at: url)
+            status = "Deleted \(url.lastPathComponent)"
+        } catch {
+            status = "Could not delete bundle: \(error.localizedDescription)"
+        }
     }
 }
 

@@ -305,6 +305,131 @@ struct TTSModelStoreTests {
         #expect(moss.modelURL?.absoluteString == "https://huggingface.co/OpenMOSS-Team/MOSS-TTS-Nano")
         #expect(moss.supportedLanguages.contains(.greek))
     }
+
+    @Test("direct model download via static host works")
+    func directModelDownloadWorks() async throws {
+        let temporaryRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temporaryRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporaryRoot) }
+
+        let requestedUrls = DirectDownloadTestArray<String>()
+        let headRequestsCount = DirectDownloadTestCounter()
+        let getRequestsCount = DirectDownloadTestCounter()
+
+        let session = makeSession { request in
+            let url = try #require(request.url)
+            requestedUrls.append(url.absoluteString)
+
+            if request.httpMethod == "HEAD" {
+                headRequestsCount.increment()
+                let response = try #require(HTTPURLResponse(
+                    url: url,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Length": "100"]
+                ))
+                return (response, Data())
+            } else if request.httpMethod == "GET" {
+                getRequestsCount.increment()
+                let response = try #require(HTTPURLResponse(
+                    url: url,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Length": "100"]
+                ))
+                return (response, Data(repeating: 7, count: 100))
+            }
+
+            throw TestHTTPError.unhandledRequest(url.absoluteString)
+        }
+
+        let store = TTSModelStore(session: session, cacheRoots: [temporaryRoot])
+        
+        let descriptor = TTSModelDescriptor(
+            id: "mlx-community/pocket-tts",
+            modelURL: URL(string: "https://r2.my-weights-mirror.com/pocket-tts"),
+            files: [
+                "config.json",
+                "embeddings/alba.safetensors",
+                "model.safetensors"
+            ]
+        )
+
+        let progressUpdates = DirectDownloadTestArray<TTSProgressUpdate>()
+        try await store.downloadModelSnapshot(
+            descriptor: descriptor,
+            hfToken: nil,
+            progressHandler: { update in
+                progressUpdates.append(update)
+            }
+        )
+
+        // Give async progress reporting tasks a moment to run
+        try await Task.sleep(nanoseconds: 10_000_000)
+
+        #expect(headRequestsCount.get() == 3)
+        #expect(getRequestsCount.get() == 3)
+        #expect(requestedUrls.get().count == 6)
+        #expect(progressUpdates.get().count > 0)
+        #expect(progressUpdates.get().contains { $0.stage == .downloadingModel })
+
+        // Check folder structure and contents
+        let localDir = temporaryRoot
+            .appendingPathComponent("mlx-audio", isDirectory: true)
+            .appendingPathComponent("mlx-community_pocket-tts", isDirectory: true)
+
+        let file1 = localDir.appendingPathComponent("config.json")
+        let file2 = localDir.appendingPathComponent("embeddings/alba.safetensors")
+        let file3 = localDir.appendingPathComponent("model.safetensors")
+
+        #expect(FileManager.default.fileExists(atPath: file1.path))
+        #expect(FileManager.default.fileExists(atPath: file2.path))
+        #expect(FileManager.default.fileExists(atPath: file3.path))
+
+        #expect(try Data(contentsOf: file1).count == 100)
+        #expect(try Data(contentsOf: file2).count == 100)
+        #expect(try Data(contentsOf: file3).count == 100)
+    }
+
+    @Test("direct model download fails with modelDownloadFailed on non-2xx status")
+    func directModelDownloadFailsOnHttpError() async throws {
+        let temporaryRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temporaryRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporaryRoot) }
+
+        let session = makeSession { request in
+            let url = try #require(request.url)
+
+            if request.httpMethod == "HEAD" {
+                let response = try #require(HTTPURLResponse(
+                    url: url,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: nil
+                ))
+                return (response, Data())
+            }
+            throw TestHTTPError.unhandledRequest(url.absoluteString)
+        }
+
+        let store = TTSModelStore(session: session, cacheRoots: [temporaryRoot])
+        
+        let descriptor = TTSModelDescriptor(
+            id: "mlx-community/pocket-tts",
+            modelURL: URL(string: "https://r2.my-weights-mirror.com/pocket-tts"),
+            files: ["config.json"]
+        )
+
+        await #expect(throws: TTSError.self) {
+            try await store.downloadModelSnapshot(
+                descriptor: descriptor,
+                hfToken: nil,
+                progressHandler: nil
+            )
+        }
+    }
 }
 
 private enum TestHTTPError: Error {
@@ -355,4 +480,38 @@ private func httpJSONResponse(url: URL, body: Any) throws -> (HTTPURLResponse, D
     let data = try JSONSerialization.data(withJSONObject: body)
     let response = try #require(HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil))
     return (response, data)
+}
+
+private final class DirectDownloadTestCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    func increment() {
+        lock.lock()
+        defer { lock.unlock() }
+        count += 1
+    }
+
+    func get() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return count
+    }
+}
+
+private final class DirectDownloadTestArray<T: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var elements: [T] = []
+
+    func append(_ element: T) {
+        lock.lock()
+        defer { lock.unlock() }
+        elements.append(element)
+    }
+
+    func get() -> [T] {
+        lock.lock()
+        defer { lock.unlock() }
+        return elements
+    }
 }

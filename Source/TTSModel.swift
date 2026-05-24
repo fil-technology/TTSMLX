@@ -8,6 +8,8 @@ public struct TTSModelDescriptor: Sendable, Hashable, Identifiable, Codable {
     public let suggestedVoices: [TTSVoice]
     public let capabilities: TTSModelCapabilities
     public let metadata: TTSModelMetadata?
+    public let modelURL: URL?
+    public let files: [String]?
 
     public init(
         id: String,
@@ -16,7 +18,9 @@ public struct TTSModelDescriptor: Sendable, Hashable, Identifiable, Codable {
         supportedLanguages: [TTSLanguage] = [],
         suggestedVoices: [TTSVoice] = [],
         capabilities: TTSModelCapabilities = .init(),
-        metadata: TTSModelMetadata? = nil
+        metadata: TTSModelMetadata? = nil,
+        modelURL: URL? = nil,
+        files: [String]? = nil
     ) {
         self.id = id
         self.displayName = displayName ?? id
@@ -25,6 +29,8 @@ public struct TTSModelDescriptor: Sendable, Hashable, Identifiable, Codable {
         self.suggestedVoices = suggestedVoices
         self.capabilities = capabilities
         self.metadata = metadata
+        self.modelURL = modelURL
+        self.files = files
     }
 }
 
@@ -36,9 +42,23 @@ public struct TTSModelCapabilities: Sendable, Hashable, Codable {
     public let defaultGenerationProfile: TTSGenerationProfile
     public let supportsStreaming: Bool
     /// Empirical peak resident memory in MB while generating. `nil` means unknown.
+    ///
+    /// Prefer this over ``minimumDeviceClass`` for any **memory-pressure**
+    /// reason — it's gateable per-device without hand-curating per-class
+    /// lists, and it doesn't punish a 6GB iPhone for being an iPhone when
+    /// the model fits comfortably (see Pocket-TTS regression in 0.5.0).
     public let peakMemoryMB: Int?
-    /// Smallest device class known to run this model without OOM crashes.
-    /// `nil` means we don't have data and the caller should treat as "unverified".
+    /// Smallest device class needed for a **non-memory** reason — e.g. the
+    /// model needs ANE-only kernels, GPU features absent on older A-series
+    /// chips, or a jetsam headroom that's tighter than `peakMemoryMB` alone
+    /// can express. `nil` means no class-level constraint.
+    ///
+    /// **Do not** use this as a shortcut for "feels like it might OOM on
+    /// iPhone." Use `peakMemoryMB` for that — it's the empirically correct
+    /// gate. Every entry that sets this above the smallest class
+    /// `peakMemoryMB` would allow on a modern 8GB iPhone needs a code
+    /// comment explaining the non-memory reason; otherwise it's redundant
+    /// and should be removed.
     public let minimumDeviceClass: TTSDeviceClass?
 
     public init(
