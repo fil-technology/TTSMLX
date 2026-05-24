@@ -6,6 +6,24 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Metal-in-background crash** definitively. The Swift defenses we
+  shipped in 0.6.0 (synchronous shutdown flag, GPU stream synchronize
+  on `willResignActive`, drain-task cancellation) prevent new MLX
+  submissions after backgrounding but cannot prevent Metal from firing
+  completion handlers on buffers that were already submitted. Those
+  handlers run on Metal's callback thread and throw `std::runtime_error`
+  from `mlx::core::gpu::check_error` when the buffer reports
+  `Insufficient Permission (to submit GPU work from background)` —
+  unreachable by Swift try-catch, so the process dies. The fix is a
+  C++ patch to `mlx-swift`'s submodule `mlx` (file
+  `Source/Cmlx/mlx/mlx/backend/metal/eval.cpp`): `check_error` now
+  swallows the specific background-permission error and returns
+  cleanly. All other Metal errors still throw as before. Patch saved
+  at `Patches/mlx-c-0.31.3-background-safe-check_error.patch`; fork
+  steps in `Docs/mlx-swift-bg-safe-fork.md`.
+
 ### Added
 
 - `startCharacterOffset: Int = 0` parameter on both

@@ -1,0 +1,44 @@
+diff --git a/mlx/backend/metal/eval.cpp b/mlx/backend/metal/eval.cpp
+index bd58a691..c047621a 100644
+--- a/mlx/backend/metal/eval.cpp
++++ b/mlx/backend/metal/eval.cpp
+@@ -1,4 +1,6 @@
+ // Copyright © 2023-2024 Apple Inc.
++#include <cstdio>
++#include <cstring>
+ #include <memory>
+ 
+ #include "mlx/backend/gpu/eval.h"
+@@ -17,9 +19,30 @@ void new_stream(Stream stream) {
+ 
+ inline void check_error(MTL::CommandBuffer* cbuf) {
+   if (cbuf->status() == MTL::CommandBufferStatusError) {
++    auto* err = cbuf->error();
++    const char* desc =
++        (err && err->localizedDescription())
++        ? err->localizedDescription()->utf8String()
++        : "(no description)";
++    // iOS revokes GPU access whenever the host app transitions to the
++    // background. Metal still fires completion handlers for buffers
++    // that were already submitted when the clamp landed; rethrowing
++    // here would terminate the process with an uncaught C++ exception
++    // from Metal's callback thread, which no Swift try-catch can reach.
++    // The Swift framework layer is responsible for stopping NEW
++    // submissions on backgrounding — this swallow only covers in-flight
++    // buffers that were submitted before the lifecycle signal arrived.
++    // Other Metal errors still throw as before.
++    if (desc != nullptr &&
++        std::strstr(desc, "submit GPU work from background") != nullptr) {
++      std::fprintf(
++          stderr,
++          "[mlx] Metal command buffer aborted by iOS background clamp; "
++          "ignoring (host app backgrounded mid-flight).\n");
++      return;
++    }
+     std::ostringstream msg;
+-    msg << "[METAL] Command buffer execution failed: "
+-        << cbuf->error()->localizedDescription()->utf8String();
++    msg << "[METAL] Command buffer execution failed: " << desc;
+     throw std::runtime_error(msg.str());
+   }
+ }

@@ -9,3 +9,7 @@ DerivedData/
 *.xcworkspace/xcuserdata/
 *.xcodeproj/xcuserdata/
 *.xcuserstate
+
+
+# SwiftPM local-edit checkouts (per-machine state, not part of source tree)
+Packages/
