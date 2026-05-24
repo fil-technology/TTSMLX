@@ -6,6 +6,144 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-05-24
+
+A perf + reliability + ergonomics release. Live streaming now keeps
+weights resident across calls, runs off the main thread, survives
+backgrounding without crashing, and drives word highlights from actual
+playback time. Voice switching is independent (per-voice sub-bundles)
+and clean (model eviction on variant change). The framework now owns
+the on-disk bundle layout via `TTSAudioCache`, and a one-call
+`speakStreaming(...)` helper collapses the canonical reader-app flow.
+
+### Added
+
+- `TTSSpeechSynthesizer.speakStreaming(text:using:options:cache:playback:onWord:onPlaybackEnd:progressHandler:)`
+  — one-call reader flow that wires streaming + cache + playback +
+  playback-driven word highlighting. Replaces the four-call wiring most
+  consumers had to assemble themselves.
+- `TTSAudioCache.narrationBundle(modelID:text:)`,
+  `availableVariants(modelID:text:)`, and `migrate(from:)` — the
+  framework now owns bundle URL derivation. Voice and language coexist
+  as per-voice sub-bundles inside the same parent URL.
+- `TTSSpeechSynthesizer.streamAndCacheNarration(_:using:options:cache:chunker:progressHandler:)`
+  overload that uses `TTSAudioCache` for URL derivation. The original
+  `cacheBundleAt: URL` variant stays for export/distribution flows.
+- `TTSPlaybackController.play(stream:synthesizer:onWord:onPlaybackEnd:)`
+  — playback-driven word highlighting for streaming synthesis.
+  Subscribes to `synthesizer.events()`, builds an absolute-time
+  timeline as `chunkFinished` / `chunkTimings` events arrive, and
+  fires `onWord` based on `AVAudioPlayerNode.currentTime`. Replaces
+  event-driven highlighting, which leads the audio by however much was
+  buffered ahead.
+- `TTSDiagnostic.modelLoadServedFromCache(modelID:)` — emitted when
+  `prepareModel` reused a previously-loaded `SpeechGenerationModel`
+  instance instead of running the load pipeline.
+- `TTSDiagnostic.cancelledByBackground(cancelledCount:)` — emitted when
+  the framework auto-cancels in-flight generation in response to a
+  background-lifecycle notification.
+- `TTSSpeechSynthesizer.cancelAllInFlight(reason:)` — cancel every
+  tracked drain Task synchronously; safe to call from any isolation.
+- `TTSSpeechSynthesizer.allowsBackgroundGeneration: Bool` — opt-in for
+  apps that own their own `UIApplication.beginBackgroundTask` assertion
+  and accept that iOS still rejects Metal compute regardless.
+- `TTSPreparedNarration.subBundleURL(in:voice:language:)`,
+  `subBundleSlug(voice:language:)`, `availableVariants(at:)`, and
+  `init(importing:voice:language:)` — public surface for the new
+  per-voice sub-bundle layout. Legacy single-voice bundles auto-migrate
+  on first use.
+- `TTSError.modelDownloadFailed(file:status:)` — distinct case for
+  per-file failures during the direct-host (non-HF) download path.
+- Direct-host model downloads: `TTSModelDescriptor.modelURL` + `files`
+  let descriptors declare a static base URL plus a file list, bypassing
+  the HF resolver. Suitable for self-hosted (e.g. Cloudflare R2) models.
+
+### Changed
+
+- `TTSSpeechSynthesizer` now caches loaded `SpeechGenerationModel`
+  instances across calls. `warmUp(_:hfToken:progressHandler:)` actually
+  keeps weights resident now; `unload(_:)`, `unloadAll()`, and
+  `handleMemoryWarning()` drop them for real.
+- Variant-aware cache eviction: switching `(voice, language)` evicts
+  the cached instance and reloads from disk (~300 ms). Prevents
+  residual state in upstream layers (Mimi, FlowLM, ProjectedTransformer)
+  from leaking voice-A character into voice-B output and vice-versa.
+- `synthesizeStream`, `synthesizeLong`, `synthesizeAll`,
+  `streamAndCacheNarration`, `prepareNarration`, `prepareForPlayback`,
+  and `TTSMLX.bake` are no longer `@MainActor`. Heavy synthesis work
+  runs on the synthesizer actor's executor. The non-Sendable MLX
+  stream is still created and drained on `@MainActor` inside an
+  internal Task, because upstream `generatePCMBufferStream` requires it.
+- `.ttsnarration` bundles use a per-voice sub-bundle layout
+  (`<bundle>/voices/<voice>.<language>/manifest.json` +
+  `<bundle>/voices/<voice>.<language>/chunks/`). Existing single-voice
+  bundles auto-migrate on first read; their cached chunks survive.
+- The DemoApp restructured into a TabView (Synthesize / Bundles /
+  Models). New Models tab manages built-in + UserDefaults-persisted
+  custom descriptors. New Bundles tab lists baked bundles per variant
+  and bakes via `prepareNarration` or `streamAndCacheNarration`.
+
+### Fixed
+
+- **`broadcast_shapes` KV-cache contamination crash** on long sessions
+  and voice switches. Caused by `MimiAdapter.resetState()` only zeroing
+  the cache offset while the underlying MLXArray storage kept its
+  stale shape, which attention paths reading `.dim(2)` directly used
+  instead of the offset. Patched upstream `mlx-audio-swift`:
+  `resetState()` now rebuilds the encoder/decoder caches outright;
+  `PocketTTSModel.generate()` calls `mimi.resetState()` defensively at
+  the top of every call; the shared `MLXAudioCodecs/Mimi/Mimi.swift`
+  gets the same fix and a new public `resetDecoderCache()` for the
+  streaming-decoder path. (See "Notes" below — these patches live in
+  the local mlx-audio-swift checkout, not in this repo.)
+- **`kIOGPUCommandBufferCallbackErrorBackgroundExecutionNotPermitted`
+  crash on app backgrounding.** The synthesizer now owns a synchronous
+  shutdown coordinator (`TTSLifecycleCoordinator`) shared between the
+  notification observer (main thread) and every drain Task. On
+  `UIApplication.willResignActive` / `didEnterBackground` and the
+  matching `UIScene` events, the observer sets `isShuttingDown` true,
+  cancels tracked Tasks synchronously, and calls
+  `MLX.Stream.gpu.synchronize()` to drain queued Metal command buffers
+  before iOS clamps GPU access. Drain Tasks check the flag before every
+  upstream iteration so no further submissions land past the signal.
+- **Streaming word highlight flushing on every inter-chunk idle.** The
+  streaming observer copy-pasted the prebaked-narration loop's
+  idle-handling, which unconditionally fired every queued word and
+  exited the observer. Mid-stream `.idle` is transient (engine waiting
+  for the next chunk's buffers); the flush-and-exit branch is now
+  gated on `streamingFinished`.
+- Stray `await` on `nonisolated` `TTSAudioCache.key(modelID:voice:text:)`
+  in `prepareForPlayback` no longer warns.
+- Sandbox-aware cache root resolution for iOS + sandboxed macOS apps.
+
+### Performance
+
+- Subsequent `synthesize*` calls on the same model + voice + language
+  skip the MLX load pipeline entirely (cache hit on the
+  `SpeechGenerationModel` instance). The first call is unchanged; the
+  second and on save ~0.3–1.5 s each.
+- `warmUp(model)` now does what its name promises — call it once when
+  the model finishes downloading (e.g. end of onboarding) and first
+  Play is instant.
+
+### Notes for consumers
+
+- **Pull the patched `mlx-audio-swift` checkout.** The `broadcast_shapes`
+  fix lives there, not in TTSMLX. Without it, the model cache surfaces
+  the latent KV-cache bug on voice switch.
+- **Wipe DerivedData + Reset Package Caches** on first integration of
+  this release. Xcode aggressively caches local-path package compile
+  output and won't pick up the mlx-audio-swift patches otherwise.
+- **iOS background MLX generation is impossible.** The OS rejects Metal
+  compute regardless of background-task assertions. For indefinite
+  background playback, pre-bake a chapter with `prepareNarration(...)`
+  (foreground only) and play the resulting `TTSPreparedNarration`
+  bundle — that path is MLX-free at playback time. See the README's
+  "Background playback continuity" section.
+- **Migrate to `speakStreaming(...)` + the cache overload** if you're
+  driving the canonical reader flow. Old call shapes still work; the
+  new one removes the room for two-subscriber highlight bugs.
+
 ## [0.5.4] - 2026-05-24
 
 ### Added
