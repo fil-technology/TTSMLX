@@ -947,17 +947,28 @@ final class DemoModel {
     }
 
     struct PreparedBundleEntry: Identifiable, Hashable {
-        let id: URL
+        /// Composite ID — same bundleURL can yield multiple variants.
+        let id: String
+        /// The bundle directory (the `.ttsnarration` root).
+        let bundleURL: URL
+        /// The sub-bundle URL (or `bundleURL` itself for legacy single-voice bundles).
         let url: URL
         let modelID: String
         let voice: String?
+        let language: String?
         let sourceText: String
         let chunkCount: Int
         let totalDuration: TimeInterval
         let createdAt: Date
         let modifiedAt: Date
 
-        var displayName: String { url.lastPathComponent }
+        var displayName: String { bundleURL.lastPathComponent }
+
+        var variantDescription: String {
+            let v = voice?.isEmpty == false ? voice! : "Automatic voice"
+            let l = language?.isEmpty == false ? language! : "Automatic language"
+            return "\(v) · \(l)"
+        }
 
         var sourcePreview: String {
             let trimmed = sourceText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -987,22 +998,51 @@ final class DemoModel {
             return []
         }
         var entries: [PreparedBundleEntry] = []
-        for url in contents where url.lastPathComponent.hasSuffix(suffix) {
-            guard let narration = try? TTSPreparedNarration(importing: url) else { continue }
-            let manifest = narration.manifest
-            let attrs = try? fm.attributesOfItem(atPath: url.path)
-            let modified = (attrs?[.modificationDate] as? Date) ?? manifest.createdAt
-            entries.append(PreparedBundleEntry(
-                id: url,
-                url: url,
-                modelID: manifest.modelID,
-                voice: manifest.voice,
-                sourceText: manifest.sourceText,
-                chunkCount: manifest.chunks.count,
-                totalDuration: narration.totalDuration,
-                createdAt: manifest.createdAt,
-                modifiedAt: modified
-            ))
+        for bundleURL in contents where bundleURL.lastPathComponent.hasSuffix(suffix) {
+            let variants = TTSPreparedNarration.availableVariants(at: bundleURL)
+            if variants.isEmpty {
+                // Legacy: try loading the root-level manifest.
+                guard let narration = try? TTSPreparedNarration(importing: bundleURL) else { continue }
+                let manifest = narration.manifest
+                let attrs = try? fm.attributesOfItem(atPath: bundleURL.path)
+                let modified = (attrs?[.modificationDate] as? Date) ?? manifest.createdAt
+                entries.append(PreparedBundleEntry(
+                    id: bundleURL.path,
+                    bundleURL: bundleURL,
+                    url: bundleURL,
+                    modelID: manifest.modelID,
+                    voice: manifest.voice,
+                    language: manifest.language,
+                    sourceText: manifest.sourceText,
+                    chunkCount: manifest.chunks.count,
+                    totalDuration: narration.totalDuration,
+                    createdAt: manifest.createdAt,
+                    modifiedAt: modified
+                ))
+                continue
+            }
+            for variant in variants {
+                let subURL = TTSPreparedNarration.subBundleURL(
+                    in: bundleURL, voice: variant.voice, language: variant.language
+                )
+                guard let narration = try? TTSPreparedNarration(importing: subURL) else { continue }
+                let manifest = narration.manifest
+                let attrs = try? fm.attributesOfItem(atPath: subURL.path)
+                let modified = (attrs?[.modificationDate] as? Date) ?? manifest.createdAt
+                entries.append(PreparedBundleEntry(
+                    id: subURL.path,
+                    bundleURL: bundleURL,
+                    url: subURL,
+                    modelID: manifest.modelID,
+                    voice: manifest.voice,
+                    language: manifest.language,
+                    sourceText: manifest.sourceText,
+                    chunkCount: manifest.chunks.count,
+                    totalDuration: narration.totalDuration,
+                    createdAt: manifest.createdAt,
+                    modifiedAt: modified
+                ))
+            }
         }
         return entries.sorted { $0.modifiedAt > $1.modifiedAt }
     }

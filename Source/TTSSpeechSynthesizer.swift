@@ -742,16 +742,25 @@ public actor TTSSpeechSynthesizer {
         let languageID = options.language?.identifier
 
         let fileManager = FileManager.default
-        let chunksDir = bundleURL.appendingPathComponent("chunks", isDirectory: true)
+        // Each (voice, language) gets its own sub-bundle inside bundleURL, so
+        // switching voice mid-chapter doesn't wipe the other voice's cache.
+        try? TTSPreparedNarration.migrateLegacyIfMatches(
+            bundleURL: bundleURL,
+            voice: voiceID,
+            language: languageID
+        )
+        let subBundleURL = TTSPreparedNarration.subBundleURL(
+            in: bundleURL, voice: voiceID, language: languageID
+        )
+        let chunksDir = subBundleURL.appendingPathComponent("chunks", isDirectory: true)
         try fileManager.createDirectory(at: chunksDir, withIntermediateDirectories: true)
 
         // Load existing manifest, validate against this call's args. Mismatch
-        // (different model/voice/text) → wipe and start fresh, so a stable
-        // bundleURL can be used across voice/model switches without manual
-        // invalidation on the caller's side.
+        // (different model/text) → wipe just this sub-bundle and start fresh.
+        // Other voices' sub-bundles are untouched.
         var workingManifest: TTSPreparedNarrationManifest
         var workingEntries: [Int: TTSPreparedNarrationManifest.ChunkEntry] = [:]
-        if let existing = try? TTSPreparedNarration(importing: bundleURL).manifest,
+        if let existing = try? TTSPreparedNarration(importing: subBundleURL).manifest,
            existing.modelID == modelID,
            existing.voice == voiceID,
            existing.sourceText == text,
@@ -763,7 +772,7 @@ public actor TTSSpeechSynthesizer {
             workingManifest = existing
             for entry in existing.chunks { workingEntries[entry.index] = entry }
         } else {
-            try? fileManager.removeItem(at: bundleURL)
+            try? fileManager.removeItem(at: subBundleURL)
             try fileManager.createDirectory(at: chunksDir, withIntermediateDirectories: true)
             workingManifest = TTSPreparedNarrationManifest(
                 modelID: modelID,
@@ -791,7 +800,7 @@ public actor TTSSpeechSynthesizer {
                 for (index, info) in chunkInfos.enumerated() {
                     try Task.checkCancellation()
                     let chunkFilename = String(format: "chunks/%03d.wav", index)
-                    let chunkURL = bundleURL.appendingPathComponent(chunkFilename, isDirectory: false)
+                    let chunkURL = subBundleURL.appendingPathComponent(chunkFilename, isDirectory: false)
                     let entry = workingEntries[index]
                     let fileExists = fileManager.fileExists(atPath: chunkURL.path)
 
@@ -846,7 +855,7 @@ public actor TTSSpeechSynthesizer {
                             modelID: modelID,
                             chunkURL: chunkURL,
                             chunkFilename: chunkFilename,
-                            bundleURL: bundleURL,
+                            bundleURL: subBundleURL,
                             workingManifest: &workingManifest,
                             workingEntries: &workingEntries,
                             continuation: continuation,
@@ -992,7 +1001,15 @@ public actor TTSSpeechSynthesizer {
         guard !chunkInfos.isEmpty else { throw TTSError.emptyText }
 
         let fileManager = FileManager.default
-        let chunksDirectory = bundleURL.appendingPathComponent("chunks", isDirectory: true)
+        let voiceID = options.voice?.identifier
+        let languageID = options.language?.identifier
+        let subBundleURL = TTSPreparedNarration.subBundleURL(
+            in: bundleURL, voice: voiceID, language: languageID
+        )
+        let chunksDirectory = subBundleURL.appendingPathComponent("chunks", isDirectory: true)
+        // Wipe any stale contents in this sub-bundle so re-baking the same
+        // (voice, language) pair overwrites rather than mingling old chunks.
+        try? fileManager.removeItem(at: subBundleURL)
         try fileManager.createDirectory(at: chunksDirectory, withIntermediateDirectories: true)
 
         var entries: [TTSPreparedNarrationManifest.ChunkEntry] = []
@@ -1002,7 +1019,7 @@ public actor TTSSpeechSynthesizer {
         for (index, info) in chunkInfos.enumerated() {
             try Task.checkCancellation()
             let filename = String(format: "chunks/%03d.wav", index)
-            let chunkURL = bundleURL.appendingPathComponent(filename, isDirectory: false)
+            let chunkURL = subBundleURL.appendingPathComponent(filename, isDirectory: false)
 
             let stream = try await synthesizeStream(
                 info.text,
@@ -1082,13 +1099,13 @@ public actor TTSSpeechSynthesizer {
 
         let manifest = TTSPreparedNarrationManifest(
             modelID: model.id,
-            voice: options.voice?.identifier,
-            language: options.language?.identifier,
+            voice: voiceID,
+            language: languageID,
             sourceText: text,
             sampleRate: detectedSampleRate,
             chunks: entries
         )
-        let narration = TTSPreparedNarration(manifest: manifest, baseURL: bundleURL)
+        let narration = TTSPreparedNarration(manifest: manifest, baseURL: subBundleURL)
         try narration.writeManifest()
         return narration
     }

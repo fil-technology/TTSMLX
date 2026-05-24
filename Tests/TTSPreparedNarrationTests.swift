@@ -189,7 +189,158 @@ struct TTSPreparedNarrationTests {
         #expect(fired == expected)
     }
 
+    @Test("subBundleSlug sanitizes voice and language components")
+    func subBundleSlugSanitizes() {
+        #expect(TTSPreparedNarration.subBundleSlug(voice: "Jean Valjean", language: nil) == "jean_valjean.auto")
+        #expect(TTSPreparedNarration.subBundleSlug(voice: nil, language: nil) == "auto.auto")
+        #expect(TTSPreparedNarration.subBundleSlug(voice: "alba", language: "en-US") == "alba.en-US".lowercased())
+        #expect(TTSPreparedNarration.subBundleSlug(voice: "tara", language: "en") == "tara.en")
+    }
+
+    @Test("availableVariants returns each sub-bundle written under voices/")
+    func availableVariantsListsSubBundles() throws {
+        let bundleURL = try Self.makeTempBundleURL()
+        defer { try? FileManager.default.removeItem(at: bundleURL) }
+
+        try Self.writeMinimalSubBundle(at: bundleURL, voice: "jean", language: "en")
+        try Self.writeMinimalSubBundle(at: bundleURL, voice: "alba", language: "en")
+        try Self.writeMinimalSubBundle(at: bundleURL, voice: nil, language: nil)
+
+        let variants = TTSPreparedNarration.availableVariants(at: bundleURL)
+        #expect(variants.count == 3)
+        let pairs = Set(variants.map { "\($0.voice ?? "nil"):\($0.language ?? "nil")" })
+        #expect(pairs.contains("jean:en"))
+        #expect(pairs.contains("alba:en"))
+        #expect(pairs.contains("nil:nil"))
+    }
+
+    @Test("availableVariants returns empty for a bundle without voices/ dir")
+    func availableVariantsEmptyWhenMissing() throws {
+        let bundleURL = try Self.makeTempBundleURL()
+        defer { try? FileManager.default.removeItem(at: bundleURL) }
+        #expect(TTSPreparedNarration.availableVariants(at: bundleURL).isEmpty)
+    }
+
+    @Test("init(importing:voice:language:) resolves the correct sub-bundle")
+    func initWithVoiceResolvesSubBundle() throws {
+        let bundleURL = try Self.makeTempBundleURL()
+        defer { try? FileManager.default.removeItem(at: bundleURL) }
+
+        try Self.writeMinimalSubBundle(at: bundleURL, voice: "jean", language: "en")
+        try Self.writeMinimalSubBundle(at: bundleURL, voice: "alba", language: "en")
+
+        let jean = try TTSPreparedNarration(importing: bundleURL, voice: "jean", language: "en")
+        #expect(jean.manifest.voice == "jean")
+        #expect(jean.manifest.language == "en")
+        let alba = try TTSPreparedNarration(importing: bundleURL, voice: "alba", language: "en")
+        #expect(alba.manifest.voice == "alba")
+    }
+
+    @Test("legacy init(importing:) still reads root-level manifests")
+    func legacyInitStillWorks() throws {
+        let bundleURL = try Self.makeTempBundleURL()
+        defer { try? FileManager.default.removeItem(at: bundleURL) }
+
+        let manifest = TTSPreparedNarrationManifest(
+            modelID: "m",
+            voice: "v",
+            sourceText: "x",
+            sampleRate: 22_050,
+            chunks: []
+        )
+        try TTSPreparedNarration(manifest: manifest, baseURL: bundleURL).writeManifest()
+
+        let imported = try TTSPreparedNarration(importing: bundleURL)
+        #expect(imported.manifest.voice == "v")
+        #expect(imported.baseURL == bundleURL)
+    }
+
+    @Test("init(importing:voice:language:) auto-migrates a matching legacy bundle")
+    func initWithVoiceMigratesLegacy() throws {
+        let bundleURL = try Self.makeTempBundleURL()
+        defer { try? FileManager.default.removeItem(at: bundleURL) }
+
+        // Build legacy layout: manifest.json + chunks/000.wav at root.
+        let manifest = TTSPreparedNarrationManifest(
+            modelID: "m",
+            voice: "jean",
+            language: "en",
+            sourceText: "x",
+            sampleRate: 22_050,
+            chunks: [.init(
+                index: 0,
+                audioFile: "chunks/000.wav",
+                characterRange: .init(start: 0, end: 1),
+                text: "x",
+                duration: 0.1,
+                wordTimings: []
+            )]
+        )
+        try TTSPreparedNarration(manifest: manifest, baseURL: bundleURL).writeManifest()
+        try Self.writeSineChunk(at: bundleURL.appendingPathComponent("chunks/000.wav"),
+                                durationSeconds: 0.1)
+
+        let imported = try TTSPreparedNarration(importing: bundleURL, voice: "jean", language: "en")
+        #expect(imported.manifest.voice == "jean")
+        let sub = TTSPreparedNarration.subBundleURL(in: bundleURL, voice: "jean", language: "en")
+        #expect(FileManager.default.fileExists(atPath: sub.appendingPathComponent("manifest.json").path))
+        #expect(FileManager.default.fileExists(atPath: sub.appendingPathComponent("chunks/000.wav").path))
+        #expect(!FileManager.default.fileExists(atPath: bundleURL.appendingPathComponent("manifest.json").path))
+    }
+
+    @Test("init(importing:voice:language:) leaves mismatched legacy alone and errors")
+    func initWithVoiceLeavesMismatchedLegacy() throws {
+        let bundleURL = try Self.makeTempBundleURL()
+        defer { try? FileManager.default.removeItem(at: bundleURL) }
+        let manifest = TTSPreparedNarrationManifest(
+            modelID: "m",
+            voice: "jean",
+            language: "en",
+            sourceText: "x",
+            sampleRate: 22_050,
+            chunks: []
+        )
+        try TTSPreparedNarration(manifest: manifest, baseURL: bundleURL).writeManifest()
+
+        var caught = false
+        do { _ = try TTSPreparedNarration(importing: bundleURL, voice: "alba", language: "en") }
+        catch TTSPreparedNarrationError.manifestMissing { caught = true }
+        catch { Issue.record("wrong error: \(error)") }
+        #expect(caught)
+        // Legacy manifest untouched.
+        #expect(FileManager.default.fileExists(atPath: bundleURL.appendingPathComponent("manifest.json").path))
+    }
+
     // MARK: - Helpers
+
+    /// Writes a minimal valid sub-bundle (manifest + one tiny wav) at
+    /// `bundleURL/voices/<slug>/` for the given `(voice, language)`.
+    static func writeMinimalSubBundle(
+        at bundleURL: URL,
+        voice: String?,
+        language: String?
+    ) throws {
+        let subURL = TTSPreparedNarration.subBundleURL(in: bundleURL, voice: voice, language: language)
+        try FileManager.default.createDirectory(at: subURL, withIntermediateDirectories: true)
+        let manifest = TTSPreparedNarrationManifest(
+            modelID: "test/model",
+            voice: voice,
+            language: language,
+            sourceText: "x",
+            sampleRate: 22_050,
+            chunks: [.init(
+                index: 0,
+                audioFile: "chunks/000.wav",
+                characterRange: .init(start: 0, end: 1),
+                text: "x",
+                duration: 0.1,
+                wordTimings: []
+            )]
+        )
+        try TTSPreparedNarration(manifest: manifest, baseURL: subURL).writeManifest()
+        try writeSineChunk(at: subURL.appendingPathComponent("chunks/000.wav"),
+                           durationSeconds: 0.1)
+    }
 
     static func makeTempBundleURL() throws -> URL {
         let url = FileManager.default.temporaryDirectory

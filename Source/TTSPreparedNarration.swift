@@ -67,8 +67,38 @@ public struct TTSPreparedNarration: Sendable, Hashable {
     /// Loads a narration from a previously exported bundle directory.
     /// Validates the manifest schema version and that every referenced chunk
     /// audio file exists. Does **not** decode the audio.
+    ///
+    /// This is the **legacy** import path that reads `manifest.json` directly
+    /// from `bundleURL`. For sub-bundle (per-voice/language) layouts, prefer
+    /// ``init(importing:voice:language:)``.
     public init(importing bundleURL: URL) throws {
-        let manifestURL = bundleURL.appendingPathComponent(Self.manifestFilename, isDirectory: false)
+        try self.init(loadingManifestFrom: bundleURL)
+    }
+
+    /// Loads a narration for a specific `(voice, language)` sub-bundle inside
+    /// `bundleURL`. Resolves to `bundleURL/voices/<slug>/manifest.json`.
+    ///
+    /// If no sub-bundle exists but a legacy root-level `manifest.json` is
+    /// present whose `voice` / `language` fields match the requested values,
+    /// the legacy layout is auto-migrated in place (manifest + chunks moved
+    /// into the sub-bundle directory) before loading.
+    public init(importing bundleURL: URL, voice: String?, language: String?) throws {
+        let subURL = Self.subBundleURL(in: bundleURL, voice: voice, language: language)
+        let fileManager = FileManager.default
+        let subManifestURL = subURL.appendingPathComponent(Self.manifestFilename, isDirectory: false)
+        if !fileManager.fileExists(atPath: subManifestURL.path) {
+            // Try a legacy migration: matching voice/language at the bundle root.
+            try Self.migrateLegacyIfMatches(
+                bundleURL: bundleURL,
+                voice: voice,
+                language: language
+            )
+        }
+        try self.init(loadingManifestFrom: subURL)
+    }
+
+    private init(loadingManifestFrom dir: URL) throws {
+        let manifestURL = dir.appendingPathComponent(Self.manifestFilename, isDirectory: false)
         let data: Data
         do {
             data = try Data(contentsOf: manifestURL)
@@ -91,7 +121,7 @@ public struct TTSPreparedNarration: Sendable, Hashable {
         }
         // Surface missing chunk files at import time rather than mid-playback.
         for chunk in manifest.chunks {
-            let url = bundleURL.appendingPathComponent(chunk.audioFile, isDirectory: false)
+            let url = dir.appendingPathComponent(chunk.audioFile, isDirectory: false)
             if !FileManager.default.fileExists(atPath: url.path) {
                 throw TTSPreparedNarrationError.chunkAudioMissing(
                     chunkIndex: chunk.index,
@@ -100,7 +130,114 @@ public struct TTSPreparedNarration: Sendable, Hashable {
             }
         }
         self.manifest = manifest
-        self.baseURL = bundleURL
+        self.baseURL = dir
+    }
+
+    /// Sanitizes a single component for the on-disk slug. Lowercased,
+    /// alphanumerics + `-` preserved, everything else collapsed to `_`.
+    /// `nil` → `"auto"`.
+    private static func slugComponent(_ value: String?) -> String {
+        guard let raw = value?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            return "auto"
+        }
+        var out = ""
+        for ch in raw.lowercased() {
+            if ch.isLetter || ch.isNumber || ch == "-" {
+                out.append(ch)
+            } else {
+                out.append("_")
+            }
+        }
+        return out.isEmpty ? "auto" : out
+    }
+
+    /// Slug for a `(voice, language)` pair, e.g. `"jean.en"` or `"auto.auto"`.
+    public static func subBundleSlug(voice: String?, language: String?) -> String {
+        "\(slugComponent(voice)).\(slugComponent(language))"
+    }
+
+    /// Filesystem URL of the sub-bundle directory inside `bundleURL` for the
+    /// given `(voice, language)`. Returns `bundleURL/voices/<slug>/`.
+    public static func subBundleURL(in bundleURL: URL, voice: String?, language: String?) -> URL {
+        bundleURL
+            .appendingPathComponent("voices", isDirectory: true)
+            .appendingPathComponent(subBundleSlug(voice: voice, language: language), isDirectory: true)
+    }
+
+    /// Enumerates the `(voice, language)` variants stored inside `bundleURL`.
+    /// Reads each sub-bundle's manifest to recover the authoritative voice /
+    /// language fields. Returns an empty array if `bundleURL` has no
+    /// `voices/` directory.
+    public static func availableVariants(at bundleURL: URL) -> [(voice: String?, language: String?, slug: String)] {
+        let voicesDir = bundleURL.appendingPathComponent("voices", isDirectory: true)
+        let fm = FileManager.default
+        var isDir: ObjCBool = false
+        guard fm.fileExists(atPath: voicesDir.path, isDirectory: &isDir), isDir.boolValue else {
+            return []
+        }
+        guard let entries = try? fm.contentsOfDirectory(
+            at: voicesDir,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+        var out: [(voice: String?, language: String?, slug: String)] = []
+        for entry in entries {
+            var entryIsDir: ObjCBool = false
+            guard fm.fileExists(atPath: entry.path, isDirectory: &entryIsDir), entryIsDir.boolValue else {
+                continue
+            }
+            let slug = entry.lastPathComponent
+            let manifestURL = entry.appendingPathComponent(Self.manifestFilename, isDirectory: false)
+            guard let data = try? Data(contentsOf: manifestURL) else { continue }
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            guard let manifest = try? decoder.decode(TTSPreparedNarrationManifest.self, from: data) else {
+                continue
+            }
+            out.append((voice: manifest.voice, language: manifest.language, slug: slug))
+        }
+        return out.sorted { $0.slug < $1.slug }
+    }
+
+    /// If `bundleURL` has a legacy root-level `manifest.json` whose voice /
+    /// language fields match the requested pair, moves it (and `chunks/`)
+    /// into the sub-bundle directory. No-op if the manifest is missing or
+    /// the fields don't match.
+    static func migrateLegacyIfMatches(
+        bundleURL: URL,
+        voice: String?,
+        language: String?
+    ) throws {
+        let fm = FileManager.default
+        let legacyManifestURL = bundleURL.appendingPathComponent(Self.manifestFilename, isDirectory: false)
+        guard fm.fileExists(atPath: legacyManifestURL.path) else { return }
+        guard let data = try? Data(contentsOf: legacyManifestURL) else { return }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        guard let legacy = try? decoder.decode(TTSPreparedNarrationManifest.self, from: data) else {
+            return
+        }
+        guard legacy.voice == voice, legacy.language == language else { return }
+
+        let subURL = subBundleURL(in: bundleURL, voice: voice, language: language)
+        try fm.createDirectory(at: subURL, withIntermediateDirectories: true)
+
+        let destManifest = subURL.appendingPathComponent(Self.manifestFilename, isDirectory: false)
+        if fm.fileExists(atPath: destManifest.path) {
+            try fm.removeItem(at: destManifest)
+        }
+        try fm.moveItem(at: legacyManifestURL, to: destManifest)
+
+        let legacyChunks = bundleURL.appendingPathComponent("chunks", isDirectory: true)
+        if fm.fileExists(atPath: legacyChunks.path) {
+            let destChunks = subURL.appendingPathComponent("chunks", isDirectory: true)
+            if fm.fileExists(atPath: destChunks.path) {
+                try fm.removeItem(at: destChunks)
+            }
+            try fm.moveItem(at: legacyChunks, to: destChunks)
+        }
     }
 
     /// Writes the bundle to disk. Creates the directory tree if needed, then

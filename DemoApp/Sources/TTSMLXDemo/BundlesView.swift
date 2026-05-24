@@ -138,6 +138,9 @@ private struct BundleRow: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
+            Label(entry.variantDescription, systemImage: "person.wave.2")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             HStack(spacing: 8) {
                 Label(entry.modelID, systemImage: "cpu")
                     .lineLimit(1)

@@ -165,6 +165,157 @@ struct TTSStreamAndCacheNarrationTests {
         #expect(timings.count == 2)
     }
 
+    @Test("voice round-trip: switching back to a cached voice replays without MLX")
+    func voiceRoundTrip() async throws {
+        let bundleURL = try Self.tempBundle()
+        defer { try? FileManager.default.removeItem(at: bundleURL) }
+
+        let modelID = "test/model"
+        let sourceText = "Hello world from TTSMLX"
+
+        // Pre-bake voice A in its sub-bundle.
+        try Self.buildHandSubBundle(
+            at: bundleURL,
+            modelID: modelID,
+            voice: "jean",
+            language: nil,
+            sourceText: sourceText
+        )
+        // Pre-bake voice B in its sub-bundle.
+        try Self.buildHandSubBundle(
+            at: bundleURL,
+            modelID: modelID,
+            voice: "alba",
+            language: nil,
+            sourceText: sourceText
+        )
+
+        let synthesizer = TTSSpeechSynthesizer()
+        let model = TTSModelDescriptor(id: modelID, capabilities: .init(isRuntimeSupported: true))
+        let chunker = TTSTextChunker(firstChunkCharacterLimit: 11, followupChunkCharacterLimit: 11)
+
+        // Call with voice A — replay.
+        let streamA = try await synthesizer.streamAndCacheNarration(
+            sourceText, using: model,
+            options: TTSSynthesisOptions(voice: TTSVoice("jean")),
+            cacheBundleAt: bundleURL, chunker: chunker
+        )
+        var aCount = 0
+        for try await _ in streamA { aCount += 1 }
+        #expect(aCount == 2)
+
+        // Switch to voice B — replay (no MLX).
+        let streamB = try await synthesizer.streamAndCacheNarration(
+            sourceText, using: model,
+            options: TTSSynthesisOptions(voice: TTSVoice("alba")),
+            cacheBundleAt: bundleURL, chunker: chunker
+        )
+        var bCount = 0
+        for try await _ in streamB { bCount += 1 }
+        #expect(bCount == 2)
+
+        // Switch back to A — should still hit cache (no wipe).
+        let streamA2 = try await synthesizer.streamAndCacheNarration(
+            sourceText, using: model,
+            options: TTSSynthesisOptions(voice: TTSVoice("jean")),
+            cacheBundleAt: bundleURL, chunker: chunker
+        )
+        var a2Count = 0
+        for try await _ in streamA2 { a2Count += 1 }
+        #expect(a2Count == 2)
+
+        // Both sub-bundles exist side by side.
+        let variants = TTSPreparedNarration.availableVariants(at: bundleURL)
+        let voices = Set(variants.compactMap(\.voice))
+        #expect(voices.contains("jean"))
+        #expect(voices.contains("alba"))
+    }
+
+    @Test("language round-trip: switching back to a cached language replays without MLX")
+    func languageRoundTrip() async throws {
+        let bundleURL = try Self.tempBundle()
+        defer { try? FileManager.default.removeItem(at: bundleURL) }
+
+        let modelID = "test/model"
+        let sourceText = "Hello world from TTSMLX"
+
+        try Self.buildHandSubBundle(
+            at: bundleURL, modelID: modelID,
+            voice: "tara", language: "en", sourceText: sourceText
+        )
+        try Self.buildHandSubBundle(
+            at: bundleURL, modelID: modelID,
+            voice: "tara", language: "es", sourceText: sourceText
+        )
+
+        let synthesizer = TTSSpeechSynthesizer()
+        let model = TTSModelDescriptor(id: modelID, capabilities: .init(isRuntimeSupported: true))
+        let chunker = TTSTextChunker(firstChunkCharacterLimit: 11, followupChunkCharacterLimit: 11)
+
+        // EN replay.
+        let stream1 = try await synthesizer.streamAndCacheNarration(
+            sourceText, using: model,
+            options: TTSSynthesisOptions(language: TTSLanguage("en"), voice: TTSVoice("tara")),
+            cacheBundleAt: bundleURL, chunker: chunker
+        )
+        var count1 = 0
+        for try await _ in stream1 { count1 += 1 }
+        #expect(count1 == 2)
+
+        // Switch to ES, then back to EN — still cached.
+        let stream2 = try await synthesizer.streamAndCacheNarration(
+            sourceText, using: model,
+            options: TTSSynthesisOptions(language: TTSLanguage("es"), voice: TTSVoice("tara")),
+            cacheBundleAt: bundleURL, chunker: chunker
+        )
+        var count2 = 0
+        for try await _ in stream2 { count2 += 1 }
+        #expect(count2 == 2)
+
+        let stream3 = try await synthesizer.streamAndCacheNarration(
+            sourceText, using: model,
+            options: TTSSynthesisOptions(language: TTSLanguage("en"), voice: TTSVoice("tara")),
+            cacheBundleAt: bundleURL, chunker: chunker
+        )
+        var count3 = 0
+        for try await _ in stream3 { count3 += 1 }
+        #expect(count3 == 2)
+    }
+
+    @Test("legacy layout is auto-migrated into the matching sub-bundle")
+    func legacyLayoutMigrates() async throws {
+        let bundleURL = try Self.tempBundle()
+        defer { try? FileManager.default.removeItem(at: bundleURL) }
+
+        let modelID = "test/model"
+        let sourceText = "Hello world from TTSMLX"
+        // Build legacy on-disk layout at root.
+        try Self.buildHandBundle(
+            at: bundleURL, modelID: modelID, voice: "tara", sourceText: sourceText
+        )
+
+        let synthesizer = TTSSpeechSynthesizer()
+        let model = TTSModelDescriptor(id: modelID, capabilities: .init(isRuntimeSupported: true))
+        let chunker = TTSTextChunker(firstChunkCharacterLimit: 11, followupChunkCharacterLimit: 11)
+
+        let stream = try await synthesizer.streamAndCacheNarration(
+            sourceText, using: model,
+            options: TTSSynthesisOptions(voice: TTSVoice("tara")),
+            cacheBundleAt: bundleURL, chunker: chunker
+        )
+        var count = 0
+        for try await _ in stream { count += 1 }
+        #expect(count == 2)
+
+        // Legacy artifacts gone from root, sub-bundle now populated.
+        let fm = FileManager.default
+        let sub = TTSPreparedNarration.subBundleURL(in: bundleURL, voice: "tara", language: nil)
+        #expect(fm.fileExists(atPath: sub.appendingPathComponent("manifest.json").path))
+        #expect(fm.fileExists(atPath: sub.appendingPathComponent("chunks/000.wav").path))
+        #expect(!fm.fileExists(atPath: bundleURL.appendingPathComponent("manifest.json").path))
+        #expect(!fm.fileExists(atPath: bundleURL.appendingPathComponent("chunks").path))
+    }
+
     // MARK: - Helpers
 
     static func tempBundle() throws -> URL {
@@ -175,10 +326,48 @@ struct TTSStreamAndCacheNarrationTests {
         return url
     }
 
+    /// Builds a hand-baked bundle inside `bundleURL/voices/<slug>/` for the
+    /// given `(voice, language)` — the new sub-bundle layout.
+    static func buildHandSubBundle(
+        at bundleURL: URL,
+        modelID: String,
+        voice: String?,
+        language: String?,
+        sourceText: String
+    ) throws {
+        let subURL = TTSPreparedNarration.subBundleURL(
+            in: bundleURL, voice: voice, language: language
+        )
+        try FileManager.default.createDirectory(at: subURL, withIntermediateDirectories: true)
+        try buildHandBundleInternal(
+            at: subURL,
+            modelID: modelID,
+            voice: voice,
+            language: language,
+            sourceText: sourceText
+        )
+    }
+
     static func buildHandBundle(
         at bundleURL: URL,
         modelID: String,
         voice: String,
+        sourceText: String
+    ) throws {
+        try buildHandBundleInternal(
+            at: bundleURL,
+            modelID: modelID,
+            voice: voice,
+            language: nil,
+            sourceText: sourceText
+        )
+    }
+
+    private static func buildHandBundleInternal(
+        at bundleURL: URL,
+        modelID: String,
+        voice: String?,
+        language: String?,
         sourceText: String
     ) throws {
         // Two chunks: "Hello world" (0..<11), "from TTSMLX" (12..<23)
@@ -190,6 +379,7 @@ struct TTSStreamAndCacheNarrationTests {
         let manifest = TTSPreparedNarrationManifest(
             modelID: modelID,
             voice: voice,
+            language: language,
             sourceText: sourceText,
             sampleRate: 22_050,
             chunks: [
