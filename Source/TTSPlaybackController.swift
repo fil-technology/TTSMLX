@@ -103,6 +103,10 @@ public final class TTSPlaybackController {
     public func schedule(_ chunk: TTSAudioBufferChunk) throws {
         try connectIfNeeded(format: chunk.buffer.format)
         scheduledBufferCount += 1
+        // Log every Nth schedule call to avoid log spam on long streams.
+        if scheduledBufferCount == 1 || scheduledBufferCount.isMultiple(of: 25) {
+            logger.info("schedule: buffer #\(self.scheduledBufferCount, privacy: .public) frameLength=\(chunk.buffer.frameLength, privacy: .public) sampleRate=\(chunk.sampleRate, privacy: .public)")
+        }
         playerNode.scheduleBuffer(chunk.buffer) { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -113,6 +117,7 @@ public final class TTSPlaybackController {
         if !playerNode.isPlaying, state != .paused {
             playerNode.play()
             state = .playing
+            logger.info("schedule: playerNode.play() invoked; state=playing")
         }
     }
 
@@ -124,11 +129,24 @@ public final class TTSPlaybackController {
         stream: AsyncThrowingStream<TTSAudioBufferChunk, Error>,
         onPlaybackEnd: (@MainActor () -> Void)? = nil
     ) async throws {
+        logger.info("play(stream:): ENTRY state=\(String(describing: self.state), privacy: .public)")
         self.onPlaybackEnd = onPlaybackEnd
         currentFile = nil
         seekFrameOffset = 0
-        for try await chunk in stream {
-            try schedule(chunk)
+        var consumed = 0
+        do {
+            for try await chunk in stream {
+                try schedule(chunk)
+                consumed += 1
+            }
+        } catch {
+            logger.error("play(stream:): stream THREW after \(consumed, privacy: .public) buffers: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
+        if consumed == 0 {
+            logger.warning("play(stream:): stream FINISHED WITH ZERO BUFFERS. Upstream synthesis produced no audio. Check synthesizeStream logs for the matching modelID.")
+        } else {
+            logger.info("play(stream:): stream drained, \(consumed, privacy: .public) buffers scheduled")
         }
     }
 
@@ -136,9 +154,17 @@ public final class TTSPlaybackController {
     /// first. Useful when you have a file from ``TTSAudioCache`` and don't
     /// need streaming.
     public func play(file url: URL, onPlaybackEnd: (@MainActor () -> Void)? = nil) throws {
+        logger.info("play(file:): ENTRY url=\(url.lastPathComponent, privacy: .public)")
         stop()
         self.onPlaybackEnd = onPlaybackEnd
-        let audioFile = try AVAudioFile(forReading: url)
+        let audioFile: AVAudioFile
+        do {
+            audioFile = try AVAudioFile(forReading: url)
+        } catch {
+            logger.error("play(file:): AVAudioFile(forReading:) failed for \(url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
+        logger.info("play(file:): opened file length=\(audioFile.length, privacy: .public) frames sampleRate=\(audioFile.processingFormat.sampleRate, privacy: .public)")
         try connectIfNeeded(format: audioFile.processingFormat)
         currentFile = audioFile
         seekFrameOffset = 0
@@ -153,6 +179,7 @@ public final class TTSPlaybackController {
         if !playerNode.isPlaying, state != .paused {
             playerNode.play()
             state = .playing
+            logger.info("play(file:): playerNode.play() invoked; state=playing")
         }
     }
 
@@ -367,16 +394,24 @@ public final class TTSPlaybackController {
     private func connectIfNeeded(format: AVAudioFormat) throws {
         if let existing = connectedFormat, existing == format { return }
         if connectedFormat != nil {
-            // Format change mid-playback — reset the graph.
+            logger.info("connectIfNeeded: format CHANGED, resetting graph (was sr=\(self.connectedFormat?.sampleRate ?? 0, privacy: .public) ch=\(self.connectedFormat?.channelCount ?? 0, privacy: .public) → new sr=\(format.sampleRate, privacy: .public) ch=\(format.channelCount, privacy: .public))")
             playerNode.stop()
             engine.stop()
             engine.disconnectNodeOutput(playerNode)
             engine.disconnectNodeOutput(timePitch)
+        } else {
+            logger.info("connectIfNeeded: initial connect sr=\(format.sampleRate, privacy: .public) ch=\(format.channelCount, privacy: .public)")
         }
         engine.connect(playerNode, to: timePitch, format: format)
         engine.connect(timePitch, to: engine.mainMixerNode, format: format)
         if !engine.isRunning {
-            try engine.start()
+            do {
+                try engine.start()
+                logger.info("connectIfNeeded: engine.start() OK")
+            } catch {
+                logger.error("connectIfNeeded: engine.start() FAILED: \(error.localizedDescription, privacy: .public). Most common causes: AVAudioSession not configured for .playback, or another app holding the audio hardware. Check the app's AVAudioSession setup.")
+                throw error
+            }
         }
         connectedFormat = format
     }

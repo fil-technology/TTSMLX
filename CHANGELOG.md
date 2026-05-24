@@ -6,6 +6,40 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-05-24
+
+### Added
+
+- Comprehensive phase-boundary logging across `TTSSpeechSynthesizer` and
+  `TTSPlaybackController`. Every public entry now emits a
+  `logger.info("<method>: ENTRY ...")` line; every catch site emits a
+  standardized `logger.error("ERROR <site>: modelID=… stage=… underlying=…")`
+  line before re-throwing. First-buffer arrival, per-chunk progress in
+  long-form synthesis, and per-25-buffer markers in streaming all log so
+  hangs are visible in real time. Subsystem `technology.fil.ttsmlx`,
+  categories `Synthesizer` / `Playback` / `Prefetch`.
+- `TTSSpeechSynthesizer.snapshot()` — read-only state dump (warmed model
+  IDs, `events()` subscriber count, whether a closure handler is set).
+  Also writes itself to `logger.info` so it correlates with synthesis
+  activity in Console.
+- `TTSSpeechSynthesizer` emits a `logger.warning` line when a stream or
+  `synthesizeStream` call finishes with **zero buffers** — the most
+  common "stopped generating" symptom — with the three usual causes
+  spelled out in the message.
+- `TTSPlaybackController` emits a `logger.warning` when a stream drains
+  with zero buffers scheduled, pointing the reader at the matching
+  `synthesizeStream` log.
+- `Docs/debugging.md` — how to read TTSMLX logs: Console.app filter
+  syntax, what a healthy trace looks like, mapping from error-site
+  names to failed phases, capture commands.
+
+### Changed
+
+- `connectIfNeeded` in `TTSPlaybackController` now logs the engine
+  start/format transitions and surfaces `engine.start()` failures with
+  a hint about the most common cause (missing `AVAudioSession`
+  configuration on the app side).
+
 ## [0.5.2] - 2026-05-24
 
 ### Added

@@ -66,11 +66,50 @@ public actor TTSSpeechSynthesizer {
         logger.debug("\(message, privacy: .public)")
     }
 
+    nonisolated private func info(_ message: String) {
+        logger.info("\(message, privacy: .public)")
+    }
+
+    /// Standardized error logger so every catch site emits the same shape:
+    /// `ERROR <site>: modelID=<id> stage=<stage> underlying=<description>`.
+    /// Read in Console.app by filtering subsystem `technology.fil.ttsmlx`
+    /// category `Synthesizer` (or `Playback`, `Prefetch`).
+    nonisolated private func logError(
+        _ site: String,
+        modelID: String?,
+        stage: String?,
+        error: Error
+    ) {
+        let id = modelID ?? "?"
+        let s = stage ?? "?"
+        let description = error.localizedDescription
+        logger.error("ERROR \(site, privacy: .public): modelID=\(id, privacy: .public) stage=\(s, privacy: .public) underlying=\(description, privacy: .public)")
+    }
+
     private func emit(_ event: TTSDiagnostic) {
         diagnosticHandler?(event)
         for continuation in eventContinuations.values {
             continuation.yield(event)
         }
+    }
+
+    /// Read-only state dump for ad-hoc diagnosis. Safe to call from anywhere.
+    /// Mirrored into `os.Logger.info` so it shows up alongside synthesis
+    /// logs when you're trying to correlate "why didn't generation start."
+    public struct Snapshot: Sendable, Hashable {
+        public let warmedModelIDs: [String]
+        public let eventStreamSubscriberCount: Int
+        public let hasClosureHandler: Bool
+    }
+
+    public func snapshot() -> Snapshot {
+        let snap = Snapshot(
+            warmedModelIDs: Array(warmedModelIDs).sorted(),
+            eventStreamSubscriberCount: eventContinuations.count,
+            hasClosureHandler: diagnosticHandler != nil
+        )
+        info("snapshot: warmed=\(snap.warmedModelIDs) subscribers=\(snap.eventStreamSubscriberCount) closureHandler=\(snap.hasClosureHandler)")
+        return snap
     }
 
     // MARK: - Lifecycle
@@ -149,10 +188,11 @@ public actor TTSSpeechSynthesizer {
     ) async throws -> TTSAudioFile {
         let prompt = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else {
+            info("synthesize: REJECTED empty text")
             throw TTSError.emptyText
         }
+        info("synthesize: ENTRY model=\(model.id) chars=\(prompt.count) voice=\(options.voice?.identifier ?? "nil")")
         emit(.requestStarted(modelID: model.id, textLength: prompt.count))
-        log("synthesize start: model=\(model.id) chars=\(prompt.count)")
 
         let loadedModel = try await prepareModel(model, options: options, progressHandler: progressHandler)
 
@@ -177,6 +217,7 @@ public actor TTSSpeechSynthesizer {
             ))
         }
 
+        info("synthesize: calling MLX.generate for \(model.id)")
         let generationStart = Date()
         let samples: [Float]
         do {
@@ -190,13 +231,20 @@ public actor TTSSpeechSynthesizer {
                 parameters: parameters
             )
         } catch {
+            logError("synthesize.generate", modelID: model.id, stage: "generatingAudio", error: error)
             let wrapped = TTSError.wrap(error, modelID: model.id, stage: .generatingAudio)
             emit(.errorOccurred(modelID: model.id, stage: .generatingAudio, error: wrapped))
             throw wrapped
         }
+        let generationDuration = Date().timeIntervalSince(generationStart)
+        if samples.isEmpty {
+            logger.warning("synthesize: MLX.generate returned ZERO samples for \(model.id, privacy: .public). Model loaded but produced no audio — likely a runtime issue.")
+        } else {
+            info("synthesize: MLX.generate produced \(samples.count) samples in \(String(format: "%.2f", generationDuration))s")
+        }
         emit(.synthesisFinished(
             modelID: model.id,
-            duration: Date().timeIntervalSince(generationStart),
+            duration: generationDuration,
             sampleCount: samples.count
         ))
 
@@ -248,8 +296,10 @@ public actor TTSSpeechSynthesizer {
     ) async throws -> AsyncThrowingStream<TTSAudioBufferChunk, Error> {
         let prompt = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else {
+            await infoFromMain("synthesizeStream: REJECTED empty text")
             throw TTSError.emptyText
         }
+        await infoFromMain("synthesizeStream: ENTRY model=\(model.id) chars=\(prompt.count) voice=\(options.voice?.identifier ?? "nil") interval=\(options.streamingInterval)s")
         await emitFromMain(.requestStarted(modelID: model.id, textLength: prompt.count))
 
         let loadedModel = try await prepareModel(model, options: options, progressHandler: progressHandler)
@@ -282,27 +332,44 @@ public actor TTSSpeechSynthesizer {
         let streamStart = Date()
         Task { @MainActor in
             var bufferCount = 0
+            var emptyBufferCount = 0
             var firstBufferEmitted = false
             do {
                 for try await buffer in upstream {
-                    if !firstBufferEmitted, buffer.frameLength > 0 {
+                    if buffer.frameLength == 0 {
+                        emptyBufferCount += 1
+                        continue
+                    }
+                    if !firstBufferEmitted {
                         firstBufferEmitted = true
                         let latency = Date().timeIntervalSince(streamStart)
+                        await synthesizer.infoFromMain("synthesizeStream[\(modelID)]: FIRST BUFFER at \(String(format: "%.2f", latency))s, frameLength=\(buffer.frameLength)")
                         await synthesizer.emitFromMain(
                             .firstBufferYielded(modelID: modelID, latency: latency)
                         )
                     }
                     continuation.yield(.init(buffer: buffer, sampleRate: sampleRate))
                     bufferCount += 1
+                    // Periodic progress log for long streams (every 25 buffers).
+                    if bufferCount.isMultiple(of: 25) {
+                        await synthesizer.infoFromMain("synthesizeStream[\(modelID)]: \(bufferCount) buffers yielded so far")
+                    }
                 }
+                let totalDuration = Date().timeIntervalSince(streamStart)
                 progressHandler?(.init(stage: .completed, fractionCompleted: 1, message: "Streaming finished."))
+                if bufferCount == 0 {
+                    await synthesizer.warningFromMain("synthesizeStream[\(modelID)]: FINISHED WITH ZERO BUFFERS after \(String(format: "%.2f", totalDuration))s (empty=\(emptyBufferCount)). MLX path ran but emitted no audio. Most common causes: (1) text contained only punctuation, (2) MLX runtime issue on this device, (3) model loaded but generate path is mis-wired upstream. Check that another model produces audio on the same device.")
+                } else {
+                    await synthesizer.infoFromMain("synthesizeStream[\(modelID)]: FINISHED total=\(bufferCount) buffers (empty=\(emptyBufferCount) skipped) in \(String(format: "%.2f", totalDuration))s")
+                }
                 await synthesizer.emitFromMain(.streamingFinished(
                     modelID: modelID,
-                    duration: Date().timeIntervalSince(streamStart),
+                    duration: totalDuration,
                     bufferCount: bufferCount
                 ))
                 continuation.finish()
             } catch {
+                await synthesizer.logErrorFromMain("synthesizeStream.upstream", modelID: modelID, stage: "generatingAudio", error: error)
                 let wrapped = TTSError.wrap(error, modelID: modelID, stage: .generatingAudio)
                 await synthesizer.emitFromMain(
                     .errorOccurred(modelID: modelID, stage: .generatingAudio, error: wrapped)
@@ -311,6 +378,18 @@ public actor TTSSpeechSynthesizer {
             }
         }
         return stream
+    }
+
+    /// Re-entry points used by Tasks spawned from `@MainActor` contexts to
+    /// route log calls back through the actor's nonisolated logger.
+    func infoFromMain(_ message: String) {
+        info(message)
+    }
+    func warningFromMain(_ message: String) {
+        logger.warning("\(message, privacy: .public)")
+    }
+    func logErrorFromMain(_ site: String, modelID: String?, stage: String?, error: Error) {
+        logError(site, modelID: modelID, stage: stage, error: error)
     }
 
     /// Helper to emit a diagnostic from a non-actor isolated context (e.g. the
@@ -335,13 +414,21 @@ public actor TTSSpeechSynthesizer {
         progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)? = nil
     ) async throws -> AsyncThrowingStream<TTSAudioBufferChunk, Error> {
         let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty else { throw TTSError.emptyText }
+        guard !normalized.isEmpty else {
+            await infoFromMain("synthesizeLong: REJECTED empty text")
+            throw TTSError.emptyText
+        }
 
         // Use chunkInfos against the ORIGINAL text so emitted character ranges
         // map directly to what the caller passed in (matches their highlight
         // overlay coordinates).
         let chunkInfos = chunker.chunkInfos(for: text)
-        guard !chunkInfos.isEmpty else { throw TTSError.emptyText }
+        guard !chunkInfos.isEmpty else {
+            await infoFromMain("synthesizeLong: REJECTED text produced zero chunks (likely whitespace/punctuation only)")
+            throw TTSError.emptyText
+        }
+
+        await infoFromMain("synthesizeLong: ENTRY model=\(model.id) chars=\(text.count) chunks=\(chunkInfos.count)")
 
         let (stream, continuation) = AsyncThrowingStream<TTSAudioBufferChunk, Error>.makeStream()
         let total = chunkInfos.count
@@ -352,6 +439,7 @@ public actor TTSSpeechSynthesizer {
             do {
                 for (index, info) in chunkInfos.enumerated() {
                     try Task.checkCancellation()
+                    await synthesizer.infoFromMain("synthesizeLong[\(modelID)]: chunk \(index + 1)/\(total) chars=\(info.text.count)")
                     let chunkStartedAt = Date()
                     var didEmitChunkStart = false
 
@@ -386,6 +474,7 @@ public actor TTSSpeechSynthesizer {
                         continuation.yield(pcmChunk)
                     }
                     let chunkDuration = Date().timeIntervalSince(chunkStartedAt)
+                    await synthesizer.infoFromMain("synthesizeLong[\(modelID)]: chunk \(index + 1)/\(total) FINISHED in \(String(format: "%.2f", chunkDuration))s (didStart=\(didEmitChunkStart))")
                     await synthesizer.emitFromMain(.chunkFinished(
                         modelID: modelID,
                         chunkIndex: index,
@@ -405,8 +494,10 @@ public actor TTSSpeechSynthesizer {
                     fractionCompleted: 1,
                     message: "Long-form synthesis finished."
                 ))
+                await synthesizer.infoFromMain("synthesizeLong[\(modelID)]: ALL \(total) chunks FINISHED")
                 continuation.finish()
             } catch {
+                await synthesizer.logErrorFromMain("synthesizeLong.chunkLoop", modelID: modelID, stage: "generatingAudio", error: error)
                 continuation.finish(throwing: error)
             }
         }
@@ -689,8 +780,10 @@ public actor TTSSpeechSynthesizer {
         options: TTSSynthesisOptions,
         progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)?
     ) async throws -> sending any SpeechGenerationModel {
+        info("prepareModel: ENTRY \(model.id) wasWarmed=\(warmedModelIDs.contains(model.id))")
         let resolveStart = Date()
         let wasInstalled = await modelStore.isInstalled(model.id)
+        info("prepareModel: resolved \(model.id) installed=\(wasInstalled) in \(String(format: "%.2f", Date().timeIntervalSince(resolveStart)))s")
         emit(.modelResolveFinished(
             modelID: model.id,
             wasInstalled: wasInstalled,
@@ -698,6 +791,7 @@ public actor TTSSpeechSynthesizer {
         ))
 
         if !wasInstalled {
+            info("prepareModel: download STARTED for \(model.id)")
             emit(.modelDownloadStarted(modelID: model.id))
         }
         let downloadStart = Date()
@@ -708,11 +802,13 @@ public actor TTSSpeechSynthesizer {
                 progressHandler: progressHandler
             )
         } catch {
+            logError("prepareModel.ensureDownloaded", modelID: model.id, stage: "downloadingModel", error: error)
             let wrapped = TTSError.wrap(error, modelID: model.id, stage: .downloadingModel)
             emit(.errorOccurred(modelID: model.id, stage: .downloadingModel, error: wrapped))
             throw wrapped
         }
         if !wasInstalled {
+            info("prepareModel: download FINISHED for \(model.id) in \(String(format: "%.2f", Date().timeIntervalSince(downloadStart)))s")
             emit(.modelDownloadFinished(
                 modelID: model.id,
                 duration: Date().timeIntervalSince(downloadStart)
@@ -725,19 +821,23 @@ public actor TTSSpeechSynthesizer {
                 message: "Preparing synthesis pipeline..."
             ))
         }
+        info("prepareModel: MLX load STARTED for \(model.id)")
         emit(.modelLoadStarted(modelID: model.id))
         let loadStart = Date()
         let loaded: any SpeechGenerationModel
         do {
             loaded = try await MLXTTSModelLoader.load(descriptor: model, hfToken: options.hfToken)
         } catch {
+            logError("prepareModel.MLXLoad", modelID: model.id, stage: "loadingModel", error: error)
             let wrapped = TTSError.wrap(error, modelID: model.id, stage: .loadingModel)
             emit(.errorOccurred(modelID: model.id, stage: .loadingModel, error: wrapped))
             throw wrapped
         }
+        let loadDuration = Date().timeIntervalSince(loadStart)
+        info("prepareModel: MLX load FINISHED for \(model.id) in \(String(format: "%.2f", loadDuration))s sampleRate=\(loaded.sampleRate)")
         emit(.modelLoadFinished(
             modelID: model.id,
-            duration: Date().timeIntervalSince(loadStart)
+            duration: loadDuration
         ))
         warmedModelIDs.insert(model.id)
         return loaded
