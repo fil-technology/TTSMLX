@@ -444,15 +444,24 @@ public actor TTSSpeechSynthesizer {
         let generationStart = Date()
         let samples: [Float]
         do {
-            samples = try await Self.generateSamples(
-                model: loadedModel,
-                text: prompt,
-                language: options.language?.identifier,
-                voice: options.voice?.identifier,
-                referenceAudio: referenceAudio,
-                referenceText: options.referenceText,
-                parameters: parameters
-            )
+            // Wrap in `MLX.withError` so C++ MLX failures (e.g.
+            // `broadcast_shapes` in attention with a stale KV-cache, OOM,
+            // shape mismatches) surface as Swift `throws` instead of
+            // terminating the process via `fatalError` inside
+            // `MLX.ErrorHandler.dispatch`. The caught error wraps as
+            // `TTSError.generationFailed` and propagates through the
+            // existing handler chain.
+            samples = try await MLX.withError {
+                try await Self.generateSamples(
+                    model: loadedModel,
+                    text: prompt,
+                    language: options.language?.identifier,
+                    voice: options.voice?.identifier,
+                    referenceAudio: referenceAudio,
+                    referenceText: options.referenceText,
+                    parameters: parameters
+                )
+            }
         } catch {
             logError("synthesize.generate", modelID: model.id, stage: "generatingAudio", error: error)
             let wrapped = TTSError.wrap(error, modelID: model.id, stage: .generatingAudio)
@@ -560,6 +569,18 @@ public actor TTSSpeechSynthesizer {
                     stage: .generatingAudio,
                     message: "Streaming audio..."
                 ))
+                // NOTE: We can't wrap the streaming path in `MLX.withError`
+                // because the AsyncThrowingStream returned by
+                // `model.generatePCMBufferStream(...)` is non-Sendable and
+                // can only be created and consumed on the same actor
+                // (MainActor in this case), but MLX.withError requires a
+                // closure that crosses isolation. The `synthesize`
+                // (non-streaming) and `prepareModel` paths ARE wrapped —
+                // see those call sites. The streaming path remains
+                // vulnerable to MLX fatal errors (e.g. `broadcast_shapes`
+                // from stale KV cache) until either upstream MLX adds a
+                // MainActor-aware withError or the upstream
+                // generatePCMBufferStream drops its @MainActor isolation.
                 let upstream = try await Self.makePCMBufferStream(
                     model: loadedModel,
                     text: capturedPrompt,
@@ -1500,7 +1521,14 @@ public actor TTSSpeechSynthesizer {
         let loadStart = Date()
         let loaded: any SpeechGenerationModel
         do {
-            loaded = try await MLXTTSModelLoader.load(descriptor: model, hfToken: options.hfToken)
+            // Same `MLX.withError` wrap as the generate path — model load
+            // does MLX work (weight materialization, kernel JIT) that can
+            // fail at the C++ layer; without this wrapper those failures
+            // would terminate the process via `fatalError` inside MLX's
+            // ErrorHandler.
+            loaded = try await MLX.withError {
+                try await MLXTTSModelLoader.load(descriptor: model, hfToken: options.hfToken)
+            }
         } catch {
             logError("prepareModel.MLXLoad", modelID: model.id, stage: "loadingModel", error: error)
             let wrapped = TTSError.wrap(error, modelID: model.id, stage: .loadingModel)
