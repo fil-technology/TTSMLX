@@ -954,6 +954,13 @@ public actor TTSSpeechSynthesizer {
         onPlaybackEnd: (@MainActor () -> Void)? = nil,
         progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)? = nil
     ) async throws {
+        // Serial model use: cancel any prior in-flight generation before starting
+        // a new utterance. The cached model instance is NOT safe for concurrent
+        // generation, and with look-ahead the previous call may still be
+        // generating chunks in the background when the user taps Play again —
+        // overlapping generations corrupt the shared KV cache (manifested as a
+        // "RoPE cache length exceeded" crash in CSM/Marvis).
+        cancelAllInFlight(reason: .explicit)
         let window = lookAheadSeconds ?? TTSDeviceProfile.current.recommendedLookAheadSeconds
         // capacity <= 0 yields a disabled (pass-through) gate; only attach one
         // when bounding is actually requested.

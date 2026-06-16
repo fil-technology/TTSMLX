@@ -8,6 +8,13 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ### Fixed
 
+- **Crash on restarting playback while a prior stream was still generating**
+  (`RoPE cache length exceeded` in CSM/Marvis). With look-ahead, a previous
+  `speakStreaming` could still be generating chunks in the background when a new
+  one started, running two generations against the same cached (non-thread-safe)
+  model instance and corrupting its KV cache. `speakStreaming` now cancels any
+  in-flight generation before starting (serial model use).
+
 - **Marvis and Orpheus failed to load** with a misleading "Network unavailable:
   Key …CSMllama3ScaledRoPE" (really a model-load error). Their `ScaledRoPE`
   precomputes `cos`/`sin` caches that MLX reflects as parameters with no
