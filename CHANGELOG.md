@@ -6,6 +6,15 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Marvis and Orpheus failed to load** with a misleading "Network unavailable:
+  Key …CSMllama3ScaledRoPE" (really a model-load error). Their `ScaledRoPE`
+  precomputes `cos`/`sin` caches that MLX reflects as parameters with no
+  matching checkpoint keys, so `verify: .all` (`.allModelKeysSet`) rejected the
+  load. Fixed in the backend by relaxing to `[.noUnusedKeys, .shapeMismatch]`;
+  `mlx-audio-swift` pin bumped `0.1.3-tts.1` → `0.1.4-tts.1`.
+
 ### Added
 
 - **Realtime conversational TTS loop (`TTSRealtimeSession`).** A low-latency

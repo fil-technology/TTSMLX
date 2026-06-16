@@ -1,5 +1,5 @@
 {
-  "originHash" : "adaacd7425cdff5e23dd95bbd8f98f0cb1d05b92563f81f7daa26049649bc56a",
+  "originHash" : "801e6df4674a7c80048134b2c06c6e2aedc65c7dfbe66ff9d7a51d87da6256d1",
   "pins" : [
     {
       "identity" : "async-http-client",
@@ -24,8 +24,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/fil-technology/mlx-audio-swift.git",
       "state" : {
-        "revision" : "a141ffd0a9f0d8a3ce33d864e5cd01ac66cfab8d",
-        "version" : "0.1.3-tts.1"
+        "revision" : "fabc4f9729f28e6f340eb088391ba6986d93e7d4",
+        "version" : "0.1.4-tts.1"
       }
     },
     {
