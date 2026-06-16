@@ -8,6 +8,20 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ### Added
 
+- **Realtime conversational TTS loop (`TTSRealtimeSession`).** A low-latency
+  controller for the "ask → speak → repeat" flow: feed it text turns (from any
+  speech-to-text source) and it speaks them with **barge-in** — a new
+  `.interrupt` turn instantly stops both in-flight generation
+  (`cancelAllInFlight`) and audio (`playback.stop()`), then starts the new turn;
+  `.enqueue` speaks turns back-to-back. Emits `TTSRealtimeEvent`
+  (turnStarted / firstAudio / turnFinished / interrupted / failed / idle) and a
+  per-turn `onWord` for karaoke. A generation token keeps a superseded turn from
+  advancing the queue. Speech-to-text is intentionally external (the
+  `mlx-audio-swift` backend has Voxtral streaming STT + SmartTurn turn detection
+  for a future fully on-device mic→text→speech loop).
+- **Demo app: a "Live" tab** exercising the realtime loop — type turns (a
+  stand-in for STT), watch them speak with karaoke highlighting and per-turn
+  status, toggle barge-in, Stop/Clear, and see time-to-first-word.
 - **Bounded look-ahead for live streaming playback (constant-memory book
   reading).** `speakStreaming` now caps how far audio generation runs ahead of
   playback via a new `lookAheadSeconds:` parameter (defaults to a device-aware

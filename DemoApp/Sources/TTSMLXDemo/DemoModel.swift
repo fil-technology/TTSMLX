@@ -1265,6 +1265,114 @@ final class DemoModel {
         readerIsActive = false
         readerStatus = "Stopped."
     }
+
+    // MARK: - Realtime conversational loop (Phase 4)
+
+    enum RealtimeTurnStatus: Hashable {
+        case speaking, done, interrupted, failed(String)
+    }
+
+    struct RealtimeTurn: Identifiable, Hashable {
+        let id: UUID
+        let text: String
+        var status: RealtimeTurnStatus
+    }
+
+    var realtimeTurns: [RealtimeTurn] = []
+    var realtimeInput = ""
+    var realtimeStatus = "Type what you ‘said’ and press Send. A new Send barges in."
+    var realtimeBargeIn = true
+    /// The turn currently showing a karaoke highlight, and the word range within it.
+    var realtimeHighlightTurn: UUID?
+    var realtimeHighlight: Range<Int>?
+    var realtimeLastLatency: TimeInterval?
+    private var realtimeSession: TTSRealtimeSession?
+    private var realtimeSessionModelID: String?
+
+    private func ensureRealtimeSession() -> TTSRealtimeSession {
+        if let session = realtimeSession, realtimeSessionModelID == readerSelectedModelID {
+            return session
+        }
+        realtimeSession?.finish()
+        let model = readerSelectedModel
+        let session = TTSRealtimeSession(
+            model: model,
+            options: TTSSynthesisOptions(
+                generationProfile: model.capabilities.defaultGenerationProfile,
+                streamingInterval: 0.8 // small chunks → fast first word
+            ),
+            synthesizer: synthesizer,
+            playback: playbackController,
+            onWord: { [weak self] turnID, timing in
+                self?.realtimeHighlightTurn = turnID
+                self?.realtimeHighlight = timing.characterRange
+            },
+            onEvent: { [weak self] event in
+                self?.handleRealtimeEvent(event)
+            }
+        )
+        realtimeSession = session
+        realtimeSessionModelID = readerSelectedModelID
+        return session
+    }
+
+    func realtimeSend() {
+        let text = realtimeInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        let session = ensureRealtimeSession()
+        realtimeInput = ""
+        guard let turn = session.say(text, delivery: realtimeBargeIn ? .interrupt : .enqueue) else { return }
+        realtimeTurns.append(RealtimeTurn(id: turn.id, text: turn.text, status: .speaking))
+    }
+
+    func realtimeInterrupt() {
+        realtimeSession?.interrupt()
+    }
+
+    func realtimeReset() {
+        realtimeSession?.finish()
+        realtimeTurns.removeAll()
+        realtimeHighlight = nil
+        realtimeHighlightTurn = nil
+        realtimeStatus = "Cleared."
+    }
+
+    private func handleRealtimeEvent(_ event: TTSRealtimeEvent) {
+        switch event {
+        case let .turnStarted(id, _):
+            setRealtimeTurnStatus(id, .speaking)
+            realtimeStatus = "Speaking…"
+        case let .firstAudio(_, latency):
+            realtimeLastLatency = latency
+        case let .turnFinished(id):
+            setRealtimeTurnStatus(id, .done)
+            clearHighlightIfActive(id)
+            realtimeStatus = "Ready."
+        case let .interrupted(id):
+            setRealtimeTurnStatus(id, .interrupted)
+            clearHighlightIfActive(id)
+            realtimeStatus = "Interrupted."
+        case let .failed(id, message):
+            setRealtimeTurnStatus(id, .failed(message))
+            clearHighlightIfActive(id)
+            realtimeStatus = "Error: \(message)"
+        case .idle:
+            realtimeStatus = "Ready."
+        }
+    }
+
+    private func setRealtimeTurnStatus(_ id: UUID, _ status: RealtimeTurnStatus) {
+        if let index = realtimeTurns.firstIndex(where: { $0.id == id }) {
+            realtimeTurns[index].status = status
+        }
+    }
+
+    private func clearHighlightIfActive(_ id: UUID) {
+        if realtimeHighlightTurn == id {
+            realtimeHighlight = nil
+            realtimeHighlightTurn = nil
+        }
+    }
 }
 
 /// A selectable model for the Reader tab, including `.implemented` variants.

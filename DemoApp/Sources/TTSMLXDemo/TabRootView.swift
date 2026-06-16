@@ -10,6 +10,11 @@ struct TabRootView: View {
                     Label("Reader", systemImage: "book")
                 }
 
+            LiveView(model: model)
+                .tabItem {
+                    Label("Live", systemImage: "bubble.left.and.bubble.right")
+                }
+
             ContentView(model: model)
                 .tabItem {
                     Label("Synthesize", systemImage: "waveform")
