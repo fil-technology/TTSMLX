@@ -111,6 +111,12 @@ struct LiveView: View {
 
     private var inputBar: some View {
         VStack(spacing: 8) {
+            if let progress = model.realtimeProgress {
+                ProgressView(value: progress) {
+                    Text(model.realtimeStatus).font(.caption)
+                }
+                .progressViewStyle(.linear)
+            }
             HStack {
                 Text(model.realtimeStatus)
                     .font(.callout)

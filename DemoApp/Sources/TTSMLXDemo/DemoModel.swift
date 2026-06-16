@@ -1241,7 +1241,11 @@ final class DemoModel {
                         if let fraction = update.fractionCompleted { self.readerProgress = fraction }
                         // Don't clobber the live "Playing…" status once audio starts.
                         if self.readerTimeToFirstWord == nil {
-                            self.readerStatus = update.message
+                            if update.stage == .downloadingModel, let f = update.fractionCompleted {
+                                self.readerStatus = "Downloading model (first run only)… \(Int(f * 100))%"
+                            } else {
+                                self.readerStatus = update.message
+                            }
                         }
                     }
                 )
@@ -1286,6 +1290,8 @@ final class DemoModel {
     var realtimeHighlightTurn: UUID?
     var realtimeHighlight: Range<Int>?
     var realtimeLastLatency: TimeInterval?
+    /// Download/generation progress for the Live tab (nil = not downloading).
+    var realtimeProgress: Double?
     private var realtimeSession: TTSRealtimeSession?
     private var realtimeSessionModelID: String?
 
@@ -1309,6 +1315,20 @@ final class DemoModel {
             },
             onEvent: { [weak self] event in
                 self?.handleRealtimeEvent(event)
+            },
+            onProgress: { [weak self] update in
+                guard let self else { return }
+                switch update.stage {
+                case .downloadingModel:
+                    self.realtimeProgress = update.fractionCompleted
+                    let pct = update.fractionCompleted.map { " \(Int($0 * 100))%" } ?? ""
+                    self.realtimeStatus = "Downloading model (first run only)…\(pct)"
+                case .resolvingModel, .loadingModel:
+                    self.realtimeProgress = nil
+                    self.realtimeStatus = "Loading model…"
+                default:
+                    self.realtimeProgress = nil
+                }
             }
         )
         realtimeSession = session
@@ -1344,6 +1364,7 @@ final class DemoModel {
             realtimeStatus = "Speaking…"
         case let .firstAudio(_, latency):
             realtimeLastLatency = latency
+            realtimeProgress = nil
         case let .turnFinished(id):
             setRealtimeTurnStatus(id, .done)
             clearHighlightIfActive(id)

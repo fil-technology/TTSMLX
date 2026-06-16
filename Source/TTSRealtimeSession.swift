@@ -71,6 +71,7 @@ public final class TTSRealtimeSession {
     private let playback: TTSPlaybackController
     private let onWord: (@MainActor (UUID, TTSWordTiming) -> Void)?
     private let onEvent: (@MainActor (TTSRealtimeEvent) -> Void)?
+    private let onProgress: (@MainActor @Sendable (TTSProgressUpdate) -> Void)?
 
     private var queue: [Turn] = []
     private var currentTurn: Turn?
@@ -86,7 +87,8 @@ public final class TTSRealtimeSession {
         synthesizer: TTSSpeechSynthesizer = TTSSpeechSynthesizer(),
         playback: TTSPlaybackController,
         onWord: (@MainActor (UUID, TTSWordTiming) -> Void)? = nil,
-        onEvent: (@MainActor (TTSRealtimeEvent) -> Void)? = nil
+        onEvent: (@MainActor (TTSRealtimeEvent) -> Void)? = nil,
+        onProgress: (@MainActor @Sendable (TTSProgressUpdate) -> Void)? = nil
     ) {
         self.model = model
         self.options = options
@@ -94,6 +96,7 @@ public final class TTSRealtimeSession {
         self.playback = playback
         self.onWord = onWord
         self.onEvent = onEvent
+        self.onProgress = onProgress
     }
 
     /// `true` while a turn is generating or speaking.
@@ -191,7 +194,8 @@ public final class TTSRealtimeSession {
         do {
             try Task.checkCancellation()
             let stream = try await synthesizer.synthesizeLong(
-                turn.text, using: model, options: options
+                turn.text, using: model, options: options,
+                progressHandler: onProgress
             )
             try await playback.play(
                 stream: stream,
