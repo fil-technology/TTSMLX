@@ -213,56 +213,79 @@ public struct TTSTextChunker: Sendable, Hashable {
         var chunks: [TTSChunkInfo] = []
         var isFirstChunk = true
 
+        // PACK consecutive clause segments into a chunk up to the active limit.
+        // Without this, prose with many short sentences produces dozens of tiny
+        // chunks — each paying full per-chunk generation overhead and draining
+        // the audio queue between them, which makes streamed reading choppy
+        // ("a lot of reads with a lot of stops"). The first chunk stays small
+        // (firstChunkCharacterLimit) for a fast time-to-first-audio.
+        var packStart: Int? = nil
+        var packEnd = 0
+
+        func flushPack() {
+            if let start = packStart, packEnd > start {
+                appendIfMeaningful(scalars: scalars, start: start, end: packEnd, into: &chunks)
+                isFirstChunk = false
+            }
+            packStart = nil
+        }
+
         for segment in clauseSegments {
             let limit = isFirstChunk ? firstChunkCharacterLimit : followupChunkCharacterLimit
+            let segStart = segment.range.lowerBound
+            let segEnd = segment.range.upperBound
 
-            if segment.text.count <= limit {
-                chunks.append(.init(text: segment.text, characterRange: segment.range))
-                isFirstChunk = false
+            if segEnd - segStart > limit {
+                // A single segment exceeds the limit: flush the pack, then
+                // greedily word-split this segment up to the limit.
+                flushPack()
+                var wpStart = segStart
+                var lastWordEnd = segStart
+                var wordStart: Int? = nil
+                for i in segment.range {
+                    if scalars[i].isWhitespace {
+                        if wordStart != nil {
+                            let curLimit = isFirstChunk ? firstChunkCharacterLimit : followupChunkCharacterLimit
+                            if i - wpStart > curLimit, lastWordEnd > wpStart {
+                                appendIfMeaningful(scalars: scalars, start: wpStart, end: lastWordEnd, into: &chunks)
+                                isFirstChunk = false
+                                wpStart = wordStart!
+                            }
+                            lastWordEnd = i
+                            wordStart = nil
+                        }
+                    } else if wordStart == nil {
+                        wordStart = i
+                    }
+                }
+                let curLimit = isFirstChunk ? firstChunkCharacterLimit : followupChunkCharacterLimit
+                if segEnd - wpStart > curLimit, lastWordEnd > wpStart {
+                    appendIfMeaningful(scalars: scalars, start: wpStart, end: lastWordEnd, into: &chunks)
+                    isFirstChunk = false
+                    appendIfMeaningful(scalars: scalars, start: lastWordEnd, end: segEnd, into: &chunks)
+                    isFirstChunk = false
+                } else {
+                    appendIfMeaningful(scalars: scalars, start: wpStart, end: segEnd, into: &chunks)
+                    isFirstChunk = false
+                }
                 continue
             }
 
-            // Word-split: walk indices and pack greedily up to the active limit.
-            var packStart = segment.range.lowerBound
-            var packEnd = packStart
-            var wordStart: Int? = nil
-
-            for i in segment.range {
-                let ch = scalars[i]
-                if ch.isWhitespace {
-                    if wordStart != nil {
-                        let tentativeEnd = i
-                        if tentativeEnd - packStart > (isFirstChunk ? firstChunkCharacterLimit : followupChunkCharacterLimit) {
-                            // Flush whatever we accumulated up through packEnd.
-                            if packEnd > packStart {
-                                appendIfMeaningful(scalars: scalars, start: packStart, end: packEnd, into: &chunks)
-                                isFirstChunk = false
-                            }
-                            packStart = wordStart!
-                            packEnd = tentativeEnd
-                        } else {
-                            packEnd = tentativeEnd
-                        }
-                        wordStart = nil
-                    }
-                } else if wordStart == nil {
-                    wordStart = i
-                }
-            }
-            // Tail
-            let finalEnd = segment.range.upperBound
-            if finalEnd - packStart > (isFirstChunk ? firstChunkCharacterLimit : followupChunkCharacterLimit) && packEnd > packStart {
-                appendIfMeaningful(scalars: scalars, start: packStart, end: packEnd, into: &chunks)
-                isFirstChunk = false
-                if let ws = wordStart {
-                    appendIfMeaningful(scalars: scalars, start: ws, end: finalEnd, into: &chunks)
-                    isFirstChunk = false
-                }
+            if packStart == nil {
+                packStart = segStart
+                packEnd = segEnd
+            } else if segEnd - packStart! <= limit {
+                // Extend the pack to absorb this segment (and the punctuation
+                // between it and the previous one).
+                packEnd = segEnd
             } else {
-                appendIfMeaningful(scalars: scalars, start: packStart, end: finalEnd, into: &chunks)
-                isFirstChunk = false
+                // Adding this segment would exceed the limit → flush and restart.
+                flushPack()
+                packStart = segStart
+                packEnd = segEnd
             }
         }
+        flushPack()
 
         return chunks
     }

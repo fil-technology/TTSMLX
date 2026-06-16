@@ -8,6 +8,13 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ### Fixed
 
+- **Choppy / stop-start streamed reading on prose.** `TTSTextChunker` emitted
+  one chunk per sentence/clause and never packed short segments together, so a
+  page of short sentences became dozens of tiny chunks (e.g. 808 chars → 22
+  chunks). Each tiny chunk paid full per-chunk generation overhead and let the
+  audio queue drain between chunks → audible stop-start. The chunker now packs
+  consecutive segments up to `followupChunkCharacterLimit` (the first chunk
+  stays small for fast time-to-first-audio), cutting that example to ~5 chunks.
 - **Crash on restarting playback while a prior stream was still generating**
   (`RoPE cache length exceeded` in CSM/Marvis). With look-ahead, a previous
   `speakStreaming` could still be generating chunks in the background when a new

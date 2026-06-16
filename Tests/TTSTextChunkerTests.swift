@@ -88,7 +88,32 @@ struct TTSTextChunkerTests {
         let chunker = TTSTextChunker(firstChunkCharacterLimit: 200, followupChunkCharacterLimit: 200)
         let text = "First sentence. Second sentence! Third one?"
         let infos = chunker.chunkInfos(for: text)
-        #expect(infos.count == 3)
+        // All three short sentences fit under the 200-char limit, so they pack
+        // into a single chunk (see packing test below). Ranges must still slice
+        // back to the exact chunk text.
+        #expect(infos.count == 1)
+        for info in infos {
+            let start = text.index(text.startIndex, offsetBy: info.characterRange.lowerBound)
+            let end = text.index(text.startIndex, offsetBy: info.characterRange.upperBound)
+            #expect(String(text[start..<end]) == info.text)
+        }
+    }
+
+    @Test("short sentences are packed up to the limit, not one chunk each")
+    func packsShortSentences() {
+        let chunker = TTSTextChunker(firstChunkCharacterLimit: 80, followupChunkCharacterLimit: 220)
+        // 12 short sentences (~24 chars each ≈ 290 chars). Per-sentence chunking
+        // would yield 12 chunks; packing should yield only a few (≤ ceil(290/220)+1).
+        let text = Array(repeating: "The cat sat on the mat.", count: 12).joined(separator: " ")
+        let infos = chunker.chunkInfos(for: text)
+        #expect(infos.count <= 4)
+        // First chunk stays small for fast time-to-first-audio.
+        #expect(infos.first!.text.count <= 80)
+        // Every chunk respects its budget.
+        for (i, info) in infos.enumerated() {
+            #expect(info.text.count <= (i == 0 ? 80 : 220))
+        }
+        // Round-trips against the original text.
         for info in infos {
             let start = text.index(text.startIndex, offsetBy: info.characterRange.lowerBound)
             let end = text.index(text.startIndex, offsetBy: info.characterRange.upperBound)
