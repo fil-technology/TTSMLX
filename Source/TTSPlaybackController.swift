@@ -82,6 +82,11 @@ public final class TTSPlaybackController {
     private var connectedFormat: AVAudioFormat?
     private var scheduledBufferCount = 0
     private var completedBufferCount = 0
+    /// True while a streamed source is still producing buffers. Prevents
+    /// `finishIfNeeded` from declaring playback finished when the queue merely
+    /// drains between chunks (which would prematurely fire `onPlaybackEnd`,
+    /// flipping a reader UI back to "stopped" mid-read).
+    private var streamProducing = false
     private var onPlaybackEnd: (@MainActor () -> Void)?
     private var currentFile: AVAudioFile?
     private var seekFrameOffset: AVAudioFramePosition = 0
@@ -184,6 +189,9 @@ public final class TTSPlaybackController {
         currentFile = nil
         seekFrameOffset = 0
         var consumed = 0
+        // While draining, don't let a transient queue-drain between chunks be
+        // mistaken for end-of-playback.
+        streamProducing = true
         // Whatever ends this drain (completion, supersession, throw,
         // cancellation), release any producer parked on the gate so it can't
         // deadlock waiting for a `release` that will never come.
@@ -192,15 +200,19 @@ public final class TTSPlaybackController {
             for try await chunk in stream {
                 if sessionToken != myToken {
                     logger.info("play(stream:): superseded by token=\(self.sessionToken, privacy: .public); exiting")
-                    return
+                    return // a newer session's stop() owns resetting streamProducing
                 }
                 try schedule(chunk)
                 consumed += 1
             }
         } catch {
+            streamProducing = false
             logger.error("play(stream:): stream THREW after \(consumed, privacy: .public) buffers: \(error.localizedDescription, privacy: .public)")
             throw error
         }
+        // Stream fully produced: now end-of-queue genuinely means finished.
+        streamProducing = false
+        finishIfNeeded()
         if consumed == 0 {
             logger.warning("play(stream:): stream FINISHED WITH ZERO BUFFERS. Upstream synthesis produced no audio. Check synthesizeStream logs for the matching modelID.")
         } else {
@@ -376,6 +388,7 @@ public final class TTSPlaybackController {
     public func stop() {
         playerNode.stop()
         engine.stop()
+        streamProducing = false
         scheduledBufferCount = 0
         completedBufferCount = 0
         connectedFormat = nil
@@ -599,7 +612,10 @@ public final class TTSPlaybackController {
     }
 
     private func finishIfNeeded() {
-        guard scheduledBufferCount > 0,
+        // Don't finish while a stream is still producing — the queue draining
+        // between chunks is transient, not end-of-playback.
+        guard !streamProducing,
+              scheduledBufferCount > 0,
               completedBufferCount >= scheduledBufferCount else { return }
         state = .idle
         let callback = onPlaybackEnd

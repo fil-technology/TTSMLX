@@ -8,6 +8,12 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ### Fixed
 
+- **`onPlaybackEnd` fired prematurely mid-stream** whenever the audio queue
+  drained between chunks, so streamed playback looked "finished" repeatedly.
+  In a reader UI this flipped state back to stopped mid-read — word highlighting
+  vanished and the Play button reappeared while audio was still coming.
+  `TTSPlaybackController` now tracks whether the stream is still producing and
+  only finishes once it has genuinely ended.
 - **Choppy / stop-start streamed reading on prose.** `TTSTextChunker` emitted
   one chunk per sentence/clause and never packed short segments together, so a
   page of short sentences became dozens of tiny chunks (e.g. 808 chars → 22
