@@ -45,7 +45,7 @@ Quick picking guide:
 - Try `VyvoTTS` if you want a smaller English Qwen3-style model.
 Current upstream note:
 
-- `TTSMLX` keeps the local path dependency on `../mlx-audio-swift` during active fork development. This package does not pin a standalone `mlx-audio` backend version by itself.
+- As of `0.6.1`, `TTSMLX` pins all MLX dependencies to public tagged forks under `github.com/fil-technology` (`mlx-audio-swift @ 0.1.3-tts.1`, `mlx-swift @ 0.31.5`, whose `mlx` C++ submodule points at `mlx @ v0.31.3-tts-bg-safe.1`). These forks carry the KV-cache reset and iOS background-safe Metal patches that are not yet in any upstream tagged release. The package is now consumable end to end from GitHub with no local-path checkout. See `Docs/mlx-swift-bg-safe-fork.md`.
 - The wrapper catalog only lists model families that the current local `mlx-audio-swift` runtime can synthesize with end to end.
 - New upstream `mlx-audio v0.4.2` TTS families such as `Irodori-TTS`, `HumeAI TADA`, `KugelAudio TTS`, and `Voxtral-4B-TTS-2603` may still appear in model search as discovery-only results, but they are intentionally marked unsupported until the local Swift backend gains loaders for them.
 - `Kitten TTS` may also appear in search as discovery-only for now. The local backend can parse its model assets, but audio generation and streaming are still not wired through yet, so `TTSMLX` does not advertise it as runnable.

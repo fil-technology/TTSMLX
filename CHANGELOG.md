@@ -6,7 +6,29 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-06-16
+
 ### Fixed
+
+- **Made v0.6.x safely consumable end-to-end.** v0.6.0's crash fixes
+  depended on patched dependencies applied only on the maintainer's
+  machine (local-path `mlx-audio-swift`, `swift package edit` on
+  `mlx-swift`), so downstream consumers pulling v0.6.0 still hit the
+  original crashes. v0.6.1 pins every dependency to public tagged forks
+  that carry the patches, with **no source changes in TTSMLX itself**
+  (only `Package.swift` / `Package.resolved`):
+    - `mlx-audio-swift` → `github.com/fil-technology/mlx-audio-swift`
+      `@ 0.1.3-tts.1` — Mimi/PocketTTS KV-cache reset (the
+      `broadcast_shapes` crash on model-instance reuse).
+    - `mlx-swift` → `github.com/fil-technology/mlx-swift @ 0.31.5` —
+      upstream 0.31.3 with its `mlx` C++ submodule repointed at
+      `github.com/fil-technology/mlx @ v0.31.3-tts-bg-safe.1`, which
+      swallows the iOS background-permission Metal error in
+      `check_error`. Tagged `0.31.5` (a normal version above upstream's
+      0.31.4) so it satisfies `mlx-swift-lm`'s `0.31.3..<0.32.0` range;
+      it is functionally 0.31.3 + the submodule patch.
+  See `Docs/mlx-swift-bg-safe-fork.md`. Verified: `swift build` + full
+  test suite (100 tests / 14 suites) green against the pinned forks.
 
 - **Metal-in-background crash** definitively. The Swift defenses we
   shipped in 0.6.0 (synchronous shutdown flag, GPU stream synchronize

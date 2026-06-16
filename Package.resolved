@@ -1,5 +1,5 @@
 {
-  "originHash" : "87bc6d3d39dc6d5fe8fa699698a94291bd61a60f1cb70d715d3c8c78e5dd821d",
+  "originHash" : "adaacd7425cdff5e23dd95bbd8f98f0cb1d05b92563f81f7daa26049649bc56a",
   "pins" : [
     {
       "identity" : "async-http-client",
@@ -20,12 +20,21 @@
       }
     },
     {
+      "identity" : "mlx-audio-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/fil-technology/mlx-audio-swift.git",
+      "state" : {
+        "revision" : "a141ffd0a9f0d8a3ce33d864e5cd01ac66cfab8d",
+        "version" : "0.1.3-tts.1"
+      }
+    },
+    {
       "identity" : "mlx-swift",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/ml-explore/mlx-swift.git",
+      "location" : "https://github.com/fil-technology/mlx-swift.git",
       "state" : {
-        "revision" : "61b9e011e09a62b489f6bd647958f1555bdf2896",
-        "version" : "0.31.3"
+        "revision" : "82246c3bc65af04bf1f2c87e21ff86c44323da84",
+        "version" : "0.31.5"
       }
     },
     {
