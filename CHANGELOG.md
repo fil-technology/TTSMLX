@@ -24,6 +24,11 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
   `streamAndCacheNarration` and `TTSPlaybackController.play(stream:…)` so custom
   pipelines can opt into the same bound.
 - `TTSDeviceProfile.recommendedLookAheadSeconds`, scaled by device memory.
+- **Demo app: a "Reader" tab** for reviewing long-text behavior — drop a `.txt`
+  or paste a long passage, pick any runnable model (validated or implemented),
+  stream it with karaoke word-by-word highlighting and auto-scroll, and watch a
+  live readout of time-to-first-word and resident memory plus an adjustable
+  look-ahead window. Exercises `speakStreaming(lookAheadSeconds:)` end to end.
 - **Expanded multilingual catalog.** Added selectable catalog entries that
   route to already-shipped backend loaders (verified via each repo's
   `config.json` `model_type`):

@@ -5,6 +5,11 @@ struct TabRootView: View {
 
     var body: some View {
         TabView {
+            ReaderView(model: model)
+                .tabItem {
+                    Label("Reader", systemImage: "book")
+                }
+
             ContentView(model: model)
                 .tabItem {
                     Label("Synthesize", systemImage: "waveform")
