@@ -24,6 +24,19 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
   `streamAndCacheNarration` and `TTSPlaybackController.play(stream:…)` so custom
   pipelines can opt into the same bound.
 - `TTSDeviceProfile.recommendedLookAheadSeconds`, scaled by device memory.
+- **Expanded multilingual catalog.** Added selectable catalog entries that
+  route to already-shipped backend loaders (verified via each repo's
+  `config.json` `model_type`):
+    - `mlx-community/Qwen3-TTS-12Hz-0.6B-Base-4bit` — smaller 4-bit multilingual.
+    - `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-4bit` — higher-quality multilingual.
+    - `mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-4bit` — multilingual with
+      reference-audio / voice-design conditioning.
+    - `mlx-community/Soprano-80M-4bit` — tiny (~60 MB) fast English model.
+  These are staged `.implemented` (not `.validated`): they carry full
+  descriptors and synthesize end to end, but are excluded from
+  `supportedModels` / `recommendedModel` until run + memory-profiled on a
+  physical iPhone. `peakMemoryMB` on them are conservative estimates. All
+  Qwen3-TTS entries now share `TTSMLX.qwen3TTSLanguages` (15 languages).
 
 ## [0.6.1] - 2026-06-16
 

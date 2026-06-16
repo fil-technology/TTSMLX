@@ -34,6 +34,25 @@ These models are included in the built-in `TTSMLX.supportedModels` catalog:
 - [mlx-community/orpheus-3b-0.1-ft-bf16](https://huggingface.co/mlx-community/orpheus-3b-0.1-ft-bf16) - larger multi-voice LlamaTTS model with expressive built-in speakers.
 - [mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit](https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit) - strongest general-purpose option here when you want better quality, multilingual support, and voice-cloning style inputs.
 
+### Additional variants (implemented, pending on-device validation)
+
+These route to a backend loader that already ships, so they synthesize end to
+end and carry full descriptors you can select today — they are staged
+`.implemented` rather than `.validated` only because they haven't been
+run + memory-profiled on a physical iPhone yet (their `peakMemoryMB` values are
+conservative estimates). They appear in `TTSMLX.implementedModels`, not in
+`TTSMLX.supportedModels` / `recommendedModel(for:)`, so they are never
+auto-selected until promoted. To use one, pass its descriptor explicitly.
+
+- [Qwen3-TTS-12Hz-0.6B-Base-4bit](https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-0.6B-Base-4bit) - smaller-footprint 4-bit build of the multilingual default.
+- [Qwen3-TTS-12Hz-1.7B-Base-4bit](https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-1.7B-Base-4bit) - higher-quality multilingual (1.7B); best on 6GB+ iPhones.
+- [Qwen3-TTS-12Hz-1.7B-CustomVoice-4bit](https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-4bit) - multilingual with custom-voice / reference-audio conditioning for voice design and cloning.
+- [Soprano-80M-4bit](https://huggingface.co/mlx-community/Soprano-80M-4bit) - tiny (~60MB) English model; fastest start and lowest memory.
+
+All Qwen3-TTS entries advertise 15 languages (English, Spanish, French, German,
+Italian, Portuguese, Dutch, Polish, Turkish, Russian, Japanese, Korean,
+Chinese, Arabic, Hindi).
+
 For a fuller support matrix, including non-runnable tracked models such as `MOSS-TTS-Nano`, see [Docs/ModelSupport.md](Docs/ModelSupport.md) or inspect `TTSMLX.modelCatalog` at runtime.
 
 Quick picking guide:

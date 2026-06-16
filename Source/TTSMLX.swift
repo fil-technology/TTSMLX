@@ -1,6 +1,13 @@
 import Foundation
 
 public enum TTSMLX {
+    /// Languages the Qwen3-TTS family advertises. Shared by every Qwen3-TTS
+    /// catalog entry so the list stays consistent across size/quant variants.
+    static let qwen3TTSLanguages: [TTSLanguage] = [
+        .english, .spanish, .french, .german, .italian, .portuguese, .dutch,
+        .polish, .turkish, .russian, .japanese, .korean, .chinese, .arabic, .hindi
+    ]
+
     public static let modelCatalog: [TTSModelCatalogEntry] = [
         validatedEntry(
             descriptor: .init(
@@ -143,13 +150,13 @@ public enum TTSMLX {
                 id: "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit",
                 displayName: "Qwen3 TTS",
                 summary: "Higher quality multilingual model.",
-                supportedLanguages: [.english, .spanish, .french, .german, .italian, .portuguese, .dutch, .polish, .turkish, .russian, .japanese, .korean, .chinese, .arabic, .hindi],
+                supportedLanguages: Self.qwen3TTSLanguages,
                 suggestedVoices: [.enUS1],
                 capabilities: .init(
                     isRuntimeSupported: true,
                     supportsReferenceAudio: false,
                     supportsLanguageList: true,
-                    supportedLanguages: [.english, .spanish, .french, .german, .italian, .portuguese, .dutch, .polish, .turkish, .russian, .japanese, .korean, .chinese, .arabic, .hindi],
+                    supportedLanguages: Self.qwen3TTSLanguages,
                     defaultGenerationProfile: .highQuality,
                     // Qwen3-TTS 0.6B at 8-bit peaks ~800MB resident. That fits
                     // comfortably on any modern iPhone (6–8GB RAM); the
@@ -162,6 +169,130 @@ public enum TTSMLX {
                 )
             ),
             modelURL: URL(string: "https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit")
+        ),
+        // ── Additional multilingual / fast variants ───────────────────────
+        // All of the following route to a loader the backend already ships
+        // (verified via config.json `model_type`: qwen3_tts → Qwen3TTSModel,
+        // soprano → SopranoModel), so they generate end to end. They are staged
+        // `.implemented` rather than `.validated` only because they have not yet
+        // been run + memory-profiled on a physical iPhone in this repo; the
+        // `peakMemoryMB` values below are conservative estimates, not measured
+        // peaks. Promote to `.validated` (move into `validatedEntry`) after an
+        // on-device pass confirms audio + resident peak. `.implemented` entries
+        // carry a full descriptor, so apps can select and synthesize them today
+        // — they are simply excluded from `supportedModels` / `recommendedModel`
+        // defaults until validated.
+        .init(
+            id: "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-4bit",
+            displayName: "Qwen3 TTS 0.6B (4-bit)",
+            summary: "Smaller-footprint 4-bit build of the multilingual Qwen3 TTS 0.6B — lower download/RAM than the 8-bit default.",
+            supportStage: .implemented,
+            supportedLanguages: Self.qwen3TTSLanguages,
+            runtimeNotes: "Routes to the qwen3_tts loader (same architecture as the validated 0.6B-8bit). Pending on-device validation + memory profiling.",
+            modelURL: URL(string: "https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-0.6B-Base-4bit"),
+            descriptor: .init(
+                id: "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-4bit",
+                displayName: "Qwen3 TTS 0.6B (4-bit)",
+                summary: "Smaller-footprint multilingual Qwen3 TTS.",
+                supportedLanguages: Self.qwen3TTSLanguages,
+                suggestedVoices: [.enUS1],
+                capabilities: .init(
+                    isRuntimeSupported: true,
+                    supportsReferenceAudio: false,
+                    supportsLanguageList: true,
+                    supportedLanguages: Self.qwen3TTSLanguages,
+                    defaultGenerationProfile: .balanced,
+                    peakMemoryMB: 700,
+                    minimumDeviceClass: .iPhone
+                )
+            )
+        ),
+        .init(
+            id: "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-4bit",
+            displayName: "Qwen3 TTS 1.7B",
+            summary: "Higher-quality multilingual Qwen3 TTS (1.7B) at 4-bit — better prosody than 0.6B; best on 6GB+ iPhones.",
+            supportStage: .implemented,
+            supportedLanguages: Self.qwen3TTSLanguages,
+            runtimeNotes: "Routes to the qwen3_tts loader. ~2.3GB download. Pending on-device validation + memory profiling; estimated resident peak is conservative.",
+            modelURL: URL(string: "https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-1.7B-Base-4bit"),
+            descriptor: .init(
+                id: "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-4bit",
+                displayName: "Qwen3 TTS 1.7B",
+                summary: "Higher-quality multilingual Qwen3 TTS.",
+                supportedLanguages: Self.qwen3TTSLanguages,
+                suggestedVoices: [.enUS1],
+                capabilities: .init(
+                    isRuntimeSupported: true,
+                    supportsReferenceAudio: false,
+                    supportsLanguageList: true,
+                    supportedLanguages: Self.qwen3TTSLanguages,
+                    defaultGenerationProfile: .highQuality,
+                    // Estimate only (not measured). 1.7B @ 4-bit ≈ 0.9GB weights
+                    // plus codec/speaker-encoder/tokenizer + activations.
+                    peakMemoryMB: 2_800,
+                    minimumDeviceClass: .iPhone
+                )
+            )
+        ),
+        .init(
+            id: "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-4bit",
+            displayName: "Qwen3 TTS 1.7B (Custom Voice)",
+            summary: "Multilingual Qwen3 TTS 1.7B with custom-voice / reference-audio conditioning for voice design and cloning.",
+            supportStage: .implemented,
+            supportedLanguages: Self.qwen3TTSLanguages,
+            runtimeNotes: "Routes to the qwen3_tts loader (CustomVoice build). Reference-audio / voice-design wiring through the wrapper is pending validation.",
+            modelURL: URL(string: "https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-4bit"),
+            descriptor: .init(
+                id: "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-4bit",
+                displayName: "Qwen3 TTS 1.7B (Custom Voice)",
+                summary: "Multilingual Qwen3 TTS with voice cloning.",
+                supportedLanguages: Self.qwen3TTSLanguages,
+                suggestedVoices: [.enUS1],
+                capabilities: .init(
+                    isRuntimeSupported: true,
+                    supportsReferenceAudio: true,
+                    supportsLanguageList: true,
+                    supportedLanguages: Self.qwen3TTSLanguages,
+                    defaultGenerationProfile: .highQuality,
+                    peakMemoryMB: 2_800,
+                    minimumDeviceClass: .iPhone
+                )
+            )
+        ),
+        .init(
+            id: "mlx-community/Soprano-80M-4bit",
+            displayName: "Soprano (4-bit)",
+            summary: "Tiny 4-bit Soprano (~60MB) — fastest start and lowest memory; ideal for snappy English reading on any iPhone.",
+            supportStage: .implemented,
+            supportedLanguages: [.english],
+            runtimeNotes: "Routes to the soprano loader (same architecture as the validated Soprano-80M-bf16, 4-bit quantized). Pending on-device validation.",
+            modelURL: URL(string: "https://huggingface.co/mlx-community/Soprano-80M-4bit"),
+            descriptor: .init(
+                id: "mlx-community/Soprano-80M-4bit",
+                displayName: "Soprano (4-bit)",
+                summary: "Tiny, fast English voice model.",
+                supportedLanguages: [.english],
+                suggestedVoices: [],
+                capabilities: .init(
+                    isRuntimeSupported: true,
+                    supportsReferenceAudio: false,
+                    supportsLanguageList: true,
+                    supportedLanguages: [.english],
+                    defaultGenerationProfile: .fast,
+                    peakMemoryMB: 150,
+                    minimumDeviceClass: .iPhone
+                ),
+                modelURL: URL(string: "https://huggingface.co/mlx-community/Soprano-80M-4bit"),
+                files: [
+                    "config.json",
+                    "README.md",
+                    "special_tokens_map.json",
+                    "tokenizer.json",
+                    "tokenizer_config.json",
+                    "model.safetensors",
+                    "model.safetensors.index.json"
+                ]
+            )
         ),
         .init(
             id: "mlx-community/kitten-tts-mini-0.8",
