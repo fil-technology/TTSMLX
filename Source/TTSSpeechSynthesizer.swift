@@ -885,6 +885,7 @@ public actor TTSSpeechSynthesizer {
         cache: TTSAudioCache,
         chunker: TTSTextChunker = .init(),
         startCharacterOffset: Int = 0,
+        backpressure: TTSPlaybackBackpressure? = nil,
         progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)? = nil
     ) async throws -> AsyncThrowingStream<TTSAudioBufferChunk, Error> {
         let bundleURL = cache.narrationBundle(modelID: model.id, text: text)
@@ -897,6 +898,7 @@ public actor TTSSpeechSynthesizer {
             cacheBundleAt: bundleURL,
             chunker: chunker,
             startCharacterOffset: startCharacterOffset,
+            backpressure: backpressure,
             progressHandler: progressHandler
         )
     }
@@ -932,6 +934,13 @@ public actor TTSSpeechSynthesizer {
     /// caller can simply call `speakStreaming(...)` again to resume —
     /// the cache will replay everything that finished generating before
     /// the cancellation and pick up generation at the first missing chunk.
+    /// - Parameter lookAheadSeconds: how far audio generation may run ahead of
+    ///   playback, in seconds of audio. Bounds memory + battery/thermal while
+    ///   reading long-form text — generation suspends once this much audio is
+    ///   queued ahead of the playback head and resumes as it drains. `nil`
+    ///   (the default) uses ``TTSDeviceProfile/recommendedLookAheadSeconds``
+    ///   for the current device; pass `0` to disable backpressure (unbounded,
+    ///   the pre-0.7 behavior).
     public func speakStreaming(
         _ text: String,
         using model: TTSModelDescriptor = TTSMLX.defaultModels[0],
@@ -940,10 +949,16 @@ public actor TTSSpeechSynthesizer {
         playback: TTSPlaybackController,
         chunker: TTSTextChunker = .init(),
         startCharacterOffset: Int = 0,
+        lookAheadSeconds: Double? = nil,
         onWord: (@MainActor (TTSWordTiming) -> Void)? = nil,
         onPlaybackEnd: (@MainActor () -> Void)? = nil,
         progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)? = nil
     ) async throws {
+        let window = lookAheadSeconds ?? TTSDeviceProfile.current.recommendedLookAheadSeconds
+        // capacity <= 0 yields a disabled (pass-through) gate; only attach one
+        // when bounding is actually requested.
+        let backpressure = window > 0 ? TTSPlaybackBackpressure(capacitySeconds: window) : nil
+        info("speakStreaming: ENTRY model=\(model.id) chars=\(text.count) lookAhead=\(window > 0 ? String(format: "%.0fs", window) : "unbounded")")
         let stream = try await streamAndCacheNarration(
             text,
             using: model,
@@ -951,11 +966,13 @@ public actor TTSSpeechSynthesizer {
             cache: cache,
             chunker: chunker,
             startCharacterOffset: startCharacterOffset,
+            backpressure: backpressure,
             progressHandler: progressHandler
         )
         try await playback.play(
             stream: stream,
             synthesizer: self,
+            backpressure: backpressure,
             onWord: onWord,
             onPlaybackEnd: onPlaybackEnd
         )
@@ -969,6 +986,7 @@ public actor TTSSpeechSynthesizer {
         cacheBundleAt bundleURL: URL,
         chunker: TTSTextChunker = .init(),
         startCharacterOffset: Int = 0,
+        backpressure: TTSPlaybackBackpressure? = nil,
         progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)? = nil
     ) async throws -> AsyncThrowingStream<TTSAudioBufferChunk, Error> {
         let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1082,6 +1100,10 @@ public actor TTSSpeechSynthesizer {
                             modelID: modelID, chunkIndex: index,
                             characterRange: info.characterRange
                         ))
+                        // Gate on look-ahead before handing the (whole-chunk)
+                        // buffer downstream so cached replay can't race ahead of
+                        // playback and pile the whole book into memory either.
+                        await backpressure?.reserve(entry.duration)
                         continuation.yield(.init(buffer: buffer, sampleRate: sampleRate))
                         await synthesizer.emit(.chunkFinished(
                             modelID: modelID, chunkIndex: index,
@@ -1122,6 +1144,7 @@ public actor TTSSpeechSynthesizer {
                             workingManifest: &workingManifest,
                             workingEntries: &workingEntries,
                             continuation: continuation,
+                            backpressure: backpressure,
                             synthesizer: synthesizer
                         )
                     }
@@ -1155,6 +1178,7 @@ public actor TTSSpeechSynthesizer {
         workingManifest: inout TTSPreparedNarrationManifest,
         workingEntries: inout [Int: TTSPreparedNarrationManifest.ChunkEntry],
         continuation: AsyncThrowingStream<TTSAudioBufferChunk, Error>.Continuation,
+        backpressure: TTSPlaybackBackpressure?,
         synthesizer: TTSSpeechSynthesizer
     ) async throws {
         synthesizer.info("streamAndCacheNarration[\(modelID)]: chunk \(index + 1) GENERATING")
@@ -1189,6 +1213,14 @@ public actor TTSSpeechSynthesizer {
             }
             try audioFile?.write(from: buffer)
             frameCount += AVAudioFramePosition(buffer.frameLength)
+            // Persist always happens (to disk, bounded); only the downstream
+            // yield is gated, so generation stays within the look-ahead window
+            // of playback. The chunk file is fully written regardless, so a
+            // background interruption still leaves a resumable cache.
+            let bufferSeconds = buffer.format.sampleRate > 0
+                ? Double(buffer.frameLength) / buffer.format.sampleRate
+                : 0
+            await backpressure?.reserve(bufferSeconds)
             continuation.yield(pcm)
         }
         audioFile = nil

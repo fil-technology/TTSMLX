@@ -39,6 +39,28 @@ public struct TTSDeviceProfile: Sendable, Hashable, Codable {
         return TTSDeviceProfile(deviceClass: Self.detectClass(), physicalMemoryMB: memoryMB)
     }
 
+    /// Default look-ahead window (in seconds of audio) for live streaming
+    /// playback, scaled to the device's memory headroom. This bounds how far
+    /// generation may run ahead of playback so reading a whole book never
+    /// accumulates more than a few seconds of PCM in memory.
+    ///
+    /// Roughly: a 30 s window holds ~170 MB of 24 kHz mono float audio across
+    /// the pipeline, so tighter-memory phones get a smaller window. These are
+    /// conservative defaults; callers can override per call.
+    public var recommendedLookAheadSeconds: Double {
+        switch deviceClass {
+        case .mac:
+            return 45
+        case .iPad:
+            return physicalMemoryMB >= 6_000 ? 30 : 20
+        case .iPhone:
+            if physicalMemoryMB >= 8_000 { return 30 }
+            if physicalMemoryMB >= 6_000 { return 24 }
+            if physicalMemoryMB >= 4_000 { return 18 }
+            return 12
+        }
+    }
+
     private static func detectClass() -> TTSDeviceClass {
         #if os(macOS)
         return .mac

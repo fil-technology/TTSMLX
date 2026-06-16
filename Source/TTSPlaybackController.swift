@@ -96,6 +96,12 @@ public final class TTSPlaybackController {
     /// scheduled) and bail out cleanly instead of continuing to schedule
     /// stale buffers onto the audio engine.
     private var sessionToken: Int = 0
+    /// Optional look-ahead gate. When set (by ``play(stream:backpressure:...)``,
+    /// wired up automatically by ``TTSSpeechSynthesizer/speakStreaming``), the
+    /// producer reserves capacity before generating each buffer and we release
+    /// it here as each buffer finishes playing — bounding how far generation
+    /// runs ahead of playback. `nil` preserves the unbounded legacy behavior.
+    private var backpressure: TTSPlaybackBackpressure?
     nonisolated private let logger = Logger(subsystem: "technology.fil.ttsmlx", category: "Playback")
 
     public init(rate: Float = 1.0) {
@@ -114,10 +120,19 @@ public final class TTSPlaybackController {
         if scheduledBufferCount == 1 || scheduledBufferCount.isMultiple(of: 25) {
             logger.info("schedule: buffer #\(self.scheduledBufferCount, privacy: .public) frameLength=\(chunk.buffer.frameLength, privacy: .public) sampleRate=\(chunk.sampleRate, privacy: .public)")
         }
+        // Duration of this buffer in source-audio seconds, used to release the
+        // backpressure reservation the producer made for it. Capture the gate
+        // active *now* so a buffer always releases the gate it reserved against,
+        // even if a later session installed a different one.
+        let bufferSeconds = chunk.sampleRate > 0
+            ? Double(chunk.buffer.frameLength) / Double(chunk.sampleRate)
+            : 0
+        let gate = backpressure
         playerNode.scheduleBuffer(chunk.buffer) { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.completedBufferCount += 1
+                gate?.release(bufferSeconds)
                 self.finishIfNeeded()
             }
         }
@@ -134,14 +149,16 @@ public final class TTSPlaybackController {
     /// buffer finishes playing.
     public func play(
         stream: AsyncThrowingStream<TTSAudioBufferChunk, Error>,
+        backpressure: TTSPlaybackBackpressure? = nil,
         onPlaybackEnd: (@MainActor () -> Void)? = nil
     ) async throws {
         // Stop any prior session so this call doesn't stack onto a still-
         // running playback (the classic voice-change-mid-stream glitch),
         // then claim a fresh session before consuming the stream.
         stop()
+        self.backpressure = backpressure
         let myToken = beginSession()
-        try await drainStream(stream, token: myToken, onPlaybackEnd: onPlaybackEnd)
+        try await drainStream(stream, token: myToken, gate: backpressure, onPlaybackEnd: onPlaybackEnd)
     }
 
     /// Bump and return the new session token. Stays a single source of
@@ -159,6 +176,7 @@ public final class TTSPlaybackController {
     private func drainStream(
         _ stream: AsyncThrowingStream<TTSAudioBufferChunk, Error>,
         token myToken: Int,
+        gate: TTSPlaybackBackpressure?,
         onPlaybackEnd: (@MainActor () -> Void)?
     ) async throws {
         logger.info("play(stream:): ENTRY state=\(String(describing: self.state), privacy: .public) token=\(myToken, privacy: .public)")
@@ -166,6 +184,10 @@ public final class TTSPlaybackController {
         currentFile = nil
         seekFrameOffset = 0
         var consumed = 0
+        // Whatever ends this drain (completion, supersession, throw,
+        // cancellation), release any producer parked on the gate so it can't
+        // deadlock waiting for a `release` that will never come.
+        defer { gate?.finish() }
         do {
             for try await chunk in stream {
                 if sessionToken != myToken {
@@ -212,6 +234,7 @@ public final class TTSPlaybackController {
     public func play(
         stream: AsyncThrowingStream<TTSAudioBufferChunk, Error>,
         synthesizer: TTSSpeechSynthesizer,
+        backpressure: TTSPlaybackBackpressure? = nil,
         onWord: (@MainActor (TTSWordTiming) -> Void)? = nil,
         onPlaybackEnd: (@MainActor () -> Void)? = nil
     ) async throws {
@@ -219,12 +242,13 @@ public final class TTSPlaybackController {
         // but stop() must happen *before* startStreamWordObserver, otherwise
         // stop() would cancel the observer we just registered.
         stop()
+        self.backpressure = backpressure
         let myToken = beginSession()
         if let onWord {
             let events = await synthesizer.events()
             startStreamWordObserver(events: events, onWord: onWord)
         }
-        try await drainStream(stream, token: myToken, onPlaybackEnd: onPlaybackEnd)
+        try await drainStream(stream, token: myToken, gate: backpressure, onPlaybackEnd: onPlaybackEnd)
     }
 
     private func startStreamWordObserver(
@@ -360,6 +384,10 @@ public final class TTSPlaybackController {
         narrationTotalDuration = nil
         narrationWordObserver?.cancel()
         narrationWordObserver = nil
+        // Release any producer parked on the look-ahead gate so it observes the
+        // stop (the next play(...) installs a fresh gate).
+        backpressure?.finish()
+        backpressure = nil
         state = .stopped
         onPlaybackEnd = nil
     }

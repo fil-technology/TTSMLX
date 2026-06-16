@@ -6,6 +6,25 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- **Bounded look-ahead for live streaming playback (constant-memory book
+  reading).** `speakStreaming` now caps how far audio generation runs ahead of
+  playback via a new `lookAheadSeconds:` parameter (defaults to a device-aware
+  window from `TTSDeviceProfile.recommendedLookAheadSeconds` — 12 s on
+  tight-memory iPhones up to 45 s on Mac). Generation suspends once that much
+  audio is queued ahead of the playback head and resumes as it drains, so
+  reading a whole book streams in roughly constant memory (a few seconds of
+  PCM) instead of piling the entire book's audio into the `AVAudioEngine`
+  queue — and it cuts battery/thermal load. Pass `lookAheadSeconds: 0` to
+  restore the previous unbounded behavior. Backgrounding never deadlocks the
+  producer (task cancellation and `stop()` both release parked generation).
+- `TTSPlaybackBackpressure` — the look-ahead credit primitive (reserve/release
+  in seconds of audio), plus a `backpressure:` parameter on
+  `streamAndCacheNarration` and `TTSPlaybackController.play(stream:…)` so custom
+  pipelines can opt into the same bound.
+- `TTSDeviceProfile.recommendedLookAheadSeconds`, scaled by device memory.
+
 ## [0.6.1] - 2026-06-16
 
 ### Fixed
