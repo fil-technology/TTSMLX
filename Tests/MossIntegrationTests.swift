@@ -8,6 +8,19 @@ import Testing
 struct MossIntegrationTests {
     static let modelID = "mlx-community/MOSS-TTS-Nano-100M"
 
+    /// These tests download ~375 MB and need Metal, so they only run where the
+    /// model is already cached. That is self-configuring: a developer machine
+    /// that has fetched MOSS runs them, CI skips them, and no environment
+    /// variable is involved — xcodebuild does not forward those to the test
+    /// process for this scheme.
+    static var modelIsCached: Bool {
+        let dir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".cache/huggingface/hub/mlx-audio")
+            .appendingPathComponent("mlx-community_MOSS-TTS-Nano-100M")
+            .appendingPathComponent("model.safetensors")
+        return FileManager.default.fileExists(atPath: dir.path)
+    }
+
     static var descriptor: TTSModelDescriptor {
         get throws {
             let entry = try #require(TTSMLX.modelCatalog.first(where: { $0.id == modelID }))
@@ -22,13 +35,9 @@ struct MossIntegrationTests {
         #expect(descriptor.capabilities.isRuntimeSupported)
     }
 
-    /// Opt-in: this one downloads ~375 MB and needs Metal, so it stays out of
-    /// the default suite, which is otherwise offline and runs in about a
-    /// second. Run with `MOSS_INTEGRATION=1` (and via xcodebuild, so the
-    /// metallib is available).
     @Test("full prepare path: download then MLX load")
     func prepareModelPathSucceeds() async throws {
-        guard ProcessInfo.processInfo.environment["MOSS_INTEGRATION"] == "1" else { return }
+        guard Self.modelIsCached else { return }
         let descriptor = try Self.descriptor
         let store = TTSModelStore()
 
@@ -45,5 +54,49 @@ struct MossIntegrationTests {
         } catch {
             Issue.record("MLX load failed: \(error) — \(error.localizedDescription)")
         }
+    }
+
+    /// Measures the path the Reader actually uses: TTSMLX chunks the text
+    /// (80 chars for the first chunk, 220 after) and feeds those to the model,
+    /// so MOSS's own 75-token budget rarely engages. Time-to-first-audio and
+    /// peak memory here are the numbers that matter on device — measuring a
+    /// whole passage in one `generate` call overstates both badly.
+    @Test("streaming through TTSMLX: first-audio latency and peak memory")
+    func streamingLatencyThroughSynthesizer() async throws {
+        guard Self.modelIsCached else { return }
+        let descriptor = try Self.descriptor
+        let synthesizer = TTSSpeechSynthesizer()
+
+        let text = """
+            Global markets closed higher on Tuesday after the central bank             signalled it would hold interest rates steady through the end of             the year. Analysts said the decision eased fears of a prolonged             slowdown, though several cautioned that inflation remains above             target. The index gained one point two percent on the session.
+            """
+
+        let chunker = TTSTextChunker()
+        let plannedChunks = chunker.chunks(for: text)
+
+        let started = Date()
+        var firstAudioAt: TimeInterval?
+        var totalFrames = 0
+        var chunkCount = 0
+
+        let stream = try await synthesizer.synthesizeLong(
+            text, using: descriptor, options: .init(), chunker: chunker
+        )
+        for try await chunk in stream {
+            if firstAudioAt == nil { firstAudioAt = Date().timeIntervalSince(started) }
+            totalFrames += Int(chunk.buffer.frameLength)
+            chunkCount += 1
+        }
+
+        let elapsed = Date().timeIntervalSince(started)
+        let sampleRate = 48000.0
+        let seconds = Double(totalFrames) / sampleRate
+        print(String(
+            format: "[moss-reader] planned=%d emitted=%d firstAudio=%.2fs total=%.2fs audio=%.2fs",
+            plannedChunks.count, chunkCount, firstAudioAt ?? -1, elapsed, seconds
+        ))
+
+        #expect(chunkCount > 0, "stream produced no audio")
+        #expect(firstAudioAt != nil)
     }
 }

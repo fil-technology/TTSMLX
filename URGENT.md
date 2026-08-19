@@ -70,16 +70,27 @@ correct pin has no such plugin.
 The port (backbone + MOSS-Audio-Tokenizer-Nano decoder) is numerically
 validated against the Python `mlx-audio` reference, but:
 
-* **Peak memory is high**: 1.3–1.8 GB observed on macOS for a ~17 s passage.
-  The codec's deepest decoder stage attends over `frames * 32` positions, so
-  peak scales with chunk length. `peakMemoryMB` in the catalog is set to
-  1600 from macOS numbers and must be re-measured on device before promoting
-  to `.validated`.
-* **Reference-audio cloning is not supported**: the MOSS codec *encoder* is
-  not ported. Named voices ship as pre-encoded prompt codes
+* **Peak memory is high**: 1.3–1.8 GB observed on macOS when a whole passage
+  is generated in one `generate` call. The codec's deepest decoder stage
+  attends over `frames * 32` positions, so peak scales with chunk length.
+  Note the Reader path is much gentler — `TTSTextChunker` splits at 80/220
+  characters, well under MOSS's own 75-token budget, so each call decodes a
+  short span. `peakMemoryMB` is set to 1600 from the pessimistic
+  single-call figure and should be re-measured on device (via the Reader
+  path) before promoting to `.validated`.
+* **Upstream already has this model.** `Blaizzy/mlx-audio-swift` ships
+  `MossTTSNano` plus a `MossAudioTokenizer` **with an encoder**, so it
+  supports cloning from arbitrary reference audio. Evaluate adopting it
+  instead of maintaining this port; note upstream also has `OmniVoice`,
+  which the `feature/omnivoice` branch is separately mid-port on, and that
+  upstream lacks KittenTTS, so it is a merge rather than a fast-forward.
+* **Reference-audio cloning is not supported here**: the MOSS codec
+  *encoder* is not ported. Named voices ship as pre-encoded prompt codes
   (`MossVoicePack`); `referenceAudio` from callers is rejected, and the
   descriptor sets `supportsReferenceAudio: false`.
-* **Time-to-first-audio is poor for streaming**: MOSS re-primes reference
-  codes per chunk and the default 75-token budget yields one chunk for a
-  typical paragraph, so nothing plays until the whole passage is generated.
-  `MossTTSNanoModel.maxTextTokensPerChunk` tunes this.
+* **Time-to-first-audio** measured through the real Reader path
+  (`synthesizeLong` + `TTSTextChunker`) is 3.3 s, with overall throughput of
+  about 1.2x realtime in a debug build on an M-series Mac. Calling
+  `generate` directly on a whole passage is far worse (~25–30 s to first
+  audio) because MOSS's own 75-token budget then yields a single chunk;
+  `MossTTSNanoModel.maxTextTokensPerChunk` tunes that case.
