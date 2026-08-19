@@ -3,33 +3,24 @@
 Surfaced at the start of every session (see CLAUDE.md). Delete this file when
 every item below is resolved.
 
-## 1. `Package.swift` points at a LOCAL path dependency — do not release
+## 1. `mlx-audio-swift` is released as `0.1.5-tts.1` — RESOLVED, verify build
 
-`Package.swift` currently declares:
+`feature/moss-tts-nano` is merged into `main` (`--no-ff`) and tagged
+`0.1.5-tts.1`, matching how `0.1.4-tts.1` was cut. `Package.swift` now pins
+that tag instead of the local `Packages/mlx-audio-swift` path, so other repos
+— including the news app — can consume TTSMLX normally.
 
-```swift
-.package(name: "mlx-audio-swift", path: "Packages/mlx-audio-swift"),
-```
+**Not yet verified:** `swift package resolve` could not complete when this was
+committed (GitHub was intermittently unreachable, failing on a different
+dependency each attempt), so `Package.resolved` does not yet carry the
+`mlx-audio-swift` pin and no build has run against the tag. The tagged tree is
+byte-identical to the branch this session built and tested against all day, so
+the risk is resolution mechanics rather than code. Run `swift package resolve`
+followed by `swift build` once the network is stable, and commit the resulting
+`Package.resolved`.
 
-instead of the pinned remote. A release cut from this state is unbuildable for
-anyone else, so **`Package.swift` and `Package.resolved` are deliberately left
-uncommitted** — everything else (catalog entry, launch-screen fix, tests) is
-committed.
-
-The port itself is pushed: `fil-technology/mlx-audio-swift` @
-`feature/moss-tts-nano`. A `branch:` dependency was tried instead of the path
-and reverted — it forces a network fetch on every `swift package resolve`,
-which is painful on a flaky connection.
-
-Consequence while this stands: the `mlx-community/MOSS-TTS-Nano-100M` catalog
-entry claims `isRuntimeSupported`, but a checkout using the pinned
-`0.1.4-tts.1` backend has no MOSS loader and will fail at load time. It is
-staged `.implemented`, so it stays out of `supportedModels` and
-`recommendedModel`, and nothing selects it by default.
-
-**Before release:** merge `feature/moss-tts-nano`, tag `mlx-audio-swift`
-`0.1.5-tts.1`, restore the pinned remote line preserved in the comment, and
-commit both dependency files.
+The `Packages/mlx-audio-swift` symlink is left in place for future local
+development; nothing references it now.
 
 ## 2. `mlx-swift` pin had drifted off the background-safe fork — FIXED, verify
 

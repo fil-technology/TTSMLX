@@ -29,13 +29,7 @@ let package = Package(
         // Both fixes are unavailable in any upstream tagged release as of
         //   2026-06; see Docs/mlx-swift-bg-safe-fork.md. Re-fork + re-tag when
         //   bumping the upstream base version.
-        // TEMPORARY (MOSS-TTS-Nano development) — see URGENT.md item 1.
-    // Points at the local checkout so the port is usable here. The work is
-    // pushed to fil-technology/mlx-audio-swift @ feature/moss-tts-nano; a
-    // `branch:` pin was tried and rejected because it forces a network fetch
-    // on every resolve. Before release: merge, tag, and restore
-    //   .package(url: "https://github.com/fil-technology/mlx-audio-swift.git", exact: "0.1.5-tts.1"),
-    .package(name: "mlx-audio-swift", path: "Packages/mlx-audio-swift"),
+        .package(url: "https://github.com/fil-technology/mlx-audio-swift.git", exact: "0.1.5-tts.1"),
         .package(url: "https://github.com/fil-technology/mlx-swift.git", exact: "0.31.5"),
         .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", exact: "2.31.3"),
         .package(url: "https://github.com/huggingface/swift-huggingface.git", exact: "0.8.1")
