@@ -299,11 +299,25 @@ struct TTSModelStoreTests {
         #expect(TTSMLX.validatedModels.allSatisfy { $0.supportStage == .validated })
         #expect(TTSMLX.implementedModels.contains { $0.id == "mlx-community/kitten-tts-mini-0.8" })
 
-        let moss = try #require(TTSMLX.plannedModels.first(where: { $0.id == "OpenMOSS-Team/MOSS-TTS-Nano" }))
-        #expect(moss.supportStage == .planned)
+        // MOSS-TTS-Nano moved planned -> implemented once the backbone and the
+        // MOSS-Audio-Tokenizer-Nano decoder were ported into mlx-audio-swift.
+        // It stays out of `supportedModels` until an on-device iPhone run
+        // confirms resident peak and throughput.
+        let moss = try #require(
+            TTSMLX.implementedModels.first(where: { $0.id == "mlx-community/MOSS-TTS-Nano-100M" })
+        )
+        #expect(moss.supportStage == .implemented)
         #expect(moss.projectURL?.absoluteString == "https://github.com/OpenMOSS/MOSS-TTS-Nano")
-        #expect(moss.modelURL?.absoluteString == "https://huggingface.co/OpenMOSS-Team/MOSS-TTS-Nano")
+        #expect(moss.modelURL?.absoluteString == "https://huggingface.co/mlx-community/MOSS-TTS-Nano-100M")
         #expect(moss.supportedLanguages.contains(.greek))
+        #expect(TTSMLX.supportedModels.contains { $0.id == moss.id } == false)
+
+        let mossDescriptor = try #require(moss.descriptor)
+        #expect(mossDescriptor.capabilities.isRuntimeSupported)
+        // No speaker embeddings: voices are bundled pre-encoded reference clips,
+        // and user-supplied reference audio needs the codec encoder (not ported).
+        #expect(mossDescriptor.capabilities.supportsReferenceAudio == false)
+        #expect(mossDescriptor.suggestedVoices.contains("en_3"))
     }
 
     @Test("direct model download via static host works")

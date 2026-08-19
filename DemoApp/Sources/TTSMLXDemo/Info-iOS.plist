@@ -18,5 +18,21 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<!--
+	  Without a launch-screen declaration iOS runs the app in compatibility
+	  mode: it is letterboxed with black bars and laid out against a legacy
+	  logical screen size, which is what truncated the Reader controls
+	  ("Look-ah...", "Drop or...ss Play."). An empty UILaunchScreen opts into
+	  the native full-screen size on every device.
+
+	  Source - https://stackoverflow.com/a/78250740
+	  Posted by Deivi
+	  Retrieved 2026-08-19, License - CC BY-SA 4.0
+	-->
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIImageName</key>
+		<string></string>
+	</dict>
 </dict>
 </plist>

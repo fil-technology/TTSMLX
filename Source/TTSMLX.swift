@@ -8,6 +8,20 @@ public enum TTSMLX {
         .polish, .turkish, .russian, .japanese, .korean, .chinese, .arabic, .hindi
     ]
 
+    /// Languages MOSS-TTS-Nano advertises (19 of the 20 it lists map onto
+    /// existing ``TTSLanguage`` constants).
+    static let mossTTSNanoLanguages: [TTSLanguage] = [
+        .chinese, .english, .german, .spanish, .french, .japanese, .italian,
+        .hungarian, .korean, .russian, .persian, .arabic, .polish,
+        .portuguese, .czech, .danish, .swedish, .greek, .turkish
+    ]
+
+    /// MOSS has no speaker embeddings: these name pre-encoded reference clips
+    /// bundled with the runtime, not voices baked into the checkpoint.
+    static let mossTTSNanoVoices: [TTSVoice] = [
+        "en_2", "en_3", "en_4", "en_6", "en_7", "en_8"
+    ]
+
     public static let modelCatalog: [TTSModelCatalogEntry] = [
         validatedEntry(
             descriptor: .init(
@@ -304,14 +318,39 @@ public enum TTSMLX {
             modelURL: URL(string: "https://huggingface.co/mlx-community/kitten-tts-mini-0.8")
         ),
         .init(
-            id: "OpenMOSS-Team/MOSS-TTS-Nano",
-            displayName: "MOSS-TTS-Nano",
-            summary: "Tiny 0.1B multilingual realtime TTS model from OpenMOSS with CPU-friendly streaming and 48 kHz stereo output.",
-            supportStage: .planned,
-            supportedLanguages: [.chinese, .english, .german, .spanish, .french, .japanese, .italian, .hungarian, .korean, .russian, .persian, .arabic, .polish, .portuguese, .czech, .danish, .swedish, .greek, .turkish],
-            runtimeNotes: "Tracked for future support. TTSMLX cannot load MOSS-TTS-Nano yet because the underlying MLXAudioTTS runtime does not currently ship a MOSS TTS loader.",
-            modelURL: URL(string: "https://huggingface.co/OpenMOSS-Team/MOSS-TTS-Nano"),
-            projectURL: URL(string: "https://github.com/OpenMOSS/MOSS-TTS-Nano")
+            id: "mlx-community/MOSS-TTS-Nano-100M",
+            displayName: "MOSS TTS Nano",
+            summary: "Tiny 0.1B multilingual model from OpenMOSS that outputs 48 kHz stereo. Voice-cloning only — it has no speaker embeddings, so it always reads in the voice of a reference clip.",
+            supportStage: .implemented,
+            supportedLanguages: Self.mossTTSNanoLanguages,
+            runtimeNotes: """
+                Routes to the moss_tts_nano loader ported into mlx-audio-swift                 (backbone + MOSS-Audio-Tokenizer-Nano decoder), validated                 numerically against the Python mlx-audio reference.                 Two things to know before selecting it:                 (1) it has no built-in speaker embeddings, so `voice` must name                 one of the bundled pre-encoded reference clips and                 user-supplied `referenceAudio` is not accepted yet (that needs                 the codec encoder, which is not ported);                 (2) the codec decodes a whole chunk at once and its deepest                 stage attends over frames x 32 positions, so peak memory and                 time-to-first-audio both scale with chunk length.                 peakMemoryMB below is a macOS measurement at the default                 75-token chunk budget; promote to .validated only after an                 on-device iPhone run confirms resident peak and throughput.
+                """,
+            modelURL: URL(string: "https://huggingface.co/mlx-community/MOSS-TTS-Nano-100M"),
+            projectURL: URL(string: "https://github.com/OpenMOSS/MOSS-TTS-Nano"),
+            descriptor: .init(
+                id: "mlx-community/MOSS-TTS-Nano-100M",
+                displayName: "MOSS TTS Nano",
+                summary: "Multilingual 48 kHz stereo voice cloning.",
+                supportedLanguages: Self.mossTTSNanoLanguages,
+                suggestedVoices: Self.mossTTSNanoVoices,
+                capabilities: .init(
+                    isRuntimeSupported: true,
+                    // User-supplied reference audio needs the MOSS codec
+                    // encoder, which is not ported yet; the bundled voices are
+                    // shipped as pre-encoded prompt codes instead.
+                    supportsReferenceAudio: false,
+                    supportsLanguageList: true,
+                    supportedLanguages: Self.mossTTSNanoLanguages,
+                    defaultGenerationProfile: .balanced,
+                    // Measured on macOS via MLX.GPU.peakMemory across a
+                    // ~17s generation at the default chunk budget (1.36-1.53GB
+                    // observed). Rounded up; re-measure on device.
+                    peakMemoryMB: 1_600,
+                    minimumDeviceClass: .iPhone
+                ),
+                modelURL: URL(string: "https://huggingface.co/mlx-community/MOSS-TTS-Nano-100M")
+            )
         )
     ]
 
