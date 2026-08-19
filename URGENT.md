@@ -3,11 +3,11 @@
 Surfaced at the start of every session (see CLAUDE.md). Delete this file when
 every item below is resolved.
 
-## 1. `mlx-audio-swift` released as `0.1.5-tts.1` — RESOLVED
+## 1. `mlx-audio-swift` released (now `0.1.6-tts.1`) — RESOLVED
 
 `feature/moss-tts-nano` is merged into `main` (`--no-ff`) and tagged
-`0.1.5-tts.1`, matching how `0.1.4-tts.1` was cut. `Package.swift` pins that
-tag and `Package.resolved` records revision `6d75f929`, so other repos —
+`0.1.5-tts.1`, matching how `0.1.4-tts.1` was cut. `Package.swift` pins `0.1.6-tts.1`
+(which adds companion-repository support) and `Package.resolved` records it, so other repos —
 including the news app — consume TTSMLX normally.
 
 Verified: TTSMLX builds against the tag (not the local path), the resolved
@@ -83,3 +83,65 @@ validated against the Python `mlx-audio` reference, but:
   `generate` directly on a whole passage is far worse (~25–30 s to first
   audio) because MOSS's own 75-token budget then yields a single chunk;
   `MossTTSNanoModel.maxTextTokensPerChunk` tunes that case.
+
+## 4. Downloaded models live in a directory iOS is allowed to delete
+
+`HubCache.default` resolves to `URL.cachesDirectory/huggingface/hub` on iOS —
+i.e. inside `~/Library/Caches`. iOS purges that directory under storage
+pressure, without notice and without telling the app.
+
+For a news app that downloads ~375 MB once during onboarding, that means the
+model can silently disappear and the next article stalls on a re-download. The
+risk is proportional to how tight the user's storage is.
+
+Both halves already agree on this location — the runtime loader
+(`ModelUtils`) and `TTSBackgroundModelDownloader` — so moving it is a single
+coherent change rather than a hunt:
+
+* `TTS.loadModel(modelRepo:hfToken:cache:)` and
+  `ModelUtils.resolveOrDownloadModel(..., cache:)` already accept a `HubCache`.
+  `MLXTTSModelLoader.load` is what currently drops it and falls back to
+  `.default`.
+* A custom `HubCache(cacheDirectory:)` under Application Support would be
+  durable. Application Support is backed up, so the model directory should be
+  marked `isExcludedFromBackup` or users get ~375 MB added to their iCloud
+  backup.
+* Existing installs would need either a migration or one re-download.
+
+Not changed here because it alters where every model lives and needs a
+migration decision.
+
+## 5. Consumers must add a SwiftPM mirror for `mlx-swift`
+
+Three packages name `mlx-swift`: TTSMLX names the background-safe fork, while
+`mlx-audio-swift` and `mlx-swift-lm` name upstream. Upstream publishes the
+same version tags, so SwiftPM resolves the shared identity to whichever URL it
+meets first — and the build succeeds either way. Xcode was observed picking
+upstream, which ships an app **without** the Metal background patch.
+
+Every consuming app needs this at its package root, in
+`.swiftpm/configuration/mirrors.json`:
+
+```json
+{
+  "object": [
+    { "original": "https://github.com/ml-explore/mlx-swift.git",
+      "mirror": "https://github.com/fil-technology/mlx-swift.git" },
+    { "original": "https://github.com/ml-explore/mlx-swift",
+      "mirror": "https://github.com/fil-technology/mlx-swift.git" }
+  ],
+  "version": 1
+}
+```
+
+Both spellings are required: `mlx-swift-lm` declares the URL without `.git`.
+
+Verify with `Tools/verify-mlx-fork.sh`, which checks the resolved submodule URL
+and greps the patch marker out of `eval.cpp`. Wire it into CI — this drift has
+appeared three separate ways (a stale `Package.resolved` pin, Xcode resolving
+to upstream, and a poisoned local SwiftPM repository mirror), and every time
+the build succeeded while silently lacking the fix.
+
+The durable fix is to fork `mlx-swift-lm` and repoint its `mlx-swift`, after
+which nothing in the graph names upstream and no mirror is needed. That needs
+a new repository under `fil-technology`.

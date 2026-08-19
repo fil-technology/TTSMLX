@@ -4,10 +4,92 @@ import TTSMLX
 struct ModelsView: View {
     @Bindable var model: DemoModel
     @State private var isShowingAddSheet = false
+    @State private var backgroundState: TTSBackgroundModelDownloader.State = .idle
+
+    /// MOSS is the model worth prefetching: it is the largest, and it needs a
+    /// second repository for its codec.
+    private var prefetchTarget: TTSModelDescriptor? {
+        TTSMLX.modelCatalog
+            .first(where: { $0.id == "mlx-community/MOSS-TTS-Nano-100M" })?
+            .descriptor
+    }
+
+    @ViewBuilder
+    private var backgroundDownloadSection: some View {
+        Section("Background download") {
+            Text("Downloads model weights with a background URLSession, so it "
+                 + "keeps going when the app is suspended and resumes if the app "
+                 + "is terminated.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            switch backgroundState {
+            case .idle:
+                startButton
+            case .preparing(let modelID):
+                Label("Listing files for \(modelID)…", systemImage: "hourglass")
+                    .font(.callout)
+            case .downloading(let progress):
+                VStack(alignment: .leading, spacing: 6) {
+                    ProgressView(value: progress.fractionCompleted)
+                    Text("\(Int(progress.fractionCompleted * 100))% · "
+                         + "\(progress.filesCompleted)/\(progress.filesTotal) files · "
+                         + byteText(progress.completedBytes, progress.totalBytes))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("Cancel", role: .destructive) {
+                        TTSBackgroundModelDownloader.shared.cancel()
+                    }
+                    .font(.caption.weight(.semibold))
+                }
+            case .finished(let modelID):
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Downloaded — ready offline", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                        .font(.callout.weight(.semibold))
+                    Text(modelID).font(.caption).foregroundStyle(.secondary)
+                }
+            case .failed(_, let message):
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Failed", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .font(.callout.weight(.semibold))
+                    Text(message).font(.caption).foregroundStyle(.secondary)
+                    startButton
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var startButton: some View {
+        if let descriptor = prefetchTarget {
+            Button {
+                Task {
+                    try? await TTSBackgroundModelDownloader.shared.startDownload(for: descriptor)
+                }
+            } label: {
+                Label("Download \(descriptor.displayName) in background", systemImage: "arrow.down.circle")
+            }
+        } else {
+            Text("No prefetchable model in the catalog.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func byteText(_ completed: Int64, _ total: Int64) -> String {
+        guard total > 0 else { return "size unknown" }
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return "\(formatter.string(fromByteCount: completed)) / \(formatter.string(fromByteCount: total))"
+    }
 
     var body: some View {
         NavigationStack {
             List {
+                backgroundDownloadSection
+
                 Section("Built-in models") {
                     ForEach(TTSMLX.validatedModels) { entry in
                         VStack(alignment: .leading, spacing: 4) {
@@ -64,6 +146,14 @@ struct ModelsView: View {
                 }
             }
             .navigationTitle("Models")
+            .task {
+                // Replays current state on subscribe, so returning to this tab
+                // after a relaunch shows an in-flight download rather than a
+                // stale idle state.
+                for await state in TTSBackgroundModelDownloader.shared.events() {
+                    backgroundState = state
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button {

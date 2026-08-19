@@ -29,7 +29,7 @@ let package = Package(
         // Both fixes are unavailable in any upstream tagged release as of
         //   2026-06; see Docs/mlx-swift-bg-safe-fork.md. Re-fork + re-tag when
         //   bumping the upstream base version.
-        .package(url: "https://github.com/fil-technology/mlx-audio-swift.git", exact: "0.1.5-tts.1"),
+        .package(url: "https://github.com/fil-technology/mlx-audio-swift.git", exact: "0.1.6-tts.1"),
         .package(url: "https://github.com/fil-technology/mlx-swift.git", exact: "0.31.5"),
         .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", exact: "2.31.3"),
         .package(url: "https://github.com/huggingface/swift-huggingface.git", exact: "0.8.1")
