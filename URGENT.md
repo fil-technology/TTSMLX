@@ -3,24 +3,22 @@
 Surfaced at the start of every session (see CLAUDE.md). Delete this file when
 every item below is resolved.
 
-## 1. `mlx-audio-swift` is released as `0.1.5-tts.1` — RESOLVED, verify build
+## 1. `mlx-audio-swift` released as `0.1.5-tts.1` — RESOLVED
 
 `feature/moss-tts-nano` is merged into `main` (`--no-ff`) and tagged
-`0.1.5-tts.1`, matching how `0.1.4-tts.1` was cut. `Package.swift` now pins
-that tag instead of the local `Packages/mlx-audio-swift` path, so other repos
-— including the news app — can consume TTSMLX normally.
+`0.1.5-tts.1`, matching how `0.1.4-tts.1` was cut. `Package.swift` pins that
+tag and `Package.resolved` records revision `6d75f929`, so other repos —
+including the news app — consume TTSMLX normally.
 
-**Not yet verified:** `swift package resolve` could not complete when this was
-committed (GitHub was intermittently unreachable, failing on a different
-dependency each attempt), so `Package.resolved` does not yet carry the
-`mlx-audio-swift` pin and no build has run against the tag. The tagged tree is
-byte-identical to the branch this session built and tested against all day, so
-the risk is resolution mechanics rather than code. Run `swift package resolve`
-followed by `swift build` once the network is stable, and commit the resulting
-`Package.resolved`.
+Verified: TTSMLX builds against the tag (not the local path), the resolved
+checkout reports `0.1.5-tts.1`, and the full suite passes (125 tests, 20
+suites).
 
 The `Packages/mlx-audio-swift` symlink is left in place for future local
-development; nothing references it now.
+development; nothing references it now. To develop against a local checkout
+again, swap the `.package(url:exact:)` line for
+`.package(name: "mlx-audio-swift", path: "Packages/mlx-audio-swift")` and
+remember to restore it before cutting a release.
 
 ## 2. `mlx-swift` pin had drifted off the background-safe fork — FIXED, verify
 
