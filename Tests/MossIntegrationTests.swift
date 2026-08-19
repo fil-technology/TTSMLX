@@ -8,17 +8,36 @@ import Testing
 struct MossIntegrationTests {
     static let modelID = "mlx-community/MOSS-TTS-Nano-100M"
 
-    /// These tests download ~375 MB and need Metal, so they only run where the
-    /// model is already cached. That is self-configuring: a developer machine
-    /// that has fetched MOSS runs them, CI skips them, and no environment
-    /// variable is involved — xcodebuild does not forward those to the test
-    /// process for this scheme.
+    /// These tests download ~375 MB and need MLX's Metal library, which is
+    /// only present under `xcodebuild` — plain `swift test` has no metallib
+    /// and would abort the whole run. They are therefore off by default.
+    ///
+    /// Enable with either:
+    ///   * `MOSS_INTEGRATION=1` (works under `swift test`, which forwards the
+    ///     environment), or
+    ///   * an empty marker file at `Tests/.moss-integration` (works under
+    ///     `xcodebuild`, which does not forward the environment for this
+    ///     scheme). The marker is gitignored.
+    ///
+    /// The model must also already be cached; these never trigger a download
+    /// as a side effect of an ordinary test run.
+    static var isEnabled: Bool {
+        let env = ProcessInfo.processInfo.environment["MOSS_INTEGRATION"] == "1"
+        let marker = FileManager.default.fileExists(
+            atPath: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent()
+                .appendingPathComponent(".moss-integration").path
+        )
+        guard env || marker else { return false }
+        return modelIsCached
+    }
+
     static var modelIsCached: Bool {
-        let dir = FileManager.default.homeDirectoryForCurrentUser
+        let weights = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".cache/huggingface/hub/mlx-audio")
             .appendingPathComponent("mlx-community_MOSS-TTS-Nano-100M")
             .appendingPathComponent("model.safetensors")
-        return FileManager.default.fileExists(atPath: dir.path)
+        return FileManager.default.fileExists(atPath: weights.path)
     }
 
     static var descriptor: TTSModelDescriptor {
@@ -37,7 +56,7 @@ struct MossIntegrationTests {
 
     @Test("full prepare path: download then MLX load")
     func prepareModelPathSucceeds() async throws {
-        guard Self.modelIsCached else { return }
+        guard Self.isEnabled else { return }
         let descriptor = try Self.descriptor
         let store = TTSModelStore()
 
@@ -63,7 +82,7 @@ struct MossIntegrationTests {
     /// whole passage in one `generate` call overstates both badly.
     @Test("streaming through TTSMLX: first-audio latency and peak memory")
     func streamingLatencyThroughSynthesizer() async throws {
-        guard Self.modelIsCached else { return }
+        guard Self.isEnabled else { return }
         let descriptor = try Self.descriptor
         let synthesizer = TTSSpeechSynthesizer()
 
