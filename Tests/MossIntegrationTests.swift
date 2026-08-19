@@ -125,4 +125,41 @@ struct MossIntegrationTests {
         #expect(chunkCount > 0, "stream produced no audio")
         #expect(firstAudioAt != nil)
     }
+
+    /// The model store used to keep its own table of loadable model types,
+    /// parallel to the runtime's registry. When that copy fell behind, an
+    /// installed and perfectly loadable model was reported as "unsupported by
+    /// the current MLX runtime" in the Synthesize tab. It now defers to the
+    /// registry; this guards the regression for MOSS and for every other
+    /// family the registry knows about.
+    @Test("installed-model discovery agrees with the runtime registry")
+    func installedDescriptorIsRuntimeSupported() throws {
+        let resolved = TTSModelStore.runtimeSupportedModelType(
+            id: Self.modelID.lowercased(),
+            tags: [],
+            modelType: "moss_tts_nano",
+            architectures: ["MossTTSNanoForCausalLM"]
+        )
+        #expect(resolved == "moss_tts_nano", "store resolved \(String(describing: resolved))")
+
+        // Architecture alone must be enough — a locally discovered model may
+        // have a config.json without a usable model_type.
+        let fromArchitecture = TTSModelStore.runtimeSupportedModelType(
+            id: "someone/local-copy", tags: [], modelType: nil,
+            architectures: ["MossTTSNanoForCausalLM"]
+        )
+        #expect(fromArchitecture == "moss_tts_nano",
+                "architecture lookup gave \(String(describing: fromArchitecture))")
+
+        // And the families that were already wired must keep resolving.
+        for (type, expected) in [
+            ("qwen3_tts", "qwen3_tts"), ("soprano", "soprano"),
+            ("pocket_tts", "pocket_tts"), ("kitten_tts", "kitten_tts"),
+            ("csm", "csm"), ("llama_tts", "llama_tts"),
+        ] {
+            #expect(TTSModelStore.runtimeSupportedModelType(
+                id: "x/y", tags: [], modelType: type, architectures: []
+            ) == expected, "\(type) regressed")
+        }
+    }
 }
