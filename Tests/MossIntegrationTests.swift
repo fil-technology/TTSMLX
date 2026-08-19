@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+@preconcurrency import MLX
 @testable import TTSMLX
 
 /// Reproduces the demo app's Reader path for MOSS-TTS-Nano on the host, so
@@ -93,6 +94,7 @@ struct MossIntegrationTests {
         let chunker = TTSTextChunker()
         let plannedChunks = chunker.chunks(for: text)
 
+        MLX.GPU.resetPeakMemory()
         let started = Date()
         var firstAudioAt: TimeInterval?
         var totalFrames = 0
@@ -110,9 +112,14 @@ struct MossIntegrationTests {
         let elapsed = Date().timeIntervalSince(started)
         let sampleRate = 48000.0
         let seconds = Double(totalFrames) / sampleRate
+        let peakMB = Double(MLX.GPU.peakMemory) / 1_048_576.0
+        let activeMB = Double(MLX.Memory.activeMemory) / 1_048_576.0
+        let cacheMB = Double(MLX.Memory.cacheMemory) / 1_048_576.0
         print(String(
-            format: "[moss-reader] planned=%d emitted=%d firstAudio=%.2fs total=%.2fs audio=%.2fs",
-            plannedChunks.count, chunkCount, firstAudioAt ?? -1, elapsed, seconds
+            format: "[moss-reader] planned=%d emitted=%d firstAudio=%.2fs total=%.2fs audio=%.2fs "
+                  + "peak=%.0fMB active=%.0fMB cache=%.0fMB",
+            plannedChunks.count, chunkCount, firstAudioAt ?? -1, elapsed, seconds,
+            peakMB, activeMB, cacheMB
         ))
 
         #expect(chunkCount > 0, "stream produced no audio")

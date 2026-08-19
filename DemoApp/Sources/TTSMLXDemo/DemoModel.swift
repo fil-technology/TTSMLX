@@ -1240,12 +1240,23 @@ final class DemoModel {
                         guard let self else { return }
                         if let fraction = update.fractionCompleted { self.readerProgress = fraction }
                         // Don't clobber the live "Playing…" status once audio starts.
-                        if self.readerTimeToFirstWord == nil {
-                            if update.stage == .downloadingModel, let f = update.fractionCompleted {
+                        guard self.readerTimeToFirstWord == nil else { return }
+                        switch update.stage {
+                        case .downloadingModel:
+                            if let f = update.fractionCompleted {
                                 self.readerStatus = "Downloading model (first run only)… \(Int(f * 100))%"
                             } else {
                                 self.readerStatus = update.message
                             }
+                        case .generatingAudio:
+                            // Word callbacks are what normally flip this to
+                            // "Playing…", but they only fire once the first
+                            // chunk has been scheduled. Without this the status
+                            // sat on "Downloading…" through the whole first
+                            // generation, which reads as a hang.
+                            self.readerStatus = update.message.isEmpty ? "Generating…" : update.message
+                        default:
+                            self.readerStatus = update.message
                         }
                     }
                 )
