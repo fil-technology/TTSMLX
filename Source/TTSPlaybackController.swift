@@ -106,6 +106,24 @@ public final class TTSPlaybackController {
     /// re-queue the remainder — without this, seeking could only address the
     /// first chunk and silently dropped everything after it.
     private var narrationChunks: [(file: AVAudioFile, startTime: TimeInterval)] = []
+
+    /// Bumped on every seek. The word observer watches this and re-places its
+    /// cursor, because the cursor only moves forward: without this a backward
+    /// seek freezes the highlight until playback returns to where it was, and a
+    /// forward seek flashes it through every word it skipped.
+    private var seekGeneration = 0
+
+    /// Word timeline for whatever is playing, so the current word can be looked
+    /// up at any moment rather than only observed as it passes.
+    private var activeWordTimeline: [TTSWordTiming] = []
+
+    /// The word being spoken right now, or `nil` when nothing is playing.
+    ///
+    /// Updated as playback advances and re-placed after a seek. Read this when
+    /// rendering — a view that redraws for an unrelated reason, or appears
+    /// mid-playback, needs the current word rather than the last callback it
+    /// happened to catch.
+    public private(set) var currentWord: TTSWordTiming?
     private var seekFrameOffset: AVAudioFramePosition = 0
     /// Set when playing a TTSPreparedNarration. Overrides `duration` to be
     /// the bundle's total length and drives the word-callback observer task.
@@ -205,6 +223,8 @@ public final class TTSPlaybackController {
         self.onPlaybackEnd = onPlaybackEnd
         currentFile = nil
         narrationChunks = []
+        activeWordTimeline = []
+        currentWord = nil
         seekFrameOffset = 0
         var consumed = 0
         // While draining, don't let a transient queue-drain between chunks be
@@ -363,12 +383,17 @@ public final class TTSPlaybackController {
                     for i in (firedThrough + 1)..<timeline.count {
                         onWord(timeline[i])
                     }
+                    self.currentWord = timeline.last
                     return
                 }
                 let t = self.currentTime
+                // Keep the queryable timeline in step with what has arrived, so
+                // `wordTiming(at:)` and `currentWord` work mid-stream too.
+                self.activeWordTimeline = timeline
                 while (firedThrough + 1) < timeline.count,
                       timeline[firedThrough + 1].offset <= t {
                     firedThrough += 1
+                    self.currentWord = timeline[firedThrough]
                     onWord(timeline[firedThrough])
                 }
                 try? await Task.sleep(nanoseconds: 30_000_000)
@@ -431,6 +456,8 @@ public final class TTSPlaybackController {
         connectedFormat = nil
         currentFile = nil
         narrationChunks = []
+        activeWordTimeline = []
+        currentWord = nil
         seekFrameOffset = 0
         narrationTotalDuration = nil
         streamAccumulatedDuration = nil
@@ -516,8 +543,10 @@ public final class TTSPlaybackController {
         timeline: [TTSWordTiming],
         onWord: @escaping @MainActor (TTSWordTiming) -> Void
     ) {
+        activeWordTimeline = timeline
         let observer = Task { @MainActor [weak self] in
             var firedThrough = -1
+            var seenGeneration = self?.seekGeneration ?? 0
             while !Task.isCancelled {
                 guard let self else { return }
                 let s = self.state
@@ -529,13 +558,31 @@ public final class TTSPlaybackController {
                     for i in (firedThrough + 1)..<timeline.count {
                         onWord(timeline[i])
                     }
+                    self.currentWord = timeline.last
                     return
                 }
                 let t = self.currentTime
+
+                // A seek moves the playhead arbitrarily, so re-place the cursor
+                // instead of walking to it: walking backwards is impossible and
+                // walking forwards would fire every word in between.
+                if self.seekGeneration != seenGeneration {
+                    seenGeneration = self.seekGeneration
+                    let landing = Self.indexOfWord(at: t, in: timeline)
+                    firedThrough = landing
+                    if landing >= 0 {
+                        self.currentWord = timeline[landing]
+                        onWord(timeline[landing])
+                    } else {
+                        self.currentWord = nil
+                    }
+                }
+
                 // Walk forward as long as the next word's start has passed.
                 while (firedThrough + 1) < timeline.count,
                       timeline[firedThrough + 1].offset <= t {
                     firedThrough += 1
+                    self.currentWord = timeline[firedThrough]
                     onWord(timeline[firedThrough])
                 }
                 try? await Task.sleep(nanoseconds: 30_000_000) // ~30Hz
@@ -549,6 +596,38 @@ public final class TTSPlaybackController {
     /// (i.e. stream playback is active). Clamps to `[0, duration]`; seeking at
     /// or past `duration` finishes playback as if it had played to the end.
     /// Preserves the prior `playing` / `paused` state.
+    /// Index of the word being spoken at `time`, or -1 before the first word.
+    ///
+    /// Binary search: the timeline for a long article runs to thousands of
+    /// words and this is consulted on every seek.
+    nonisolated static func indexOfWord(at time: TimeInterval, in timeline: [TTSWordTiming]) -> Int {
+        guard let first = timeline.first, time >= first.offset else { return -1 }
+        var low = 0
+        var high = timeline.count - 1
+        var result = 0
+        while low <= high {
+            let mid = (low + high) / 2
+            if timeline[mid].offset <= time {
+                result = mid
+                low = mid + 1
+            } else {
+                high = mid - 1
+            }
+        }
+        return result
+    }
+
+    /// The word spoken at `time`, for anything playing with a word timeline
+    /// (a narration, or a stream once its timings have arrived).
+    ///
+    /// Useful for rendering a scrubber preview, or restoring a highlight after
+    /// the view reappears, without waiting for the next callback.
+    public func wordTiming(at time: TimeInterval) -> TTSWordTiming? {
+        let index = Self.indexOfWord(at: time, in: activeWordTimeline)
+        guard index >= 0 else { return nil }
+        return activeWordTimeline[index]
+    }
+
     /// Seeks across a multi-chunk narration: plays the containing chunk from
     /// an offset, then queues every later chunk in full.
     ///
@@ -577,6 +656,7 @@ public final class TTSPlaybackController {
         scheduledBufferCount = 0
         completedBufferCount = 0
         seekFrameOffset = AVAudioFramePosition(target * sampleRate)
+        seekGeneration += 1
 
         let intoChunk = target - landing.startTime
         let startFrame = min(
@@ -645,6 +725,7 @@ public final class TTSPlaybackController {
         scheduledBufferCount = 1
         completedBufferCount = 0
         seekFrameOffset = targetFrame
+        seekGeneration += 1
         let frameCount = AVAudioFrameCount(totalFrames - targetFrame)
         playerNode.scheduleSegment(
             file,
