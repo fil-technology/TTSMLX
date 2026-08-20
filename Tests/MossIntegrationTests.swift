@@ -162,4 +162,62 @@ struct MossIntegrationTests {
             ) == expected, "\(type) regressed")
         }
     }
+
+    /// End-to-end check for the timing bug: the `.chunkFinished` durations the
+    /// playback observer builds its timeline from must sum to the audio that
+    /// was actually produced. They previously reported generation wall-clock,
+    /// so the karaoke cursor ran at whatever ratio generation happened to hit.
+    @Test("emitted chunk durations equal the audio produced")
+    func chunkDurationsMatchAudio() async throws {
+        guard Self.isEnabled else { return }
+        let descriptor = try Self.descriptor
+        let synthesizer = TTSSpeechSynthesizer()
+
+        let text = """
+            Global markets closed higher on Tuesday. Analysts said the decision             eased fears of a prolonged slowdown, though several cautioned that             inflation remains above target.
+            """
+
+        // Collect the diagnostics the playback controller would consume.
+        let events = await synthesizer.events()
+        let collector = Task { () -> (durations: [Int: TimeInterval], timings: [TTSWordTiming]) in
+            var durations: [Int: TimeInterval] = [:]
+            var timings: [TTSWordTiming] = []
+            for await event in events {
+                switch event {
+                case let .chunkFinished(_, index, duration): durations[index] = duration
+                case let .chunkTimings(_, _, chunkTimings): timings.append(contentsOf: chunkTimings)
+                case .streamingFinished: return (durations, timings)
+                default: break
+                }
+            }
+            return (durations, timings)
+        }
+
+        var audioFrames = 0
+        let stream = try await synthesizer.synthesizeLong(text, using: descriptor, options: .init())
+        for try await chunk in stream {
+            audioFrames += Int(chunk.buffer.frameLength)
+        }
+        let audioSeconds = Double(audioFrames) / 48_000.0
+
+        let collected = await collector.value
+        let reported = collected.durations.values.reduce(0, +)
+
+        print(String(format: "[moss-timing] audio=%.2fs reported=%.2fs words=%d",
+                     audioSeconds, reported, collected.timings.count))
+
+        #expect(audioSeconds > 1, "no audio produced")
+        // Within a frame or two of rounding. Before the fix this compared
+        // generation wall-clock against audio and was off by seconds.
+        #expect(abs(reported - audioSeconds) < 0.05,
+                "reported \(reported)s vs actual audio \(audioSeconds)s")
+
+        // And the word timeline must end where the audio ends, so a scrubber
+        // driven by it reaches 100%.
+        if let last = collected.timings.max(by: { $0.offset < $1.offset }) {
+            let end = last.offset + last.duration
+            #expect(end <= audioSeconds + 0.05,
+                    "timeline ends at \(end)s, past the audio's \(audioSeconds)s")
+        }
+    }
 }

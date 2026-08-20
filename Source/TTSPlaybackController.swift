@@ -66,15 +66,26 @@ public final class TTSPlaybackController {
         return max(0, elapsed + offset)
     }
 
-    /// Total duration in seconds for file or narration playback. `nil` for
-    /// stream playback (the total length isn't known until the stream ends).
+    /// Total duration in seconds for file or narration playback, and for
+    /// stream playback the audio produced so far.
+    ///
+    /// For a stream this grows as chunks arrive and settles on the true total
+    /// once the stream finishes, so a scrubber can show a running total rather
+    /// than nothing at all. ``isDurationFinal`` says which it is.
     public var duration: TimeInterval? {
         if let narrationTotalDuration { return narrationTotalDuration }
+        if let streamAccumulatedDuration { return streamAccumulatedDuration }
         guard let file = currentFile else { return nil }
         let sampleRate = file.processingFormat.sampleRate
         guard sampleRate > 0 else { return nil }
         return Double(file.length) / sampleRate
     }
+
+    /// Sum of the audio produced by the stream so far. Fed by `.chunkFinished`
+    /// durations, which are audio seconds.
+    private var streamAccumulatedDuration: TimeInterval?
+    /// Whether ``duration`` is the final total rather than a running one.
+    public private(set) var isDurationFinal: Bool = true
 
     private let engine = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
@@ -256,6 +267,11 @@ public final class TTSPlaybackController {
         stop()
         self.backpressure = backpressure
         let myToken = beginSession()
+        // A stream's total length is unknown until it ends; `duration` reports
+        // the audio produced so far and `isDurationFinal` stays false until
+        // `.streamingFinished`.
+        isDurationFinal = false
+        streamAccumulatedDuration = 0
         if let onWord {
             let events = await synthesizer.events()
             startStreamWordObserver(events: events, onWord: onWord)
@@ -287,6 +303,7 @@ public final class TTSPlaybackController {
                     switch event {
                     case let .chunkFinished(_, chunkIndex, duration):
                         chunkDurations[chunkIndex] = duration
+                        self?.streamAccumulatedDuration = chunkDurations.values.reduce(0, +)
                     case let .chunkTimings(_, chunkIndex, timings):
                         let priorTotal = chunkDurations
                             .filter { $0.key < chunkIndex }
@@ -298,8 +315,21 @@ public final class TTSPlaybackController {
                                 duration: timing.duration
                             ))
                         }
+                        // The cursor below only moves forward, so an
+                        // out-of-order arrival would strand every word behind
+                        // it. Chunks normally arrive in order and this is a
+                        // no-op; it costs little and removes the failure mode.
+                        if timeline.count > 1 {
+                            let tail = timeline[(timeline.count - timings.count)...]
+                            if let first = tail.first,
+                               let previous = timeline.dropLast(timings.count).last,
+                               first.offset < previous.offset {
+                                timeline.sort { $0.offset < $1.offset }
+                            }
+                        }
                     case .streamingFinished:
                         streamingFinished = true
+                        self?.isDurationFinal = true
                         return
                     default:
                         break
@@ -395,6 +425,8 @@ public final class TTSPlaybackController {
         currentFile = nil
         seekFrameOffset = 0
         narrationTotalDuration = nil
+        streamAccumulatedDuration = nil
+        isDurationFinal = true
         narrationWordObserver?.cancel()
         narrationWordObserver = nil
         // Release any producer parked on the look-ahead gate so it observes the
