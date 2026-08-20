@@ -93,6 +93,32 @@ public struct TTSWordTiming: Sendable, Hashable {
     public let offset: TimeInterval
     public let duration: TimeInterval
 
+    /// This word's span as UTF-16 code-unit offsets into `text`.
+    ///
+    /// `text` must be the same string the timings were produced from. Returns
+    /// `nil` if the range falls outside it.
+    public func utf16Range(in text: String) -> Range<Int>? {
+        let characters = Array(text)
+        guard characterRange.lowerBound >= 0,
+              characterRange.upperBound <= characters.count,
+              characterRange.lowerBound <= characterRange.upperBound
+        else { return nil }
+
+        // Count code units up to each boundary. Walking the prefix keeps this
+        // correct for any grapheme cluster, however many scalars it spans.
+        let lower = characters[0 ..< characterRange.lowerBound]
+            .reduce(0) { $0 + String($1).utf16.count }
+        let span = characters[characterRange.lowerBound ..< characterRange.upperBound]
+            .reduce(0) { $0 + String($1).utf16.count }
+        return lower ..< (lower + span)
+    }
+
+    /// This word's span as an `NSRange`, for TextKit and `NSAttributedString`.
+    public func nsRange(in text: String) -> NSRange? {
+        guard let range = utf16Range(in: text) else { return nil }
+        return NSRange(location: range.lowerBound, length: range.upperBound - range.lowerBound)
+    }
+
     public init(characterRange: Range<Int>, offset: TimeInterval, duration: TimeInterval) {
         self.characterRange = characterRange
         self.offset = offset
