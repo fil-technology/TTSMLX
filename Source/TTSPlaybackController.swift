@@ -100,6 +100,12 @@ public final class TTSPlaybackController {
     private var streamProducing = false
     private var onPlaybackEnd: (@MainActor () -> Void)?
     private var currentFile: AVAudioFile?
+
+    /// Chunk files of the narration being played, with the absolute time each
+    /// one begins at. Held so ``seek(to:)`` can land inside any chunk and
+    /// re-queue the remainder — without this, seeking could only address the
+    /// first chunk and silently dropped everything after it.
+    private var narrationChunks: [(file: AVAudioFile, startTime: TimeInterval)] = []
     private var seekFrameOffset: AVAudioFramePosition = 0
     /// Set when playing a TTSPreparedNarration. Overrides `duration` to be
     /// the bundle's total length and drives the word-callback observer task.
@@ -198,6 +204,7 @@ public final class TTSPlaybackController {
         logger.info("play(stream:): ENTRY state=\(String(describing: self.state), privacy: .public) token=\(myToken, privacy: .public)")
         self.onPlaybackEnd = onPlaybackEnd
         currentFile = nil
+        narrationChunks = []
         seekFrameOffset = 0
         var consumed = 0
         // While draining, don't let a transient queue-drain between chunks be
@@ -423,6 +430,7 @@ public final class TTSPlaybackController {
         completedBufferCount = 0
         connectedFormat = nil
         currentFile = nil
+        narrationChunks = []
         seekFrameOffset = 0
         narrationTotalDuration = nil
         streamAccumulatedDuration = nil
@@ -470,19 +478,21 @@ public final class TTSPlaybackController {
         try connectIfNeeded(format: firstFile.processingFormat)
 
         // Mark this as a narration session so duration / cleanup behave right.
-        // currentFile points at the first chunk so seek(to:) inside the first
-        // chunk's range still works. Multi-chunk seek isn't supported in this
-        // pass — seek() will clamp to the first chunk's frame range.
         currentFile = firstFile
         narrationTotalDuration = narration.totalDuration
         seekFrameOffset = 0
+        narrationChunks = []
 
+        var startTime: TimeInterval = 0
         for chunkEntry in chunks {
             let chunkURL = narration.baseURL.appendingPathComponent(chunkEntry.audioFile, isDirectory: false)
             // Re-open per chunk so each schedule() call holds its own file handle.
             let chunkFile = (chunkEntry.index == firstChunkEntry.index)
                 ? firstFile
                 : try AVAudioFile(forReading: chunkURL)
+            narrationChunks.append((file: chunkFile, startTime: startTime))
+            let rate = chunkFile.processingFormat.sampleRate
+            if rate > 0 { startTime += Double(chunkFile.length) / rate }
             scheduledBufferCount += 1
             playerNode.scheduleFile(chunkFile, at: nil) { [weak self] in
                 Task { @MainActor [weak self] in
@@ -539,7 +549,79 @@ public final class TTSPlaybackController {
     /// (i.e. stream playback is active). Clamps to `[0, duration]`; seeking at
     /// or past `duration` finishes playback as if it had played to the end.
     /// Preserves the prior `playing` / `paused` state.
+    /// Seeks across a multi-chunk narration: plays the containing chunk from
+    /// an offset, then queues every later chunk in full.
+    ///
+    /// `seekFrameOffset` is set to the absolute target so ``currentTime`` keeps
+    /// reporting position within the whole narration rather than within the
+    /// chunk — the word timeline is absolute, so the two must share an origin.
+    private func seekWithinNarration(to time: TimeInterval) throws {
+        let target = max(0, time)
+        if let total = narrationTotalDuration, target >= total {
+            let callback = onPlaybackEnd
+            stop()
+            state = .idle
+            callback?()
+            return
+        }
+
+        guard let landing = narrationChunks.last(where: { $0.startTime <= target })
+                ?? narrationChunks.first else {
+            throw PlaybackError.seekUnsupportedForStream
+        }
+        let sampleRate = landing.file.processingFormat.sampleRate
+        guard sampleRate > 0 else { return }
+
+        let wasPlaying = (state == .playing)
+        playerNode.stop()
+        scheduledBufferCount = 0
+        completedBufferCount = 0
+        seekFrameOffset = AVAudioFramePosition(target * sampleRate)
+
+        let intoChunk = target - landing.startTime
+        let startFrame = min(
+            max(0, AVAudioFramePosition(intoChunk * sampleRate)),
+            max(0, landing.file.length - 1)
+        )
+        let remaining = AVAudioFrameCount(max(0, landing.file.length - startFrame))
+        if remaining > 0 {
+            scheduledBufferCount += 1
+            playerNode.scheduleSegment(
+                landing.file, startingFrame: startFrame, frameCount: remaining, at: nil
+            ) { [weak self] in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.completedBufferCount += 1
+                    self.finishIfNeeded()
+                }
+            }
+        }
+
+        for chunk in narrationChunks where chunk.startTime > landing.startTime {
+            scheduledBufferCount += 1
+            playerNode.scheduleFile(chunk.file, at: nil) { [weak self] in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.completedBufferCount += 1
+                    self.finishIfNeeded()
+                }
+            }
+        }
+
+        if wasPlaying {
+            playerNode.play()
+            state = .playing
+        }
+    }
+
     public func seek(to time: TimeInterval) throws {
+        // A narration is many files; seek has to find the one containing the
+        // target and re-queue everything after it. Rescheduling only the file
+        // the target lands in would silently truncate playback there.
+        if narrationChunks.count > 1 {
+            try seekWithinNarration(to: time)
+            return
+        }
         guard let file = currentFile else {
             throw PlaybackError.seekUnsupportedForStream
         }

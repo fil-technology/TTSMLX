@@ -168,6 +168,74 @@ public struct TTSPreparedNarration: Sendable, Hashable {
     /// Reads each sub-bundle's manifest to recover the authoritative voice /
     /// language fields. Returns an empty array if `bundleURL` has no
     /// `voices/` directory.
+    /// How much of a narration bundle has been baked to disk.
+    ///
+    /// Baking is resumable: `streamAndCacheNarration` writes each chunk as it
+    /// finishes and skips chunks already present, so a bake interrupted by
+    /// backgrounding continues from where it stopped when the app returns.
+    /// This lets an app show that progress — "42% prepared, open the app to
+    /// continue" — and decide whether a bundle is playable offline yet,
+    /// instead of guessing.
+    ///
+    /// Reports `nil` when there is no manifest at `bundleURL` (nothing baked
+    /// yet, or a different voice/language variant).
+    public struct BakeProgress: Sendable, Hashable {
+        /// Chunks whose audio is present on disk.
+        public let completedChunks: Int
+        /// Chunks the manifest expects in total.
+        public let totalChunks: Int
+        /// Audio already on disk, in seconds.
+        public let bakedDuration: TimeInterval
+
+        public var isComplete: Bool { totalChunks > 0 && completedChunks == totalChunks }
+
+        /// Fraction baked, by chunk count. Zero when nothing is expected.
+        public var fractionCompleted: Double {
+            guard totalChunks > 0 else { return 0 }
+            return Double(completedChunks) / Double(totalChunks)
+        }
+    }
+
+    /// Inspects a bundle on disk without loading or validating its audio.
+    ///
+    /// - Parameters:
+    ///   - bundleURL: the same URL passed as `cacheBundleAt`.
+    ///   - voice / language: the variant to inspect, matching the bake call.
+    public static func bakeProgress(
+        at bundleURL: URL,
+        voice: String? = nil,
+        language: String? = nil,
+        fileManager: FileManager = .default
+    ) -> BakeProgress? {
+        let root = subBundleURL(in: bundleURL, voice: voice, language: language)
+        let manifestURL = root.appendingPathComponent("manifest.json")
+        guard let data = try? Data(contentsOf: manifestURL),
+              let manifest = try? JSONDecoder().decode(
+                  TTSPreparedNarrationManifest.self, from: data
+              )
+        else { return nil }
+
+        var completed = 0
+        var duration: TimeInterval = 0
+        for chunk in manifest.chunks {
+            let audioURL = root.appendingPathComponent(chunk.audioFile, isDirectory: false)
+            guard fileManager.fileExists(atPath: audioURL.path) else { continue }
+            // A zero-byte file is a chunk that was interrupted mid-write; treat
+            // it as absent so the bake regenerates it rather than playing
+            // silence.
+            let size = (try? fileManager.attributesOfItem(atPath: audioURL.path)[.size] as? Int64) ?? 0
+            guard (size ?? 0) > 0 else { continue }
+            completed += 1
+            duration += chunk.duration
+        }
+
+        return BakeProgress(
+            completedChunks: completed,
+            totalChunks: manifest.chunks.count,
+            bakedDuration: duration
+        )
+    }
+
     public static func availableVariants(at bundleURL: URL) -> [(voice: String?, language: String?, slug: String)] {
         let voicesDir = bundleURL.appendingPathComponent("voices", isDirectory: true)
         let fm = FileManager.default
