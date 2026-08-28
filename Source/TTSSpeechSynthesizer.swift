@@ -1067,6 +1067,9 @@ public actor TTSSpeechSynthesizer {
             backpressure: backpressure,
             progressHandler: progressHandler
         )
+        // Sentence-level highlighting needs the text to find sentence
+        // boundaries; harmless for word level.
+        await playback.setHighlightSourceText(text)
         try await playback.play(
             stream: stream,
             synthesizer: self,

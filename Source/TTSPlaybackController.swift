@@ -117,6 +117,20 @@ public final class TTSPlaybackController {
     /// up at any moment rather than only observed as it passes.
     private var activeWordTimeline: [TTSWordTiming] = []
 
+    /// Source text of the current stream. Sentence-level highlighting needs it
+    /// to find sentence boundaries; word-level does not.
+    private var highlightSourceText: String = ""
+
+    /// Tells the controller which text the upcoming stream is reading, so
+    /// sentence-level highlighting can find sentence boundaries.
+    ///
+    /// `speakStreaming` sets this for you; call it directly only when driving
+    /// `play(stream:...)` yourself with `highlightOptions.granularity ==
+    /// .sentence`.
+    public func setHighlightSourceText(_ text: String) {
+        highlightSourceText = text
+    }
+
     /// The word being spoken right now, or `nil` when nothing is playing.
     ///
     /// Updated as playback advances and re-placed after a seek. Read this when
@@ -124,6 +138,35 @@ public final class TTSPlaybackController {
     /// mid-playback, needs the current word rather than the last callback it
     /// happened to catch.
     public private(set) var currentWord: TTSWordTiming?
+
+    /// How highlights behave: word or sentence spans, lead time, and a minimum
+    /// on-screen duration. Set before starting playback.
+    ///
+    /// Sentence granularity is worth considering for on-device models: their
+    /// word timings are estimated from character weight rather than force
+    /// aligned, and a sentence span stays visually correct when an individual
+    /// word is out by a couple of hundred milliseconds.
+    public var highlightOptions: TTSHighlightOptions = .default
+
+    /// UTF-16 code units spoken so far, interpolated within the current word.
+    ///
+    /// A single `Int` is what a read-along view actually wants to bind to:
+    /// SwiftUI diffs it trivially, and everything else — which sentence is
+    /// current, how far the fill has progressed inside it — derives from it.
+    /// Binding a whole word object instead makes every row re-evaluate.
+    ///
+    /// Interpolated across the current word rather than stepping word to word,
+    /// so a progressive fill animates smoothly instead of jumping.
+    public var spokenCharacterCount: Int {
+        guard let word = currentWord else { return 0 }
+        guard let range = word.utf16Range(in: highlightSourceText) else { return 0 }
+        guard word.duration > 0 else { return range.upperBound }
+
+        let elapsedInWord = min(max(0, currentTime - word.offset), word.duration)
+        let fraction = elapsedInWord / word.duration
+        let span = Double(range.upperBound - range.lowerBound)
+        return range.lowerBound + Int((span * fraction).rounded())
+    }
     private var seekFrameOffset: AVAudioFramePosition = 0
     /// Set when playing a TTSPreparedNarration. Overrides `duration` to be
     /// the bundle's total length and drives the word-callback observer task.
@@ -225,6 +268,7 @@ public final class TTSPlaybackController {
         narrationChunks = []
         activeWordTimeline = []
         currentWord = nil
+        highlightSourceText = ""
         seekFrameOffset = 0
         var consumed = 0
         // While draining, don't let a transient queue-drain between chunks be
@@ -342,6 +386,17 @@ public final class TTSPlaybackController {
                                 duration: timing.duration
                             ))
                         }
+                        // Apply the consumer's highlight shaping to the words
+                        // this chunk contributed. Done per chunk because a
+                        // stream has no complete timeline until it ends.
+                        if let controller = self {
+                            let shaped = controller.highlightOptions.apply(
+                                to: Array(timeline.suffix(timings.count)),
+                                in: controller.highlightSourceText
+                            )
+                            timeline.removeLast(timings.count)
+                            timeline.append(contentsOf: shaped)
+                        }
                         // The cursor below only moves forward, so an
                         // out-of-order arrival would strand every word behind
                         // it. Chunks normally arrive in order and this is a
@@ -458,6 +513,7 @@ public final class TTSPlaybackController {
         narrationChunks = []
         activeWordTimeline = []
         currentWord = nil
+        highlightSourceText = ""
         seekFrameOffset = 0
         narrationTotalDuration = nil
         streamAccumulatedDuration = nil
@@ -534,8 +590,14 @@ public final class TTSPlaybackController {
             state = .playing
         }
 
+        // Needed by `spokenCharacterCount` and by sentence-level highlighting.
+        highlightSourceText = narration.manifest.sourceText
         if let onWord {
-            startNarrationWordObserver(timeline: narration.flattenedWordTimeline(), onWord: onWord)
+            let timeline = highlightOptions.apply(
+                to: narration.flattenedWordTimeline(),
+                in: narration.manifest.sourceText
+            )
+            startNarrationWordObserver(timeline: timeline, onWord: onWord)
         }
     }
 
