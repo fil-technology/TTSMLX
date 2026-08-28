@@ -43,6 +43,17 @@ struct ReaderView: View {
 
                 Spacer()
 
+                Toggle(isOn: $model.readerFastMode) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Fast mode (whole book)")
+                            .font(.callout)
+                        Text("~2.4x faster per word; drops the finest audio detail")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .disabled(model.readerIsActive)
+
                 Stepper(value: $model.readerLookAheadSeconds, in: 0...60, step: 2) {
                     Text(model.readerLookAheadSeconds <= 0
                          ? "Look-ahead: unbounded"

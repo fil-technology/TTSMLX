@@ -1182,6 +1182,12 @@ final class DemoModel {
     /// Wall-clock time from pressing Play to the first spoken word.
     var readerTimeToFirstWord: TimeInterval?
     var readerLookAheadSeconds: Double = TTSDeviceProfile.current.recommendedLookAheadSeconds
+
+    /// Bulk mode: trades audio detail for generation speed, for baking a long
+    /// text rather than auditioning a short one. Maps onto the `.fast`
+    /// generation profile, which for MOSS drops the finest residual codebooks —
+    /// measured at roughly 2.4x faster per word.
+    var readerFastMode = false
     private var readerTask: Task<Void, Never>?
 
     func startReader() {
@@ -1206,7 +1212,7 @@ final class DemoModel {
             : "Downloading \(model.displayName) (first run only)…"
 
         let options = TTSSynthesisOptions(
-            generationProfile: model.capabilities.defaultGenerationProfile,
+            generationProfile: readerFastMode ? .fast : model.capabilities.defaultGenerationProfile,
             streamingInterval: 1.0 // snappier first-word + finer look-ahead granularity
         )
         let lookAhead = readerLookAheadSeconds

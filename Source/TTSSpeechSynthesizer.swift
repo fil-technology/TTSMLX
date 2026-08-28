@@ -1574,6 +1574,31 @@ public actor TTSSpeechSynthesizer {
     }
 #endif
 
+
+    /// Applies model-specific knobs a generic `GenerateParameters` cannot carry.
+    ///
+    /// MOSS predicts its 16 residual codebooks sequentially, so the count is
+    /// close to a linear dial on generation time — measured at 2.4x faster per
+    /// word at 8 codebooks. The quantiser is coarse-to-fine, so the cost is
+    /// high-frequency detail rather than intelligibility, which is the right
+    /// trade for bulk work like baking a book and the wrong one for a short
+    /// sample the user is auditioning.
+    ///
+    /// Routed through the existing generation profile rather than a new option,
+    /// so callers keep one dial instead of two that can disagree.
+    private func applyModelSpecificProfile(
+        _ profile: TTSGenerationProfile?,
+        to model: any SpeechGenerationModel
+    ) {
+        guard let moss = model as? MossTTSNanoModel else { return }
+        switch profile {
+        case .fast:        moss.codebookCount = 8
+        case .balanced:    moss.codebookCount = 12
+        case .highQuality: moss.codebookCount = nil   // all 16
+        case nil:          moss.codebookCount = nil
+        }
+    }
+
     /// Centralizes the ensureDownloaded + load pipeline so that lifecycle
     /// diagnostics (resolve, download, load) are emitted from one place and
     /// caught errors are mapped to the right `TTSError` case. Consults the
@@ -1597,6 +1622,7 @@ public actor TTSSpeechSynthesizer {
         // fresh load so the new variant starts from a known-clean model
         // state (see note on `lastVariantByModel`).
         if let cached = loadedModels[model.id] {
+            applyModelSpecificProfile(options.generationProfile, to: cached.model)
             if lastVariantByModel[model.id] == requestedVariant {
                 info("prepareModel: CACHE HIT for \(model.id) sampleRate=\(cached.model.sampleRate) variant=\(requestedVariant.voice ?? "auto").\(requestedVariant.language ?? "auto")")
                 emit(.modelLoadServedFromCache(modelID: model.id))
@@ -1675,6 +1701,7 @@ public actor TTSSpeechSynthesizer {
             duration: loadDuration
         ))
         let box = LoadedModelBox(loaded)
+        applyModelSpecificProfile(options.generationProfile, to: loaded)
         hasInitializedMLX = true
         loadedModels[model.id] = box
         warmedModelIDs.insert(model.id)
