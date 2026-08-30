@@ -6,7 +6,131 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-30
+
 ### Fixed
+
+- **`onPlaybackEnd` fired prematurely mid-stream** whenever the audio queue
+  drained between chunks, so streamed playback looked "finished" repeatedly.
+  In a reader UI this flipped state back to stopped mid-read — word highlighting
+  vanished and the Play button reappeared while audio was still coming.
+  `TTSPlaybackController` now tracks whether the stream is still producing and
+  only finishes once it has genuinely ended.
+- **Choppy / stop-start streamed reading on prose.** `TTSTextChunker` emitted
+  one chunk per sentence/clause and never packed short segments together, so a
+  page of short sentences became dozens of tiny chunks (e.g. 808 chars → 22
+  chunks). Each tiny chunk paid full per-chunk generation overhead and let the
+  audio queue drain between chunks → audible stop-start. The chunker now packs
+  consecutive segments up to `followupChunkCharacterLimit` (the first chunk
+  stays small for fast time-to-first-audio), cutting that example to ~5 chunks.
+- **Crash on restarting playback while a prior stream was still generating**
+  (`RoPE cache length exceeded` in CSM/Marvis). With look-ahead, a previous
+  `speakStreaming` could still be generating chunks in the background when a new
+  one started, running two generations against the same cached (non-thread-safe)
+  model instance and corrupting its KV cache. `speakStreaming` now cancels any
+  in-flight generation before starting (serial model use).
+
+- **Marvis and Orpheus failed to load** with a misleading "Network unavailable:
+  Key …CSMllama3ScaledRoPE" (really a model-load error). Their `ScaledRoPE`
+  precomputes `cos`/`sin` caches that MLX reflects as parameters with no
+  matching checkpoint keys, so `verify: .all` (`.allModelKeysSet`) rejected the
+  load. Fixed in the backend by relaxing to `[.noUnusedKeys, .shapeMismatch]`;
+  `mlx-audio-swift` pin bumped `0.1.3-tts.1` → `0.1.4-tts.1`.
+
+### Added
+
+- **Compressed narration audio (`TTSAudioCodec`).** Narration bundles can now
+  store chunk audio as **AAC-LC** (`.m4a`, ~24–48 kbps mono → **~8–16× smaller**
+  than 24 kHz/16-bit WAV) or **Apple Lossless** (~2×), instead of only WAV.
+  Opt in per synthesis via `TTSSynthesisOptions.audioCodec` (defaults to `.wav`,
+  so existing behavior is unchanged); it flows through `streamAndCacheNarration`
+  and `prepareNarration`. Playback is untouched — `AVAudioFile` decodes every
+  codec transparently — and word-timing/karaoke stays aligned because timings
+  come from the manifest (measured from the PCM frame count *before* encoding),
+  never from file size or sample count. The manifest gains an additive, optional
+  `codec` field and records each chunk's real extension, so old WAV bundles keep
+  playing, a bundle may even **mix codecs** (resume across a codec switch), and
+  the change does not bump the manifest `schemaVersion`. `TTSAudioCache` now
+  recognizes `.m4a`/`.aac` entries alongside `.wav`/`.caf`.
+- **Migration API to recompress already-generated audio.**
+  `TTSPreparedNarration.recompress(bundleAt:to:)` transcodes a bundle in place
+  (all voice/language sub-bundles, or a legacy root bundle), rewriting the
+  manifest and deleting the superseded files — MLX-free and idempotent, so a
+  host can reclaim space on the *current* library, not just future books.
+  `TTSAudioCache.recompressAllBundles(to:progress:)` sweeps the whole managed
+  store and reports before/after byte totals plus `(done, total)` progress.
+- **Realtime conversational TTS loop (`TTSRealtimeSession`).** A low-latency
+  controller for the "ask → speak → repeat" flow: feed it text turns (from any
+  speech-to-text source) and it speaks them with **barge-in** — a new
+  `.interrupt` turn instantly stops both in-flight generation
+  (`cancelAllInFlight`) and audio (`playback.stop()`), then starts the new turn;
+  `.enqueue` speaks turns back-to-back. Emits `TTSRealtimeEvent`
+  (turnStarted / firstAudio / turnFinished / interrupted / failed / idle) and a
+  per-turn `onWord` for karaoke. A generation token keeps a superseded turn from
+  advancing the queue. Speech-to-text is intentionally external (the
+  `mlx-audio-swift` backend has Voxtral streaming STT + SmartTurn turn detection
+  for a future fully on-device mic→text→speech loop).
+- **Demo app: a "Live" tab** exercising the realtime loop — type turns (a
+  stand-in for STT), watch them speak with karaoke highlighting and per-turn
+  status, toggle barge-in, Stop/Clear, and see time-to-first-word.
+- **Bounded look-ahead for live streaming playback (constant-memory book
+  reading).** `speakStreaming` now caps how far audio generation runs ahead of
+  playback via a new `lookAheadSeconds:` parameter (defaults to a device-aware
+  window from `TTSDeviceProfile.recommendedLookAheadSeconds` — 12 s on
+  tight-memory iPhones up to 45 s on Mac). Generation suspends once that much
+  audio is queued ahead of the playback head and resumes as it drains, so
+  reading a whole book streams in roughly constant memory (a few seconds of
+  PCM) instead of piling the entire book's audio into the `AVAudioEngine`
+  queue — and it cuts battery/thermal load. Pass `lookAheadSeconds: 0` to
+  restore the previous unbounded behavior. Backgrounding never deadlocks the
+  producer (task cancellation and `stop()` both release parked generation).
+- `TTSPlaybackBackpressure` — the look-ahead credit primitive (reserve/release
+  in seconds of audio), plus a `backpressure:` parameter on
+  `streamAndCacheNarration` and `TTSPlaybackController.play(stream:…)` so custom
+  pipelines can opt into the same bound.
+- `TTSDeviceProfile.recommendedLookAheadSeconds`, scaled by device memory.
+- **Demo app: a "Reader" tab** for reviewing long-text behavior — drop a `.txt`
+  or paste a long passage, pick any runnable model (validated or implemented),
+  stream it with karaoke word-by-word highlighting and auto-scroll, and watch a
+  live readout of time-to-first-word and resident memory plus an adjustable
+  look-ahead window. Exercises `speakStreaming(lookAheadSeconds:)` end to end.
+- **Expanded multilingual catalog.** Added selectable catalog entries that
+  route to already-shipped backend loaders (verified via each repo's
+  `config.json` `model_type`):
+    - `mlx-community/Qwen3-TTS-12Hz-0.6B-Base-4bit` — smaller 4-bit multilingual.
+    - `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-4bit` — higher-quality multilingual.
+    - `mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-4bit` — multilingual with
+      reference-audio / voice-design conditioning.
+    - `mlx-community/Soprano-80M-4bit` — tiny (~60 MB) fast English model.
+  These are staged `.implemented` (not `.validated`): they carry full
+  descriptors and synthesize end to end, but are excluded from
+  `supportedModels` / `recommendedModel` until run + memory-profiled on a
+  physical iPhone. `peakMemoryMB` on them are conservative estimates. All
+  Qwen3-TTS entries now share `TTSMLX.qwen3TTSLanguages` (15 languages).
+
+## [0.6.1] - 2026-06-16
+
+### Fixed
+
+- **Made v0.6.x safely consumable end-to-end.** v0.6.0's crash fixes
+  depended on patched dependencies applied only on the maintainer's
+  machine (local-path `mlx-audio-swift`, `swift package edit` on
+  `mlx-swift`), so downstream consumers pulling v0.6.0 still hit the
+  original crashes. v0.6.1 pins every dependency to public tagged forks
+  that carry the patches, with **no source changes in TTSMLX itself**
+  (only `Package.swift` / `Package.resolved`):
+    - `mlx-audio-swift` → `github.com/fil-technology/mlx-audio-swift`
+      `@ 0.1.3-tts.1` — Mimi/PocketTTS KV-cache reset (the
+      `broadcast_shapes` crash on model-instance reuse).
+    - `mlx-swift` → `github.com/fil-technology/mlx-swift @ 0.31.5` —
+      upstream 0.31.3 with its `mlx` C++ submodule repointed at
+      `github.com/fil-technology/mlx @ v0.31.3-tts-bg-safe.1`, which
+      swallows the iOS background-permission Metal error in
+      `check_error`. Tagged `0.31.5` (a normal version above upstream's
+      0.31.4) so it satisfies `mlx-swift-lm`'s `0.31.3..<0.32.0` range;
+      it is functionally 0.31.3 + the submodule patch.
+  See `Docs/mlx-swift-bg-safe-fork.md`. Verified: `swift build` + full
+  test suite (100 tests / 14 suites) green against the pinned forks.
 
 - **Metal-in-background crash** definitively. The Swift defenses we
   shipped in 0.6.0 (synchronous shutdown flag, GPU stream synchronize

@@ -34,6 +34,25 @@ These models are included in the built-in `TTSMLX.supportedModels` catalog:
 - [mlx-community/orpheus-3b-0.1-ft-bf16](https://huggingface.co/mlx-community/orpheus-3b-0.1-ft-bf16) - larger multi-voice LlamaTTS model with expressive built-in speakers.
 - [mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit](https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit) - strongest general-purpose option here when you want better quality, multilingual support, and voice-cloning style inputs.
 
+### Additional variants (implemented, pending on-device validation)
+
+These route to a backend loader that already ships, so they synthesize end to
+end and carry full descriptors you can select today — they are staged
+`.implemented` rather than `.validated` only because they haven't been
+run + memory-profiled on a physical iPhone yet (their `peakMemoryMB` values are
+conservative estimates). They appear in `TTSMLX.implementedModels`, not in
+`TTSMLX.supportedModels` / `recommendedModel(for:)`, so they are never
+auto-selected until promoted. To use one, pass its descriptor explicitly.
+
+- [Qwen3-TTS-12Hz-0.6B-Base-4bit](https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-0.6B-Base-4bit) - smaller-footprint 4-bit build of the multilingual default.
+- [Qwen3-TTS-12Hz-1.7B-Base-4bit](https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-1.7B-Base-4bit) - higher-quality multilingual (1.7B); best on 6GB+ iPhones.
+- [Qwen3-TTS-12Hz-1.7B-CustomVoice-4bit](https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-4bit) - multilingual with custom-voice / reference-audio conditioning for voice design and cloning.
+- [Soprano-80M-4bit](https://huggingface.co/mlx-community/Soprano-80M-4bit) - tiny (~60MB) English model; fastest start and lowest memory.
+
+All Qwen3-TTS entries advertise 15 languages (English, Spanish, French, German,
+Italian, Portuguese, Dutch, Polish, Turkish, Russian, Japanese, Korean,
+Chinese, Arabic, Hindi).
+
 For a fuller support matrix, including non-runnable tracked models such as `MOSS-TTS-Nano`, see [Docs/ModelSupport.md](Docs/ModelSupport.md) or inspect `TTSMLX.modelCatalog` at runtime.
 
 Quick picking guide:
@@ -45,7 +64,7 @@ Quick picking guide:
 - Try `VyvoTTS` if you want a smaller English Qwen3-style model.
 Current upstream note:
 
-- `TTSMLX` keeps the local path dependency on `../mlx-audio-swift` during active fork development. This package does not pin a standalone `mlx-audio` backend version by itself.
+- As of `0.6.1`, `TTSMLX` pins all MLX dependencies to public tagged forks under `github.com/fil-technology` (`mlx-audio-swift @ 0.1.3-tts.1`, `mlx-swift @ 0.31.5`, whose `mlx` C++ submodule points at `mlx @ v0.31.3-tts-bg-safe.1`). These forks carry the KV-cache reset and iOS background-safe Metal patches that are not yet in any upstream tagged release. The package is now consumable end to end from GitHub with no local-path checkout. See `Docs/mlx-swift-bg-safe-fork.md`.
 - The wrapper catalog only lists model families that the current local `mlx-audio-swift` runtime can synthesize with end to end.
 - New upstream `mlx-audio v0.4.2` TTS families such as `Irodori-TTS`, `HumeAI TADA`, `KugelAudio TTS`, and `Voxtral-4B-TTS-2603` may still appear in model search as discovery-only results, but they are intentionally marked unsupported until the local Swift backend gains loaders for them.
 - `Kitten TTS` may also appear in search as discovery-only for now. The local backend can parse its model assets, but audio generation and streaming are still not wired through yet, so `TTSMLX` does not advertise it as runnable.

@@ -1148,6 +1148,277 @@ final class DemoModel {
             status = "Could not delete bundle: \(error.localizedDescription)"
         }
     }
+
+    // MARK: - Reader (long-text karaoke) demo
+
+    /// Every catalog model that carries a runnable descriptor — including
+    /// `.implemented` multilingual variants that don't appear in `allModels`.
+    var readerModelChoices: [ReaderModelChoice] {
+        TTSMLX.modelCatalog.compactMap { entry in
+            guard let descriptor = entry.descriptor,
+                  descriptor.capabilities.isRuntimeSupported else { return nil }
+            return ReaderModelChoice(
+                id: entry.id,
+                label: entry.displayName,
+                stage: entry.supportStage,
+                descriptor: descriptor
+            )
+        }
+    }
+
+    var readerSelectedModelID: String = TTSMLX.defaultModels.first?.id ?? ""
+    var readerSelectedModel: TTSModelDescriptor {
+        readerModelChoices.first(where: { $0.id == readerSelectedModelID })?.descriptor
+            ?? readerModelChoices.first?.descriptor
+            ?? .init(id: readerSelectedModelID)
+    }
+
+    var readerText = ""
+    /// Current word's character range in `readerText`, driven by playback.
+    var readerHighlight: Range<Int>?
+    var readerIsActive = false
+    var readerStatus = "Drop or paste a long text, pick a model, then press Play."
+    var readerProgress: Double?
+    /// Wall-clock time from pressing Play to the first spoken word.
+    var readerTimeToFirstWord: TimeInterval?
+    var readerLookAheadSeconds: Double = TTSDeviceProfile.current.recommendedLookAheadSeconds
+
+    /// Bulk mode: trades audio detail for generation speed, for baking a long
+    /// text rather than auditioning a short one. Maps onto the `.fast`
+    /// generation profile, which for MOSS drops the finest residual codebooks —
+    /// measured at roughly 2.4x faster per word.
+    var readerFastMode = false
+    private var readerTask: Task<Void, Never>?
+
+    func startReader() {
+        let text = readerText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            readerStatus = "Nothing to read — drop or paste some text first."
+            return
+        }
+        guard !readerIsActive else { return }
+        let model = readerSelectedModel
+        guard model.capabilities.isRuntimeSupported else {
+            readerStatus = "\(model.displayName) isn't runnable on this build. Pick another model."
+            return
+        }
+
+        readerIsActive = true
+        readerHighlight = nil
+        readerProgress = nil
+        readerTimeToFirstWord = nil
+        readerStatus = isInstalled(model.id)
+            ? "Loading \(model.displayName)…"
+            : "Downloading \(model.displayName) (first run only)…"
+
+        let options = TTSSynthesisOptions(
+            generationProfile: readerFastMode ? .fast : model.capabilities.defaultGenerationProfile,
+            streamingInterval: 1.0 // snappier first-word + finer look-ahead granularity
+        )
+        let lookAhead = readerLookAheadSeconds
+        let start = Date()
+
+        readerTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.synthesizer.speakStreaming(
+                    text,
+                    using: model,
+                    options: options,
+                    cache: self.bundleCache,
+                    playback: self.playbackController,
+                    lookAheadSeconds: lookAhead,
+                    onWord: { [weak self] timing in
+                        guard let self else { return }
+                        if self.readerTimeToFirstWord == nil {
+                            self.readerTimeToFirstWord = Date().timeIntervalSince(start)
+                        }
+                        self.readerHighlight = timing.characterRange
+                        self.readerStatus = "Playing…"
+                    },
+                    onPlaybackEnd: { [weak self] in
+                        guard let self else { return }
+                        self.readerHighlight = nil
+                        self.readerIsActive = false
+                        self.readerStatus = "Finished."
+                    },
+                    progressHandler: { [weak self] update in
+                        guard let self else { return }
+                        if let fraction = update.fractionCompleted { self.readerProgress = fraction }
+                        // Don't clobber the live "Playing…" status once audio starts.
+                        guard self.readerTimeToFirstWord == nil else { return }
+                        switch update.stage {
+                        case .downloadingModel:
+                            if let f = update.fractionCompleted {
+                                self.readerStatus = "Downloading model (first run only)… \(Int(f * 100))%"
+                            } else {
+                                self.readerStatus = update.message
+                            }
+                        case .generatingAudio:
+                            // Word callbacks are what normally flip this to
+                            // "Playing…", but they only fire once the first
+                            // chunk has been scheduled. Without this the status
+                            // sat on "Downloading…" through the whole first
+                            // generation, which reads as a hang.
+                            self.readerStatus = update.message.isEmpty ? "Generating…" : update.message
+                        default:
+                            self.readerStatus = update.message
+                        }
+                    }
+                )
+            } catch is CancellationError {
+                self.readerStatus = "Stopped."
+                self.readerHighlight = nil
+                self.readerIsActive = false
+            } catch {
+                self.readerStatus = "Error: \(error.localizedDescription)"
+                self.readerHighlight = nil
+                self.readerIsActive = false
+            }
+        }
+    }
+
+    func stopReader() {
+        readerTask?.cancel()
+        readerTask = nil
+        playbackController.stop()
+        readerHighlight = nil
+        readerIsActive = false
+        readerStatus = "Stopped."
+    }
+
+    // MARK: - Realtime conversational loop (Phase 4)
+
+    enum RealtimeTurnStatus: Hashable {
+        case speaking, done, interrupted, failed(String)
+    }
+
+    struct RealtimeTurn: Identifiable, Hashable {
+        let id: UUID
+        let text: String
+        var status: RealtimeTurnStatus
+    }
+
+    var realtimeTurns: [RealtimeTurn] = []
+    var realtimeInput = ""
+    var realtimeStatus = "Type what you ‘said’ and press Send. A new Send barges in."
+    var realtimeBargeIn = true
+    /// The turn currently showing a karaoke highlight, and the word range within it.
+    var realtimeHighlightTurn: UUID?
+    var realtimeHighlight: Range<Int>?
+    var realtimeLastLatency: TimeInterval?
+    /// Download/generation progress for the Live tab (nil = not downloading).
+    var realtimeProgress: Double?
+    private var realtimeSession: TTSRealtimeSession?
+    private var realtimeSessionModelID: String?
+
+    private func ensureRealtimeSession() -> TTSRealtimeSession {
+        if let session = realtimeSession, realtimeSessionModelID == readerSelectedModelID {
+            return session
+        }
+        realtimeSession?.finish()
+        let model = readerSelectedModel
+        let session = TTSRealtimeSession(
+            model: model,
+            options: TTSSynthesisOptions(
+                generationProfile: model.capabilities.defaultGenerationProfile,
+                streamingInterval: 0.8 // small chunks → fast first word
+            ),
+            synthesizer: synthesizer,
+            playback: playbackController,
+            onWord: { [weak self] turnID, timing in
+                self?.realtimeHighlightTurn = turnID
+                self?.realtimeHighlight = timing.characterRange
+            },
+            onEvent: { [weak self] event in
+                self?.handleRealtimeEvent(event)
+            },
+            onProgress: { [weak self] update in
+                guard let self else { return }
+                switch update.stage {
+                case .downloadingModel:
+                    self.realtimeProgress = update.fractionCompleted
+                    let pct = update.fractionCompleted.map { " \(Int($0 * 100))%" } ?? ""
+                    self.realtimeStatus = "Downloading model (first run only)…\(pct)"
+                case .resolvingModel, .loadingModel:
+                    self.realtimeProgress = nil
+                    self.realtimeStatus = "Loading model…"
+                default:
+                    self.realtimeProgress = nil
+                }
+            }
+        )
+        realtimeSession = session
+        realtimeSessionModelID = readerSelectedModelID
+        return session
+    }
+
+    func realtimeSend() {
+        let text = realtimeInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        let session = ensureRealtimeSession()
+        realtimeInput = ""
+        guard let turn = session.say(text, delivery: realtimeBargeIn ? .interrupt : .enqueue) else { return }
+        realtimeTurns.append(RealtimeTurn(id: turn.id, text: turn.text, status: .speaking))
+    }
+
+    func realtimeInterrupt() {
+        realtimeSession?.interrupt()
+    }
+
+    func realtimeReset() {
+        realtimeSession?.finish()
+        realtimeTurns.removeAll()
+        realtimeHighlight = nil
+        realtimeHighlightTurn = nil
+        realtimeStatus = "Cleared."
+    }
+
+    private func handleRealtimeEvent(_ event: TTSRealtimeEvent) {
+        switch event {
+        case let .turnStarted(id, _):
+            setRealtimeTurnStatus(id, .speaking)
+            realtimeStatus = "Speaking…"
+        case let .firstAudio(_, latency):
+            realtimeLastLatency = latency
+            realtimeProgress = nil
+        case let .turnFinished(id):
+            setRealtimeTurnStatus(id, .done)
+            clearHighlightIfActive(id)
+            realtimeStatus = "Ready."
+        case let .interrupted(id):
+            setRealtimeTurnStatus(id, .interrupted)
+            clearHighlightIfActive(id)
+            realtimeStatus = "Interrupted."
+        case let .failed(id, message):
+            setRealtimeTurnStatus(id, .failed(message))
+            clearHighlightIfActive(id)
+            realtimeStatus = "Error: \(message)"
+        case .idle:
+            realtimeStatus = "Ready."
+        }
+    }
+
+    private func setRealtimeTurnStatus(_ id: UUID, _ status: RealtimeTurnStatus) {
+        if let index = realtimeTurns.firstIndex(where: { $0.id == id }) {
+            realtimeTurns[index].status = status
+        }
+    }
+
+    private func clearHighlightIfActive(_ id: UUID) {
+        if realtimeHighlightTurn == id {
+            realtimeHighlight = nil
+            realtimeHighlightTurn = nil
+        }
+    }
+}
+
+/// A selectable model for the Reader tab, including `.implemented` variants.
+struct ReaderModelChoice: Identifiable, Hashable {
+    let id: String
+    let label: String
+    let stage: TTSModelSupportStage
+    let descriptor: TTSModelDescriptor
 }
 
 enum DemoActivityState: Hashable {

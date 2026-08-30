@@ -1,6 +1,7 @@
 import Foundation
 import HuggingFace
 import MLXAudioCore
+import MLXAudioTTS
 
 public actor TTSModelStore {
     private let fileManager: FileManager
@@ -164,7 +165,9 @@ public actor TTSModelStore {
     }
 }
 
-private extension TTSModelStore {
+// `internal` rather than `private` so tests can assert that model-type
+// resolution stays in agreement with the runtime registry.
+extension TTSModelStore {
     struct HuggingFaceModel: Decodable {
         let id: String
         let pipelineTag: String?
@@ -251,6 +254,50 @@ private extension TTSModelStore {
         }
 
         return false
+    }
+
+    /// Model-type resolution for cases where a real `config.json` is in hand
+    /// (an installed model, or HF metadata), which is where the runtime's
+    /// registry is authoritative.
+    ///
+    /// The tables in this file are a parallel copy of that registry and have to
+    /// be updated for every new model family. When they fall behind, an
+    /// installed and perfectly loadable model reports as "unsupported by the
+    /// current MLX runtime" — which is what happened to MOSS-TTS-Nano.
+    ///
+    /// Deliberately *not* used by ``isSupportedSearchResult``: search sees only
+    /// an id and tags, and that path's allowlist encodes curation decisions
+    /// (which families we are willing to surface) rather than what the runtime
+    /// can technically load.
+    static func runtimeSupportedModelType(
+        id: String,
+        tags: [String],
+        modelType: String?,
+        architectures: [String]
+    ) -> String? {
+        // Curation wins over capability. The catalog's contract is that an
+        // entry carries a descriptor exactly when apps may select and
+        // synthesize with it; an entry without one is listed for discovery
+        // only. KittenTTS is the live example — the runtime registry has a
+        // loader for it, but the catalog deliberately withholds a descriptor
+        // until generation and streaming are validated end to end, and
+        // reporting it as runnable would let users pick a path we know is not
+        // ready.
+        if let entry = TTSMLX.modelCatalog.first(where: { $0.id.lowercased() == id.lowercased() }) {
+            guard let descriptor = entry.descriptor,
+                  descriptor.capabilities.isRuntimeSupported else { return nil }
+        }
+
+        if let canonical = TTSModelRegistry.canonicalModelType(
+            modelType: modelType,
+            architectures: architectures,
+            repo: id
+        ) {
+            return canonical
+        }
+        return supportedModelType(
+            id: id, tags: tags, modelType: modelType, architectures: architectures
+        )
     }
 
     static func supportedModelType(
@@ -440,14 +487,20 @@ private extension TTSModelStore {
         modelTags: [String],
         fallback: TTSModelDescriptor?,
         discoveredLanguages: [TTSLanguage],
-        metadata: TTSModelMetadata
+        metadata: TTSModelMetadata,
+        // Only the installed-model path has a real config.json to go on, and
+        // there the runtime registry is authoritative about what can be
+        // loaded. Search results carry just an id and tags, where the local
+        // heuristics (and their curation decisions) still apply.
+        useRuntimeRegistry: Bool = false
     ) -> TTSModelCapabilities {
         let id = modelID.lowercased()
-        let supportedType = supportedModelType(
-            id: id,
-            tags: modelTags.map { $0.lowercased() },
-            modelType: metadata.modelType,
-            architectures: metadata.architectures
+        let resolve = useRuntimeRegistry ? runtimeSupportedModelType : supportedModelType
+        let supportedType = resolve(
+            id,
+            modelTags.map { $0.lowercased() },
+            metadata.modelType,
+            metadata.architectures
         )
 
         let fallbackProfile = fallback?.capabilities.defaultGenerationProfile ?? .balanced
@@ -635,7 +688,7 @@ private extension TTSModelStore {
             config: config
         )
 
-        let supportedType = Self.supportedModelType(
+        let supportedType = Self.runtimeSupportedModelType(
             id: repoID.lowercased(),
             tags: [],
             modelType: metadata.modelType,
@@ -656,7 +709,8 @@ private extension TTSModelStore {
             modelTags: [],
             fallback: fallback,
             discoveredLanguages: discoveredLanguages,
-            metadata: metadata
+            metadata: metadata,
+            useRuntimeRegistry: true
         )
 
         return fallback ?? .init(

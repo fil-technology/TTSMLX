@@ -103,6 +103,10 @@ public actor TTSSpeechSynthesizer {
     /// stays in sync with `loadedModels.keys` and is kept as a small
     /// `Set<String>` to keep `isLoaded(_:)` O(1) without exposing the box.
     private var loadedModels: [String: LoadedModelBox] = [:]
+
+    /// Set once a model has been materialised, which is the point MLX's Metal
+    /// backend comes up. Guards ``releaseRuntimeBuffers()``.
+    private var hasInitializedMLX = false
     private var warmedModelIDs: Set<String> = []
     /// Tracks the `(voice, language)` pair the cached `loadedModels[id]`
     /// instance was last used with. If a subsequent call requests a
@@ -372,9 +376,33 @@ public actor TTSSpeechSynthesizer {
         let droppedMarker = warmedModelIDs.remove(modelID) != nil
         lastVariantByModel.removeValue(forKey: modelID)
         if droppedInstance || droppedMarker {
+            // Dropping the model object frees its weights, but MLX keeps freed
+            // buffers in its own cache — for a codec that allocates attention
+            // buffers proportional to (frames * 32)^2 that is most of the
+            // resident footprint, and it survives the unload otherwise.
+            releaseRuntimeBuffers()
             emit(.modelUnloaded(modelID: modelID))
             log("unload: \(modelID) instance=\(droppedInstance) marker=\(droppedMarker)")
         }
+    }
+
+    /// Returns MLX's cached buffers to the OS.
+    ///
+    /// Live arrays are unaffected; this only releases what the allocator is
+    /// holding for reuse. Worth calling after generation finishes or a model is
+    /// dropped — on iOS that cache is the difference between settling near the
+    /// weight footprint and staying pinned near the generation peak.
+    ///
+    /// No-op until a model has actually been loaded. Touching MLX's allocator
+    /// initialises the Metal backend, which aborts the process where no
+    /// metallib is present (plain `swift test`), so this must stay inert until
+    /// something has already brought MLX up.
+    public func releaseRuntimeBuffers() {
+        guard hasInitializedMLX else { return }
+        let before = MLX.GPU.cacheMemory
+        MLX.GPU.clearCache()
+        let after = MLX.GPU.cacheMemory
+        log("releaseRuntimeBuffers: cache \(before / 1_048_576)MB -> \(after / 1_048_576)MB")
     }
 
     /// Drop every cached weight instance and clear the warmed set.
@@ -383,6 +411,7 @@ public actor TTSSpeechSynthesizer {
         loadedModels.removeAll()
         warmedModelIDs.removeAll()
         lastVariantByModel.removeAll()
+        if !ids.isEmpty { releaseRuntimeBuffers() }
         for id in ids {
             emit(.modelUnloaded(modelID: id))
         }
@@ -525,6 +554,27 @@ public actor TTSSpeechSynthesizer {
         options: TTSSynthesisOptions = .init(),
         progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)? = nil
     ) async throws -> AsyncThrowingStream<TTSAudioBufferChunk, Error> {
+        try await synthesizeStream(
+            text, using: model, options: options,
+            emitsTerminalDiagnostic: true, progressHandler: progressHandler
+        )
+    }
+
+    /// - Parameter emitsTerminalDiagnostic: whether to emit
+    ///   ``TTSDiagnostic/streamingFinished(modelID:duration:bufferCount:)`` when
+    ///   this stream drains. ``synthesizeLong(_:using:options:chunker:progressHandler:)``
+    ///   passes `false`: it drives one of these per chunk, and consumers treat
+    ///   that diagnostic as "the whole utterance is over". Emitting it per chunk
+    ///   made the playback observer stop building its word timeline after the
+    ///   first chunk — before that chunk's own timings had even been emitted —
+    ///   so the karaoke cursor never advanced past the opening sentence.
+    func synthesizeStream(
+        _ text: String,
+        using model: TTSModelDescriptor = TTSMLX.defaultModels[0],
+        options: TTSSynthesisOptions = .init(),
+        emitsTerminalDiagnostic: Bool,
+        progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)? = nil
+    ) async throws -> AsyncThrowingStream<TTSAudioBufferChunk, Error> {
         let prompt = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else {
             info("synthesizeStream: REJECTED empty text")
@@ -621,11 +671,13 @@ public actor TTSSpeechSynthesizer {
                 } else {
                     synthesizer.info("synthesizeStream[\(modelID)]: FINISHED total=\(bufferCount) buffers (empty=\(emptyBufferCount) skipped) in \(String(format: "%.2f", totalDuration))s")
                 }
-                await synthesizer.emit(.streamingFinished(
-                    modelID: modelID,
-                    duration: totalDuration,
-                    bufferCount: bufferCount
-                ))
+                if emitsTerminalDiagnostic {
+                    await synthesizer.emit(.streamingFinished(
+                        modelID: modelID,
+                        duration: totalDuration,
+                        bufferCount: bufferCount
+                    ))
+                }
                 continuation.finish()
             } catch is CancellationError {
                 synthesizer.info("synthesizeStream[\(modelID)]: CANCELLED")
@@ -685,6 +737,10 @@ public actor TTSSpeechSynthesizer {
             defer {
                 Task { [synthesizer] in await synthesizer.untrackTask(id: taskID) }
             }
+            // Totals for the single terminal diagnostic this composite stream
+            // owns; the per-chunk streams no longer emit one of their own.
+            var totalAudioSeconds: TimeInterval = 0
+            var totalBufferCount = 0
             do {
                 for (index, info) in chunkInfos.enumerated() {
                     try Task.checkCancellation()
@@ -692,11 +748,19 @@ public actor TTSSpeechSynthesizer {
                     synthesizer.info("synthesizeLong[\(modelID)]: chunk \(index + 1)/\(total) chars=\(info.text.count)")
                     let chunkStartedAt = Date()
                     var didEmitChunkStart = false
+                    // Real audio length of this chunk, accumulated from the
+                    // buffers actually rendered. Word timings and the playback
+                    // cursor are both expressed in playback seconds, so
+                    // deriving them from generation wall-clock desynchronises
+                    // the highlight the moment generation is not exactly
+                    // realtime — which it never is.
+                    var chunkAudioSeconds: TimeInterval = 0
 
                     let chunkStream = try await synthesizer.synthesizeStream(
                         info.text,
                         using: model,
                         options: options,
+                        emitsTerminalDiagnostic: false,
                         progressHandler: { update in
                             guard update.stage != .completed else { return }
                             progressHandler?(.init(
@@ -722,16 +786,32 @@ public actor TTSSpeechSynthesizer {
                                 characterRange: info.characterRange
                             ))
                         }
+                        if pcmChunk.sampleRate > 0 {
+                            chunkAudioSeconds += Double(pcmChunk.buffer.frameLength)
+                                / Double(pcmChunk.sampleRate)
+                        }
+                        totalBufferCount += 1
                         continuation.yield(pcmChunk)
                     }
-                    let chunkDuration = Date().timeIntervalSince(chunkStartedAt)
-                    synthesizer.info("synthesizeLong[\(modelID)]: chunk \(index + 1)/\(total) FINISHED in \(String(format: "%.2f", chunkDuration))s (didStart=\(didEmitChunkStart))")
+                    let generationSeconds = Date().timeIntervalSince(chunkStartedAt)
+                    synthesizer.info(
+                        "synthesizeLong[\(modelID)]: chunk \(index + 1)/\(total) FINISHED "
+                        + "audio=\(String(format: "%.2f", chunkAudioSeconds))s "
+                        + "generated in \(String(format: "%.2f", generationSeconds))s "
+                        + "(rtf=\(String(format: "%.2f", generationSeconds > 0 ? chunkAudioSeconds / generationSeconds : 0))x, "
+                        + "didStart=\(didEmitChunkStart))"
+                    )
+                    // Both of these are consumed as playback seconds: the
+                    // observer sums prior chunk durations to place each word on
+                    // the timeline, then compares against the player's
+                    // currentTime.
                     await synthesizer.emit(.chunkFinished(
                         modelID: modelID,
                         chunkIndex: index,
-                        duration: chunkDuration
+                        duration: chunkAudioSeconds
                     ))
-                    let timings = info.wordTimings(forDuration: chunkDuration)
+                    totalAudioSeconds += chunkAudioSeconds
+                    let timings = info.wordTimings(forDuration: chunkAudioSeconds)
                     if !timings.isEmpty {
                         await synthesizer.emit(.chunkTimings(
                             modelID: modelID,
@@ -745,7 +825,18 @@ public actor TTSSpeechSynthesizer {
                     fractionCompleted: 1,
                     message: "Long-form synthesis finished."
                 ))
-                synthesizer.info("synthesizeLong[\(modelID)]: ALL \(total) chunks FINISHED")
+                synthesizer.info(
+                    "synthesizeLong[\(modelID)]: ALL \(total) chunks FINISHED "
+                    + "audio=\(String(format: "%.2f", totalAudioSeconds))s"
+                )
+                // One terminal event for the whole utterance. Consumers treat
+                // this as "stop building the timeline", so it must not fire
+                // until every chunk's timings have been emitted.
+                await synthesizer.emit(.streamingFinished(
+                    modelID: modelID,
+                    duration: totalAudioSeconds,
+                    bufferCount: totalBufferCount
+                ))
                 continuation.finish()
             } catch is CancellationError {
                 synthesizer.info("synthesizeLong[\(modelID)]: CANCELLED")
@@ -885,6 +976,7 @@ public actor TTSSpeechSynthesizer {
         cache: TTSAudioCache,
         chunker: TTSTextChunker = .init(),
         startCharacterOffset: Int = 0,
+        backpressure: TTSPlaybackBackpressure? = nil,
         progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)? = nil
     ) async throws -> AsyncThrowingStream<TTSAudioBufferChunk, Error> {
         let bundleURL = cache.narrationBundle(modelID: model.id, text: text)
@@ -897,6 +989,7 @@ public actor TTSSpeechSynthesizer {
             cacheBundleAt: bundleURL,
             chunker: chunker,
             startCharacterOffset: startCharacterOffset,
+            backpressure: backpressure,
             progressHandler: progressHandler
         )
     }
@@ -932,6 +1025,13 @@ public actor TTSSpeechSynthesizer {
     /// caller can simply call `speakStreaming(...)` again to resume —
     /// the cache will replay everything that finished generating before
     /// the cancellation and pick up generation at the first missing chunk.
+    /// - Parameter lookAheadSeconds: how far audio generation may run ahead of
+    ///   playback, in seconds of audio. Bounds memory + battery/thermal while
+    ///   reading long-form text — generation suspends once this much audio is
+    ///   queued ahead of the playback head and resumes as it drains. `nil`
+    ///   (the default) uses ``TTSDeviceProfile/recommendedLookAheadSeconds``
+    ///   for the current device; pass `0` to disable backpressure (unbounded,
+    ///   the pre-0.7 behavior).
     public func speakStreaming(
         _ text: String,
         using model: TTSModelDescriptor = TTSMLX.defaultModels[0],
@@ -940,10 +1040,23 @@ public actor TTSSpeechSynthesizer {
         playback: TTSPlaybackController,
         chunker: TTSTextChunker = .init(),
         startCharacterOffset: Int = 0,
+        lookAheadSeconds: Double? = nil,
         onWord: (@MainActor (TTSWordTiming) -> Void)? = nil,
         onPlaybackEnd: (@MainActor () -> Void)? = nil,
         progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)? = nil
     ) async throws {
+        // Serial model use: cancel any prior in-flight generation before starting
+        // a new utterance. The cached model instance is NOT safe for concurrent
+        // generation, and with look-ahead the previous call may still be
+        // generating chunks in the background when the user taps Play again —
+        // overlapping generations corrupt the shared KV cache (manifested as a
+        // "RoPE cache length exceeded" crash in CSM/Marvis).
+        cancelAllInFlight(reason: .explicit)
+        let window = lookAheadSeconds ?? TTSDeviceProfile.current.recommendedLookAheadSeconds
+        // capacity <= 0 yields a disabled (pass-through) gate; only attach one
+        // when bounding is actually requested.
+        let backpressure = window > 0 ? TTSPlaybackBackpressure(capacitySeconds: window) : nil
+        info("speakStreaming: ENTRY model=\(model.id) chars=\(text.count) lookAhead=\(window > 0 ? String(format: "%.0fs", window) : "unbounded")")
         let stream = try await streamAndCacheNarration(
             text,
             using: model,
@@ -951,11 +1064,16 @@ public actor TTSSpeechSynthesizer {
             cache: cache,
             chunker: chunker,
             startCharacterOffset: startCharacterOffset,
+            backpressure: backpressure,
             progressHandler: progressHandler
         )
+        // Sentence-level highlighting needs the text to find sentence
+        // boundaries; harmless for word level.
+        await playback.setHighlightSourceText(text)
         try await playback.play(
             stream: stream,
             synthesizer: self,
+            backpressure: backpressure,
             onWord: onWord,
             onPlaybackEnd: onPlaybackEnd
         )
@@ -969,6 +1087,7 @@ public actor TTSSpeechSynthesizer {
         cacheBundleAt bundleURL: URL,
         chunker: TTSTextChunker = .init(),
         startCharacterOffset: Int = 0,
+        backpressure: TTSPlaybackBackpressure? = nil,
         progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)? = nil
     ) async throws -> AsyncThrowingStream<TTSAudioBufferChunk, Error> {
         let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -985,6 +1104,7 @@ public actor TTSSpeechSynthesizer {
         let modelID = model.id
         let voiceID = options.voice?.identifier
         let languageID = options.language?.identifier
+        let codec = options.audioCodec
 
         let fileManager = FileManager.default
         // Each (voice, language) gets its own sub-bundle inside bundleURL, so
@@ -1025,6 +1145,7 @@ public actor TTSSpeechSynthesizer {
                 language: languageID,
                 sourceText: text,
                 sampleRate: 0,
+                codec: codec.manifestTag,
                 chunks: []
             )
         }
@@ -1062,13 +1183,19 @@ public actor TTSSpeechSynthesizer {
                     if skippedCount > 0, index == skippedCount {
                         synthesizer.info("streamAndCacheNarration[\(modelID)]: SKIPPED \(skippedCount) chunk(s) before offset \(resumeOffset); resuming at chunk \(index + 1)/\(totalChunks)")
                     }
-                    let chunkFilename = String(format: "chunks/%03d.wav", index)
-                    let chunkURL = subBundleURL.appendingPathComponent(chunkFilename, isDirectory: false)
+                    // Fresh chunks are written in the caller's chosen codec.
+                    // Cached chunks are located by their manifest-recorded path,
+                    // which carries the real extension — so a bundle that mixes
+                    // codecs (e.g. a WAV bundle resumed after switching to AAC)
+                    // still replays its existing chunks.
+                    let genFilename = String(format: "chunks/%03d.\(codec.fileExtension)", index)
                     let entry = workingEntries[index]
-                    let fileExists = fileManager.fileExists(atPath: chunkURL.path)
+                    let replayFilename = entry?.audioFile ?? genFilename
+                    let replayURL = subBundleURL.appendingPathComponent(replayFilename, isDirectory: false)
+                    let fileExists = fileManager.fileExists(atPath: replayURL.path)
 
                     if let entry, fileExists, entry.text == info.text,
-                       let chunkFile = try? AVAudioFile(forReading: chunkURL),
+                       let chunkFile = try? AVAudioFile(forReading: replayURL),
                        chunkFile.length > 0,
                        let buffer = AVAudioPCMBuffer(
                            pcmFormat: chunkFile.processingFormat,
@@ -1082,6 +1209,10 @@ public actor TTSSpeechSynthesizer {
                             modelID: modelID, chunkIndex: index,
                             characterRange: info.characterRange
                         ))
+                        // Gate on look-ahead before handing the (whole-chunk)
+                        // buffer downstream so cached replay can't race ahead of
+                        // playback and pile the whole book into memory either.
+                        await backpressure?.reserve(entry.duration)
                         continuation.yield(.init(buffer: buffer, sampleRate: sampleRate))
                         await synthesizer.emit(.chunkFinished(
                             modelID: modelID, chunkIndex: index,
@@ -1107,21 +1238,24 @@ public actor TTSSpeechSynthesizer {
                         // file is corrupt/empty. Drop any stale entry first.
                         if entry != nil {
                             workingEntries.removeValue(forKey: index)
-                            try? fileManager.removeItem(at: chunkURL)
+                            try? fileManager.removeItem(at: replayURL)
                             synthesizer.warning("streamAndCacheNarration[\(modelID)]: chunk \(index + 1) cached file invalid, regenerating")
                         }
+                        let genURL = subBundleURL.appendingPathComponent(genFilename, isDirectory: false)
                         try await Self.generateAndPersist(
                             index: index,
                             info: info,
                             model: model,
                             options: options,
                             modelID: modelID,
-                            chunkURL: chunkURL,
-                            chunkFilename: chunkFilename,
+                            codec: codec,
+                            chunkURL: genURL,
+                            chunkFilename: genFilename,
                             bundleURL: subBundleURL,
                             workingManifest: &workingManifest,
                             workingEntries: &workingEntries,
                             continuation: continuation,
+                            backpressure: backpressure,
                             synthesizer: synthesizer
                         )
                     }
@@ -1149,12 +1283,14 @@ public actor TTSSpeechSynthesizer {
         model: TTSModelDescriptor,
         options: TTSSynthesisOptions,
         modelID: String,
+        codec: TTSAudioCodec,
         chunkURL: URL,
         chunkFilename: String,
         bundleURL: URL,
         workingManifest: inout TTSPreparedNarrationManifest,
         workingEntries: inout [Int: TTSPreparedNarrationManifest.ChunkEntry],
         continuation: AsyncThrowingStream<TTSAudioBufferChunk, Error>.Continuation,
+        backpressure: TTSPlaybackBackpressure?,
         synthesizer: TTSSpeechSynthesizer
     ) async throws {
         synthesizer.info("streamAndCacheNarration[\(modelID)]: chunk \(index + 1) GENERATING")
@@ -1180,15 +1316,20 @@ public actor TTSSpeechSynthesizer {
             }
             if audioFile == nil {
                 chunkSampleRate = buffer.format.sampleRate
-                audioFile = try AVAudioFile(
-                    forWriting: chunkURL,
-                    settings: buffer.format.settings,
-                    commonFormat: buffer.format.commonFormat,
-                    interleaved: buffer.format.isInterleaved
+                audioFile = try TTSAudioEncoder.makeFile(
+                    at: chunkURL, codec: codec, sourceFormat: buffer.format
                 )
             }
-            try audioFile?.write(from: buffer)
+            if let audioFile { try TTSAudioEncoder.write(buffer, to: audioFile) }
             frameCount += AVAudioFramePosition(buffer.frameLength)
+            // Persist always happens (to disk, bounded); only the downstream
+            // yield is gated, so generation stays within the look-ahead window
+            // of playback. The chunk file is fully written regardless, so a
+            // background interruption still leaves a resumable cache.
+            let bufferSeconds = buffer.format.sampleRate > 0
+                ? Double(buffer.frameLength) / buffer.format.sampleRate
+                : 0
+            await backpressure?.reserve(bufferSeconds)
             continuation.yield(pcm)
         }
         audioFile = nil
@@ -1211,6 +1352,9 @@ public actor TTSSpeechSynthesizer {
         }
         if workingManifest.sampleRate == 0 {
             workingManifest.sampleRate = Int(chunkSampleRate.rounded())
+        }
+        if workingManifest.codec == nil {
+            workingManifest.codec = codec.manifestTag
         }
         let shifted = liveTimings.map { timing -> TTSPreparedNarrationManifest.SerializableWordTiming in
             TTSPreparedNarrationManifest.SerializableWordTiming(
@@ -1268,6 +1412,7 @@ public actor TTSSpeechSynthesizer {
         let fileManager = FileManager.default
         let voiceID = options.voice?.identifier
         let languageID = options.language?.identifier
+        let codec = options.audioCodec
         let subBundleURL = TTSPreparedNarration.subBundleURL(
             in: bundleURL, voice: voiceID, language: languageID
         )
@@ -1285,7 +1430,7 @@ public actor TTSSpeechSynthesizer {
         for (index, info) in chunkInfos.enumerated() {
             try Task.checkCancellation()
             if lifecycle.isShuttingDown { throw CancellationError() }
-            let filename = String(format: "chunks/%03d.wav", index)
+            let filename = String(format: "chunks/%03d.\(codec.fileExtension)", index)
             let chunkURL = subBundleURL.appendingPathComponent(filename, isDirectory: false)
 
             let stream = try await synthesizeStream(
@@ -1307,14 +1452,11 @@ public actor TTSSpeechSynthesizer {
                     if audioFile == nil {
                         let format = buffer.format
                         chunkSampleRate = format.sampleRate
-                        audioFile = try AVAudioFile(
-                            forWriting: chunkURL,
-                            settings: format.settings,
-                            commonFormat: format.commonFormat,
-                            interleaved: format.isInterleaved
+                        audioFile = try TTSAudioEncoder.makeFile(
+                            at: chunkURL, codec: codec, sourceFormat: format
                         )
                     }
-                    try audioFile?.write(from: buffer)
+                    if let audioFile { try TTSAudioEncoder.write(buffer, to: audioFile) }
                     frameCount += AVAudioFramePosition(buffer.frameLength)
                 }
                 audioFile = nil
@@ -1371,6 +1513,7 @@ public actor TTSSpeechSynthesizer {
             language: languageID,
             sourceText: text,
             sampleRate: detectedSampleRate,
+            codec: codec.manifestTag,
             chunks: entries
         )
         let narration = TTSPreparedNarration(manifest: manifest, baseURL: subBundleURL)
@@ -1441,6 +1584,31 @@ public actor TTSSpeechSynthesizer {
     }
 #endif
 
+
+    /// Applies model-specific knobs a generic `GenerateParameters` cannot carry.
+    ///
+    /// MOSS predicts its 16 residual codebooks sequentially, so the count is
+    /// close to a linear dial on generation time — measured at 2.4x faster per
+    /// word at 8 codebooks. The quantiser is coarse-to-fine, so the cost is
+    /// high-frequency detail rather than intelligibility, which is the right
+    /// trade for bulk work like baking a book and the wrong one for a short
+    /// sample the user is auditioning.
+    ///
+    /// Routed through the existing generation profile rather than a new option,
+    /// so callers keep one dial instead of two that can disagree.
+    private func applyModelSpecificProfile(
+        _ profile: TTSGenerationProfile?,
+        to model: any SpeechGenerationModel
+    ) {
+        guard let moss = model as? MossTTSNanoModel else { return }
+        switch profile {
+        case .fast:        moss.codebookCount = 8
+        case .balanced:    moss.codebookCount = 12
+        case .highQuality: moss.codebookCount = nil   // all 16
+        case nil:          moss.codebookCount = nil
+        }
+    }
+
     /// Centralizes the ensureDownloaded + load pipeline so that lifecycle
     /// diagnostics (resolve, download, load) are emitted from one place and
     /// caught errors are mapped to the right `TTSError` case. Consults the
@@ -1464,6 +1632,7 @@ public actor TTSSpeechSynthesizer {
         // fresh load so the new variant starts from a known-clean model
         // state (see note on `lastVariantByModel`).
         if let cached = loadedModels[model.id] {
+            applyModelSpecificProfile(options.generationProfile, to: cached.model)
             if lastVariantByModel[model.id] == requestedVariant {
                 info("prepareModel: CACHE HIT for \(model.id) sampleRate=\(cached.model.sampleRate) variant=\(requestedVariant.voice ?? "auto").\(requestedVariant.language ?? "auto")")
                 emit(.modelLoadServedFromCache(modelID: model.id))
@@ -1542,6 +1711,8 @@ public actor TTSSpeechSynthesizer {
             duration: loadDuration
         ))
         let box = LoadedModelBox(loaded)
+        applyModelSpecificProfile(options.generationProfile, to: loaded)
+        hasInitializedMLX = true
         loadedModels[model.id] = box
         warmedModelIDs.insert(model.id)
         lastVariantByModel[model.id] = requestedVariant

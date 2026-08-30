@@ -50,7 +50,15 @@ struct ContentView: View {
                 .padding(.horizontal, 18)
                 .padding(.top, 14)
 
-                Spacer(minLength: 24)
+                // Scrolls rather than relying on Spacers. With fixed spacers the
+                // keyboard pushed the whole stack upward: the title clipped off
+                // the top and the composer — attached as a bottom safeAreaInset —
+                // ended up behind the keyboard. Scrolling lets the middle
+                // compress instead, so the composer stays put and everything
+                // above it remains reachable.
+                ScrollView {
+                    VStack(spacing: 0) {
+                        Spacer(minLength: 24)
 
                 VStack(spacing: 18) {
                     ActivityOrbView(
@@ -157,6 +165,11 @@ struct ContentView: View {
                 }
                 .padding(.horizontal, 14)
                 .padding(.bottom, 12)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .scrollDismissesKeyboard(.interactively)
+                .scrollBounceBehavior(.basedOnSize)
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {

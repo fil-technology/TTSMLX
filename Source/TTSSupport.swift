@@ -53,6 +53,14 @@ public struct TTSSynthesisOptions: Sendable, Hashable {
     public var topP: Float?
     public var hfToken: String?
     public var streamingInterval: Double
+    /// Codec used when the framework writes generated audio to disk — narration
+    /// bundle chunks (``TTSSpeechSynthesizer/streamAndCacheNarration(_:using:options:cache:chunker:startCharacterOffset:backpressure:progressHandler:)``
+    /// and ``TTSSpeechSynthesizer/prepareNarration(_:using:options:into:chunker:progressHandler:)``).
+    /// Defaults to ``TTSAudioCodec/wav`` so existing behavior is unchanged; a
+    /// host opts into compression by passing e.g. `.aacLC(bitrate: 32_000)`.
+    /// Playback is unaffected — `AVAudioFile` decodes every codec transparently
+    /// — and word timings are codec-independent.
+    public var audioCodec: TTSAudioCodec
 
     public init(
         language: TTSLanguage? = nil,
@@ -65,7 +73,8 @@ public struct TTSSynthesisOptions: Sendable, Hashable {
         temperature: Float? = nil,
         topP: Float? = nil,
         hfToken: String? = nil,
-        streamingInterval: Double = 2.0
+        streamingInterval: Double = 2.0,
+        audioCodec: TTSAudioCodec = .wav
     ) {
         self.language = language
         self.voice = voice
@@ -78,6 +87,7 @@ public struct TTSSynthesisOptions: Sendable, Hashable {
         self.topP = topP
         self.hfToken = hfToken
         self.streamingInterval = streamingInterval
+        self.audioCodec = audioCodec
     }
 }
 

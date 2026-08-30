@@ -1,74 +1,147 @@
-# URGENT — Pre-Release Blockers
+# URGENT — pre-release blockers
 
-**Read this file before working on anything in this repo. Surface its contents to the user at the start of every session until the items here are cleared.**
+Surfaced at the start of every session (see CLAUDE.md). Delete this file when
+every item below is resolved.
 
-Last updated: 2026-05-24 (after the mlx-swift background-safe patch).
+## 1. `mlx-audio-swift` released (now `0.1.6-tts.1`) — RESOLVED
 
-## Status
+`feature/moss-tts-nano` is merged into `main` (`--no-ff`) and tagged
+`0.1.5-tts.1`, matching how `0.1.4-tts.1` was cut. `Package.swift` pins `0.1.6-tts.1`
+(which adds companion-repository support) and `Package.resolved` records it, so other repos —
+including the news app — consume TTSMLX normally.
 
-`v0.6.0` is tagged and pushed to `main`, **BUT it is not safely consumable yet**. There are unresolved dependencies that mean a downstream consumer pulling `v0.6.0` will hit the same crashes the release claims to fix.
+Verified: TTSMLX builds against the tag (not the local path), the resolved
+checkout reports `0.1.5-tts.1`, and the full suite passes (125 tests, 20
+suites).
 
-## Blockers
+The `Packages/mlx-audio-swift` symlink is left in place for future local
+development; nothing references it now. To develop against a local checkout
+again, swap the `.package(url:exact:)` line for
+`.package(name: "mlx-audio-swift", path: "Packages/mlx-audio-swift")` and
+remember to restore it before cutting a release.
 
-### 1. `mlx-audio-swift` patches are uncommitted
+## 2. `mlx-swift` pin had drifted off the background-safe fork — FIXED, verify
 
-The `broadcast_shapes (1,8,N,64) vs (1,8,2N,64)` KV-cache contamination crash is fixed by patches in `/Users/sviatoslavfil/Development/Fil.Technology/Packages/mlx-audio-swift/`. Those patches exist on disk but are **not committed**:
+Both `Package.resolved` (working tree — the committed value was already
+correct) and `DemoApp/.../swiftpm/Package.resolved` (gitignored, since the
+`.xcodeproj` is generated from `project.yml`) had drifted to mlx-swift
+revision `eb889e01`. Neither drift was committed, but both affected every
+local and demo-app build. That commit is:
 
-- `Sources/MLXAudioTTS/Models/PocketTTS/PocketTTSMimiAdapter.swift` — `resetState()`, `encodeToLatent`, `decodeFromLatent` rebuild caches outright
-- `Sources/MLXAudioTTS/Models/PocketTTS/PocketTTSModel.swift` — `generate()` calls `mimi.resetState()` defensively at the top
-- `Sources/MLXAudioCodecs/Mimi/Mimi.swift` — same fix in the shared codec, plus new public `resetDecoderCache()`
+* **not the fork commit** — its `.gitmodules` points `Source/Cmlx/mlx` at
+  `ml-explore/mlx`, i.e. **without** the background-safe `check_error` patch
+  that `Docs/mlx-swift-bg-safe-fork.md` and the `Package.swift` comment both
+  claim is present. The iOS background-Metal crash was therefore unmitigated
+  in anything built from that pin, including the demo app.
+* **unreachable on the remote** — tag `0.31.5` on
+  `fil-technology/mlx-swift` resolves to `82246c3b`, and `eb889e01` exists
+  only in local checkouts. Any clean checkout or CI build failed to resolve.
 
-Without these patches, the model cache shipped in `v0.6.0` reintroduces the crash on voice switch and long sessions. The `v0.6.0` CHANGELOG explicitly tells consumers to pull patched mlx-audio-swift, so we owe them a published version of it.
+Both files are now re-pinned to `82246c3b` ("Point mlx submodule at
+fil-technology/mlx background-safe fork"), whose submodule
+`fil-technology/mlx@6525eded` does carry the patch (verified by reading
+`mlx/backend/metal/eval.cpp`).
 
-### 2. The local `mlx-audio-swift` git state is broken
+**Still to do:** work out how the drift happened so it cannot recur. A stray
+`swift package update` is the likeliest cause — it moves the pin to a newer
+upstream commit that satisfies `exact: "0.31.5"` by tag name alone. Because
+the demo app's resolution file is gitignored and regenerated, nothing in the
+repo protects against this; consider asserting the expected mlx-swift
+revision in CI, or verifying the resolved submodule URL at build time.
 
-`/Users/sviatoslavfil/Development/Fil.Technology/Packages/mlx-audio-swift/.git/objects/info/` points at `/Users/sviatoslavfil/Development/Fil.Technology/Packages/TTSMLX/.build/repositories/mlx-audio-swift-4f05d7e9/objects`, which is a SwiftPM cache that no longer exists. The repo has no usable git history right now. This predates our work (the alternates pointer was already broken when the session started); none of our changes caused it. But it does mean the patches can't simply be committed in place — the `.git` directory needs repair or replacement first.
+Note: the `eb889e01` drift is also what made iOS builds fail with
+`encuda-utils.swift: cannot find type 'Process'` — that newer upstream commit
+introduced a CUDA build-tool plugin that Xcode wrongly builds for iOS. The
+correct pin has no such plugin.
 
-### 3. `Package.swift` points at a local path
+## 3. MOSS-TTS-Nano is `.implemented`, not `.validated`
 
-```swift
-.package(path: "../mlx-audio-swift")
+The port (backbone + MOSS-Audio-Tokenizer-Nano decoder) is numerically
+validated against the Python `mlx-audio` reference, but:
+
+* **Peak memory is high**: 1.3–1.8 GB observed on macOS when a whole passage
+  is generated in one `generate` call. The codec's deepest decoder stage
+  attends over `frames * 32` positions, so peak scales with chunk length.
+  Note the Reader path is much gentler — `TTSTextChunker` splits at 80/220
+  characters, well under MOSS's own 75-token budget, so each call decodes a
+  short span. `peakMemoryMB` is set to 1600 from the pessimistic
+  single-call figure and should be re-measured on device (via the Reader
+  path) before promoting to `.validated`.
+* **Upstream already has this model.** `Blaizzy/mlx-audio-swift` ships
+  `MossTTSNano` plus a `MossAudioTokenizer` **with an encoder**, so it
+  supports cloning from arbitrary reference audio. Evaluate adopting it
+  instead of maintaining this port; note upstream also has `OmniVoice`,
+  which the `feature/omnivoice` branch is separately mid-port on, and that
+  upstream lacks KittenTTS, so it is a merge rather than a fast-forward.
+* **Reference-audio cloning is not supported here**: the MOSS codec
+  *encoder* is not ported. Named voices ship as pre-encoded prompt codes
+  (`MossVoicePack`); `referenceAudio` from callers is rejected, and the
+  descriptor sets `supportsReferenceAudio: false`.
+* **Time-to-first-audio** measured through the real Reader path
+  (`synthesizeLong` + `TTSTextChunker`) is 3.3 s, with overall throughput of
+  about 1.2x realtime in a debug build on an M-series Mac. Calling
+  `generate` directly on a whole passage is far worse (~25–30 s to first
+  audio) because MOSS's own 75-token budget then yields a single chunk;
+  `MossTTSNanoModel.maxTextTokensPerChunk` tunes that case.
+
+## 4. Downloaded models live in a directory iOS is allowed to delete
+
+`HubCache.default` resolves to `URL.cachesDirectory/huggingface/hub` on iOS —
+i.e. inside `~/Library/Caches`. iOS purges that directory under storage
+pressure, without notice and without telling the app.
+
+For a news app that downloads ~375 MB once during onboarding, that means the
+model can silently disappear and the next article stalls on a re-download. The
+risk is proportional to how tight the user's storage is.
+
+Both halves already agree on this location — the runtime loader
+(`ModelUtils`) and `TTSBackgroundModelDownloader` — so moving it is a single
+coherent change rather than a hunt:
+
+* `TTS.loadModel(modelRepo:hfToken:cache:)` and
+  `ModelUtils.resolveOrDownloadModel(..., cache:)` already accept a `HubCache`.
+  `MLXTTSModelLoader.load` is what currently drops it and falls back to
+  `.default`.
+* A custom `HubCache(cacheDirectory:)` under Application Support would be
+  durable. Application Support is backed up, so the model directory should be
+  marked `isExcludedFromBackup` or users get ~375 MB added to their iCloud
+  backup.
+* Existing installs would need either a migration or one re-download.
+
+Not changed here because it alters where every model lives and needs a
+migration decision.
+
+## 5. Consumers must add a SwiftPM mirror for `mlx-swift`
+
+Three packages name `mlx-swift`: TTSMLX names the background-safe fork, while
+`mlx-audio-swift` and `mlx-swift-lm` name upstream. Upstream publishes the
+same version tags, so SwiftPM resolves the shared identity to whichever URL it
+meets first — and the build succeeds either way. Xcode was observed picking
+upstream, which ships an app **without** the Metal background patch.
+
+Every consuming app needs this at its package root, in
+`.swiftpm/configuration/mirrors.json`:
+
+```json
+{
+  "object": [
+    { "original": "https://github.com/ml-explore/mlx-swift.git",
+      "mirror": "https://github.com/fil-technology/mlx-swift.git" },
+    { "original": "https://github.com/ml-explore/mlx-swift",
+      "mirror": "https://github.com/fil-technology/mlx-swift.git" }
+  ],
+  "version": 1
+}
 ```
 
-This works for the maintainer's machine but not for any downstream consumer pulling `v0.6.0` from GitHub. The release tag effectively can't be consumed by anyone except via local-path checkout.
+Both spellings are required: `mlx-swift-lm` declares the URL without `.git`.
 
-### 4. `mlx-swift` needs a forked + tagged release for background safety
+Verify with `Tools/verify-mlx-fork.sh`, which checks the resolved submodule URL
+and greps the patch marker out of `eval.cpp`. Wire it into CI — this drift has
+appeared three separate ways (a stale `Package.resolved` pin, Xcode resolving
+to upstream, and a poisoned local SwiftPM repository mirror), and every time
+the build succeeded while silently lacking the fix.
 
-The Metal-in-background crash (`Insufficient Permission (to submit GPU work from background)` → `std::runtime_error` thrown from Metal's completion handler → uncaught C++ exception → process termination) is **not fixable in TTSMLX or mlx-audio-swift**. The throw site is in the upstream `mlx` C++ runtime, registered as a Metal `addCompletedHandler` callback that runs on Metal's own thread. No Swift try-catch can reach it.
-
-The patch is one block in `Source/Cmlx/mlx/mlx/backend/metal/eval.cpp` and is saved at `Patches/mlx-c-0.31.3-background-safe-check_error.patch`. It swallows the specific "submit GPU work from background" error and lets other Metal errors throw as today. The maintainer has the patch applied locally via `swift package edit mlx-swift`, so it builds and tests green right now — but that local-edit state is per-machine and not published.
-
-To make `v0.6.x` actually safe for backgrounding in any downstream consumer, you need to:
-- Fork `ml-explore/mlx` (the C++ submodule, not just `mlx-swift` — the patched file lives there)
-- Apply the patch and tag (e.g. `v0.31.3-tts-bg-safe.1`)
-- Fork `ml-explore/mlx-swift`, point its submodule at your `mlx` fork, tag matching version
-- Point TTSMLX's `Package.swift` at your `mlx-swift` fork instead of `ml-explore/mlx-swift`
-
-Detailed steps in [Docs/mlx-swift-bg-safe-fork.md](Docs/mlx-swift-bg-safe-fork.md).
-
-This is **three** patched dependencies now (mlx, mlx-audio-swift, TTSMLX). Strongly consider opening upstream PRs against `ml-explore/mlx` and the relevant `mlx-audio` upstream so the forks don't have to live indefinitely.
-
-## Required actions before the next release is meaningful
-
-These need to happen in order:
-
-1. **Fix or rebuild the `mlx-audio-swift` git state.** Most pragmatic path: clone fresh from your fork's upstream URL (or from your own GitHub mirror of mlx-audio-swift), and re-apply the patches from this repo's local checkout. Don't try to repair the broken `.git/objects/info/alternates` — easier to start clean.
-2. **Commit the patches** to whatever your fork's main branch is. Suggested commit message: "Fix MimiAdapter KV-cache reset to rebuild caches outright (broadcast_shapes crash on model instance reuse)." Reference the TTSMLX `v0.6.0` notes if you want a link.
-3. **Tag a release on your mlx-audio-swift fork** (e.g. `v0.4.3-tts-patches.1` or similar — pick a scheme that signals "based on upstream X plus our patches"). Push the tag.
-4. **Fork `ml-explore/mlx` and `ml-explore/mlx-swift`, apply the background-safe patch from `Patches/mlx-c-0.31.3-background-safe-check_error.patch`, tag both.** See [Docs/mlx-swift-bg-safe-fork.md](Docs/mlx-swift-bg-safe-fork.md) for the exact steps.
-5. **Update TTSMLX's `Package.swift`** to point at:
-   - your `mlx-audio-swift` fork URL with `.exact(...)` pinning at its new tag, replacing the `.package(path: "../mlx-audio-swift")` line
-   - your `mlx-swift` fork URL with `.exact(...)` pinning at its new tag, replacing the `ml-explore/mlx-swift` line
-   Run `swift package resolve` to update `Package.resolved`. Run `swift package unedit mlx-swift` to clear the local-edit state.
-6. **Cut TTSMLX `v0.6.1`** with the Package.swift / Package.resolved change. CHANGELOG entry: "Pin mlx-audio-swift and mlx-swift to public tagged versions including KV-cache reset and background-safe check_error patches." Now `v0.6.1` is safely consumable end-to-end.
-
-## How to act on this file
-
-When the user starts a session in this repo:
-
-1. Surface this file's contents immediately, before doing anything else they asked for.
-2. Confirm with them whether the items above are still outstanding.
-3. If yes, propose tackling them before any new feature/bug work.
-4. When the items are all complete, **delete this file** in the same commit that makes them complete. Future sessions don't need to keep seeing it.
-
-Until then, treat this file as a hard precondition. Other work can proceed if the user explicitly accepts the risk of releasing `v0.6.0` without the patched dependency, but they should make that call consciously, not by default.
+The durable fix is to fork `mlx-swift-lm` and repoint its `mlx-swift`, after
+which nothing in the graph names upstream and no mirror is needed. That needs
+a new repository under `fil-technology`.

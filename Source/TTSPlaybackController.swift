@@ -66,15 +66,26 @@ public final class TTSPlaybackController {
         return max(0, elapsed + offset)
     }
 
-    /// Total duration in seconds for file or narration playback. `nil` for
-    /// stream playback (the total length isn't known until the stream ends).
+    /// Total duration in seconds for file or narration playback, and for
+    /// stream playback the audio produced so far.
+    ///
+    /// For a stream this grows as chunks arrive and settles on the true total
+    /// once the stream finishes, so a scrubber can show a running total rather
+    /// than nothing at all. ``isDurationFinal`` says which it is.
     public var duration: TimeInterval? {
         if let narrationTotalDuration { return narrationTotalDuration }
+        if let streamAccumulatedDuration { return streamAccumulatedDuration }
         guard let file = currentFile else { return nil }
         let sampleRate = file.processingFormat.sampleRate
         guard sampleRate > 0 else { return nil }
         return Double(file.length) / sampleRate
     }
+
+    /// Sum of the audio produced by the stream so far. Fed by `.chunkFinished`
+    /// durations, which are audio seconds.
+    private var streamAccumulatedDuration: TimeInterval?
+    /// Whether ``duration`` is the final total rather than a running one.
+    public private(set) var isDurationFinal: Bool = true
 
     private let engine = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
@@ -82,8 +93,80 @@ public final class TTSPlaybackController {
     private var connectedFormat: AVAudioFormat?
     private var scheduledBufferCount = 0
     private var completedBufferCount = 0
+    /// True while a streamed source is still producing buffers. Prevents
+    /// `finishIfNeeded` from declaring playback finished when the queue merely
+    /// drains between chunks (which would prematurely fire `onPlaybackEnd`,
+    /// flipping a reader UI back to "stopped" mid-read).
+    private var streamProducing = false
     private var onPlaybackEnd: (@MainActor () -> Void)?
     private var currentFile: AVAudioFile?
+
+    /// Chunk files of the narration being played, with the absolute time each
+    /// one begins at. Held so ``seek(to:)`` can land inside any chunk and
+    /// re-queue the remainder — without this, seeking could only address the
+    /// first chunk and silently dropped everything after it.
+    private var narrationChunks: [(file: AVAudioFile, startTime: TimeInterval)] = []
+
+    /// Bumped on every seek. The word observer watches this and re-places its
+    /// cursor, because the cursor only moves forward: without this a backward
+    /// seek freezes the highlight until playback returns to where it was, and a
+    /// forward seek flashes it through every word it skipped.
+    private var seekGeneration = 0
+
+    /// Word timeline for whatever is playing, so the current word can be looked
+    /// up at any moment rather than only observed as it passes.
+    private var activeWordTimeline: [TTSWordTiming] = []
+
+    /// Source text of the current stream. Sentence-level highlighting needs it
+    /// to find sentence boundaries; word-level does not.
+    private var highlightSourceText: String = ""
+
+    /// Tells the controller which text the upcoming stream is reading, so
+    /// sentence-level highlighting can find sentence boundaries.
+    ///
+    /// `speakStreaming` sets this for you; call it directly only when driving
+    /// `play(stream:...)` yourself with `highlightOptions.granularity ==
+    /// .sentence`.
+    public func setHighlightSourceText(_ text: String) {
+        highlightSourceText = text
+    }
+
+    /// The word being spoken right now, or `nil` when nothing is playing.
+    ///
+    /// Updated as playback advances and re-placed after a seek. Read this when
+    /// rendering — a view that redraws for an unrelated reason, or appears
+    /// mid-playback, needs the current word rather than the last callback it
+    /// happened to catch.
+    public private(set) var currentWord: TTSWordTiming?
+
+    /// How highlights behave: word or sentence spans, lead time, and a minimum
+    /// on-screen duration. Set before starting playback.
+    ///
+    /// Sentence granularity is worth considering for on-device models: their
+    /// word timings are estimated from character weight rather than force
+    /// aligned, and a sentence span stays visually correct when an individual
+    /// word is out by a couple of hundred milliseconds.
+    public var highlightOptions: TTSHighlightOptions = .default
+
+    /// UTF-16 code units spoken so far, interpolated within the current word.
+    ///
+    /// A single `Int` is what a read-along view actually wants to bind to:
+    /// SwiftUI diffs it trivially, and everything else — which sentence is
+    /// current, how far the fill has progressed inside it — derives from it.
+    /// Binding a whole word object instead makes every row re-evaluate.
+    ///
+    /// Interpolated across the current word rather than stepping word to word,
+    /// so a progressive fill animates smoothly instead of jumping.
+    public var spokenCharacterCount: Int {
+        guard let word = currentWord else { return 0 }
+        guard let range = word.utf16Range(in: highlightSourceText) else { return 0 }
+        guard word.duration > 0 else { return range.upperBound }
+
+        let elapsedInWord = min(max(0, currentTime - word.offset), word.duration)
+        let fraction = elapsedInWord / word.duration
+        let span = Double(range.upperBound - range.lowerBound)
+        return range.lowerBound + Int((span * fraction).rounded())
+    }
     private var seekFrameOffset: AVAudioFramePosition = 0
     /// Set when playing a TTSPreparedNarration. Overrides `duration` to be
     /// the bundle's total length and drives the word-callback observer task.
@@ -96,6 +179,12 @@ public final class TTSPlaybackController {
     /// scheduled) and bail out cleanly instead of continuing to schedule
     /// stale buffers onto the audio engine.
     private var sessionToken: Int = 0
+    /// Optional look-ahead gate. When set (by ``play(stream:backpressure:...)``,
+    /// wired up automatically by ``TTSSpeechSynthesizer/speakStreaming``), the
+    /// producer reserves capacity before generating each buffer and we release
+    /// it here as each buffer finishes playing — bounding how far generation
+    /// runs ahead of playback. `nil` preserves the unbounded legacy behavior.
+    private var backpressure: TTSPlaybackBackpressure?
     nonisolated private let logger = Logger(subsystem: "technology.fil.ttsmlx", category: "Playback")
 
     public init(rate: Float = 1.0) {
@@ -114,10 +203,19 @@ public final class TTSPlaybackController {
         if scheduledBufferCount == 1 || scheduledBufferCount.isMultiple(of: 25) {
             logger.info("schedule: buffer #\(self.scheduledBufferCount, privacy: .public) frameLength=\(chunk.buffer.frameLength, privacy: .public) sampleRate=\(chunk.sampleRate, privacy: .public)")
         }
+        // Duration of this buffer in source-audio seconds, used to release the
+        // backpressure reservation the producer made for it. Capture the gate
+        // active *now* so a buffer always releases the gate it reserved against,
+        // even if a later session installed a different one.
+        let bufferSeconds = chunk.sampleRate > 0
+            ? Double(chunk.buffer.frameLength) / Double(chunk.sampleRate)
+            : 0
+        let gate = backpressure
         playerNode.scheduleBuffer(chunk.buffer) { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.completedBufferCount += 1
+                gate?.release(bufferSeconds)
                 self.finishIfNeeded()
             }
         }
@@ -134,14 +232,16 @@ public final class TTSPlaybackController {
     /// buffer finishes playing.
     public func play(
         stream: AsyncThrowingStream<TTSAudioBufferChunk, Error>,
+        backpressure: TTSPlaybackBackpressure? = nil,
         onPlaybackEnd: (@MainActor () -> Void)? = nil
     ) async throws {
         // Stop any prior session so this call doesn't stack onto a still-
         // running playback (the classic voice-change-mid-stream glitch),
         // then claim a fresh session before consuming the stream.
         stop()
+        self.backpressure = backpressure
         let myToken = beginSession()
-        try await drainStream(stream, token: myToken, onPlaybackEnd: onPlaybackEnd)
+        try await drainStream(stream, token: myToken, gate: backpressure, onPlaybackEnd: onPlaybackEnd)
     }
 
     /// Bump and return the new session token. Stays a single source of
@@ -159,26 +259,42 @@ public final class TTSPlaybackController {
     private func drainStream(
         _ stream: AsyncThrowingStream<TTSAudioBufferChunk, Error>,
         token myToken: Int,
+        gate: TTSPlaybackBackpressure?,
         onPlaybackEnd: (@MainActor () -> Void)?
     ) async throws {
         logger.info("play(stream:): ENTRY state=\(String(describing: self.state), privacy: .public) token=\(myToken, privacy: .public)")
         self.onPlaybackEnd = onPlaybackEnd
         currentFile = nil
+        narrationChunks = []
+        activeWordTimeline = []
+        currentWord = nil
+        highlightSourceText = ""
         seekFrameOffset = 0
         var consumed = 0
+        // While draining, don't let a transient queue-drain between chunks be
+        // mistaken for end-of-playback.
+        streamProducing = true
+        // Whatever ends this drain (completion, supersession, throw,
+        // cancellation), release any producer parked on the gate so it can't
+        // deadlock waiting for a `release` that will never come.
+        defer { gate?.finish() }
         do {
             for try await chunk in stream {
                 if sessionToken != myToken {
                     logger.info("play(stream:): superseded by token=\(self.sessionToken, privacy: .public); exiting")
-                    return
+                    return // a newer session's stop() owns resetting streamProducing
                 }
                 try schedule(chunk)
                 consumed += 1
             }
         } catch {
+            streamProducing = false
             logger.error("play(stream:): stream THREW after \(consumed, privacy: .public) buffers: \(error.localizedDescription, privacy: .public)")
             throw error
         }
+        // Stream fully produced: now end-of-queue genuinely means finished.
+        streamProducing = false
+        finishIfNeeded()
         if consumed == 0 {
             logger.warning("play(stream:): stream FINISHED WITH ZERO BUFFERS. Upstream synthesis produced no audio. Check synthesizeStream logs for the matching modelID.")
         } else {
@@ -212,6 +328,7 @@ public final class TTSPlaybackController {
     public func play(
         stream: AsyncThrowingStream<TTSAudioBufferChunk, Error>,
         synthesizer: TTSSpeechSynthesizer,
+        backpressure: TTSPlaybackBackpressure? = nil,
         onWord: (@MainActor (TTSWordTiming) -> Void)? = nil,
         onPlaybackEnd: (@MainActor () -> Void)? = nil
     ) async throws {
@@ -219,12 +336,18 @@ public final class TTSPlaybackController {
         // but stop() must happen *before* startStreamWordObserver, otherwise
         // stop() would cancel the observer we just registered.
         stop()
+        self.backpressure = backpressure
         let myToken = beginSession()
+        // A stream's total length is unknown until it ends; `duration` reports
+        // the audio produced so far and `isDurationFinal` stays false until
+        // `.streamingFinished`.
+        isDurationFinal = false
+        streamAccumulatedDuration = 0
         if let onWord {
             let events = await synthesizer.events()
             startStreamWordObserver(events: events, onWord: onWord)
         }
-        try await drainStream(stream, token: myToken, onPlaybackEnd: onPlaybackEnd)
+        try await drainStream(stream, token: myToken, gate: backpressure, onPlaybackEnd: onPlaybackEnd)
     }
 
     private func startStreamWordObserver(
@@ -251,6 +374,7 @@ public final class TTSPlaybackController {
                     switch event {
                     case let .chunkFinished(_, chunkIndex, duration):
                         chunkDurations[chunkIndex] = duration
+                        self?.streamAccumulatedDuration = chunkDurations.values.reduce(0, +)
                     case let .chunkTimings(_, chunkIndex, timings):
                         let priorTotal = chunkDurations
                             .filter { $0.key < chunkIndex }
@@ -262,8 +386,32 @@ public final class TTSPlaybackController {
                                 duration: timing.duration
                             ))
                         }
+                        // Apply the consumer's highlight shaping to the words
+                        // this chunk contributed. Done per chunk because a
+                        // stream has no complete timeline until it ends.
+                        if let controller = self {
+                            let shaped = controller.highlightOptions.apply(
+                                to: Array(timeline.suffix(timings.count)),
+                                in: controller.highlightSourceText
+                            )
+                            timeline.removeLast(timings.count)
+                            timeline.append(contentsOf: shaped)
+                        }
+                        // The cursor below only moves forward, so an
+                        // out-of-order arrival would strand every word behind
+                        // it. Chunks normally arrive in order and this is a
+                        // no-op; it costs little and removes the failure mode.
+                        if timeline.count > 1 {
+                            let tail = timeline[(timeline.count - timings.count)...]
+                            if let first = tail.first,
+                               let previous = timeline.dropLast(timings.count).last,
+                               first.offset < previous.offset {
+                                timeline.sort { $0.offset < $1.offset }
+                            }
+                        }
                     case .streamingFinished:
                         streamingFinished = true
+                        self?.isDurationFinal = true
                         return
                     default:
                         break
@@ -290,12 +438,17 @@ public final class TTSPlaybackController {
                     for i in (firedThrough + 1)..<timeline.count {
                         onWord(timeline[i])
                     }
+                    self.currentWord = timeline.last
                     return
                 }
                 let t = self.currentTime
+                // Keep the queryable timeline in step with what has arrived, so
+                // `wordTiming(at:)` and `currentWord` work mid-stream too.
+                self.activeWordTimeline = timeline
                 while (firedThrough + 1) < timeline.count,
                       timeline[firedThrough + 1].offset <= t {
                     firedThrough += 1
+                    self.currentWord = timeline[firedThrough]
                     onWord(timeline[firedThrough])
                 }
                 try? await Task.sleep(nanoseconds: 30_000_000)
@@ -352,14 +505,25 @@ public final class TTSPlaybackController {
     public func stop() {
         playerNode.stop()
         engine.stop()
+        streamProducing = false
         scheduledBufferCount = 0
         completedBufferCount = 0
         connectedFormat = nil
         currentFile = nil
+        narrationChunks = []
+        activeWordTimeline = []
+        currentWord = nil
+        highlightSourceText = ""
         seekFrameOffset = 0
         narrationTotalDuration = nil
+        streamAccumulatedDuration = nil
+        isDurationFinal = true
         narrationWordObserver?.cancel()
         narrationWordObserver = nil
+        // Release any producer parked on the look-ahead gate so it observes the
+        // stop (the next play(...) installs a fresh gate).
+        backpressure?.finish()
+        backpressure = nil
         state = .stopped
         onPlaybackEnd = nil
     }
@@ -397,19 +561,21 @@ public final class TTSPlaybackController {
         try connectIfNeeded(format: firstFile.processingFormat)
 
         // Mark this as a narration session so duration / cleanup behave right.
-        // currentFile points at the first chunk so seek(to:) inside the first
-        // chunk's range still works. Multi-chunk seek isn't supported in this
-        // pass — seek() will clamp to the first chunk's frame range.
         currentFile = firstFile
         narrationTotalDuration = narration.totalDuration
         seekFrameOffset = 0
+        narrationChunks = []
 
+        var startTime: TimeInterval = 0
         for chunkEntry in chunks {
             let chunkURL = narration.baseURL.appendingPathComponent(chunkEntry.audioFile, isDirectory: false)
             // Re-open per chunk so each schedule() call holds its own file handle.
             let chunkFile = (chunkEntry.index == firstChunkEntry.index)
                 ? firstFile
                 : try AVAudioFile(forReading: chunkURL)
+            narrationChunks.append((file: chunkFile, startTime: startTime))
+            let rate = chunkFile.processingFormat.sampleRate
+            if rate > 0 { startTime += Double(chunkFile.length) / rate }
             scheduledBufferCount += 1
             playerNode.scheduleFile(chunkFile, at: nil) { [weak self] in
                 Task { @MainActor [weak self] in
@@ -424,8 +590,14 @@ public final class TTSPlaybackController {
             state = .playing
         }
 
+        // Needed by `spokenCharacterCount` and by sentence-level highlighting.
+        highlightSourceText = narration.manifest.sourceText
         if let onWord {
-            startNarrationWordObserver(timeline: narration.flattenedWordTimeline(), onWord: onWord)
+            let timeline = highlightOptions.apply(
+                to: narration.flattenedWordTimeline(),
+                in: narration.manifest.sourceText
+            )
+            startNarrationWordObserver(timeline: timeline, onWord: onWord)
         }
     }
 
@@ -433,8 +605,10 @@ public final class TTSPlaybackController {
         timeline: [TTSWordTiming],
         onWord: @escaping @MainActor (TTSWordTiming) -> Void
     ) {
+        activeWordTimeline = timeline
         let observer = Task { @MainActor [weak self] in
             var firedThrough = -1
+            var seenGeneration = self?.seekGeneration ?? 0
             while !Task.isCancelled {
                 guard let self else { return }
                 let s = self.state
@@ -446,13 +620,31 @@ public final class TTSPlaybackController {
                     for i in (firedThrough + 1)..<timeline.count {
                         onWord(timeline[i])
                     }
+                    self.currentWord = timeline.last
                     return
                 }
                 let t = self.currentTime
+
+                // A seek moves the playhead arbitrarily, so re-place the cursor
+                // instead of walking to it: walking backwards is impossible and
+                // walking forwards would fire every word in between.
+                if self.seekGeneration != seenGeneration {
+                    seenGeneration = self.seekGeneration
+                    let landing = Self.indexOfWord(at: t, in: timeline)
+                    firedThrough = landing
+                    if landing >= 0 {
+                        self.currentWord = timeline[landing]
+                        onWord(timeline[landing])
+                    } else {
+                        self.currentWord = nil
+                    }
+                }
+
                 // Walk forward as long as the next word's start has passed.
                 while (firedThrough + 1) < timeline.count,
                       timeline[firedThrough + 1].offset <= t {
                     firedThrough += 1
+                    self.currentWord = timeline[firedThrough]
                     onWord(timeline[firedThrough])
                 }
                 try? await Task.sleep(nanoseconds: 30_000_000) // ~30Hz
@@ -466,7 +658,112 @@ public final class TTSPlaybackController {
     /// (i.e. stream playback is active). Clamps to `[0, duration]`; seeking at
     /// or past `duration` finishes playback as if it had played to the end.
     /// Preserves the prior `playing` / `paused` state.
+    /// Index of the word being spoken at `time`, or -1 before the first word.
+    ///
+    /// Binary search: the timeline for a long article runs to thousands of
+    /// words and this is consulted on every seek.
+    nonisolated static func indexOfWord(at time: TimeInterval, in timeline: [TTSWordTiming]) -> Int {
+        guard let first = timeline.first, time >= first.offset else { return -1 }
+        var low = 0
+        var high = timeline.count - 1
+        var result = 0
+        while low <= high {
+            let mid = (low + high) / 2
+            if timeline[mid].offset <= time {
+                result = mid
+                low = mid + 1
+            } else {
+                high = mid - 1
+            }
+        }
+        return result
+    }
+
+    /// The word spoken at `time`, for anything playing with a word timeline
+    /// (a narration, or a stream once its timings have arrived).
+    ///
+    /// Useful for rendering a scrubber preview, or restoring a highlight after
+    /// the view reappears, without waiting for the next callback.
+    public func wordTiming(at time: TimeInterval) -> TTSWordTiming? {
+        let index = Self.indexOfWord(at: time, in: activeWordTimeline)
+        guard index >= 0 else { return nil }
+        return activeWordTimeline[index]
+    }
+
+    /// Seeks across a multi-chunk narration: plays the containing chunk from
+    /// an offset, then queues every later chunk in full.
+    ///
+    /// `seekFrameOffset` is set to the absolute target so ``currentTime`` keeps
+    /// reporting position within the whole narration rather than within the
+    /// chunk — the word timeline is absolute, so the two must share an origin.
+    private func seekWithinNarration(to time: TimeInterval) throws {
+        let target = max(0, time)
+        if let total = narrationTotalDuration, target >= total {
+            let callback = onPlaybackEnd
+            stop()
+            state = .idle
+            callback?()
+            return
+        }
+
+        guard let landing = narrationChunks.last(where: { $0.startTime <= target })
+                ?? narrationChunks.first else {
+            throw PlaybackError.seekUnsupportedForStream
+        }
+        let sampleRate = landing.file.processingFormat.sampleRate
+        guard sampleRate > 0 else { return }
+
+        let wasPlaying = (state == .playing)
+        playerNode.stop()
+        scheduledBufferCount = 0
+        completedBufferCount = 0
+        seekFrameOffset = AVAudioFramePosition(target * sampleRate)
+        seekGeneration += 1
+
+        let intoChunk = target - landing.startTime
+        let startFrame = min(
+            max(0, AVAudioFramePosition(intoChunk * sampleRate)),
+            max(0, landing.file.length - 1)
+        )
+        let remaining = AVAudioFrameCount(max(0, landing.file.length - startFrame))
+        if remaining > 0 {
+            scheduledBufferCount += 1
+            playerNode.scheduleSegment(
+                landing.file, startingFrame: startFrame, frameCount: remaining, at: nil
+            ) { [weak self] in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.completedBufferCount += 1
+                    self.finishIfNeeded()
+                }
+            }
+        }
+
+        for chunk in narrationChunks where chunk.startTime > landing.startTime {
+            scheduledBufferCount += 1
+            playerNode.scheduleFile(chunk.file, at: nil) { [weak self] in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.completedBufferCount += 1
+                    self.finishIfNeeded()
+                }
+            }
+        }
+
+        if wasPlaying {
+            playerNode.play()
+            state = .playing
+        }
+    }
+
     public func seek(to time: TimeInterval) throws {
+        // A narration is many files; seek has to find the one containing the
+        // target and re-queue everything after it. Rescheduling only the file
+        // the target lands in would silently truncate playback there.
+        if narrationChunks.count > 1 {
+            try seekWithinNarration(to: time)
+            return
+        }
         guard let file = currentFile else {
             throw PlaybackError.seekUnsupportedForStream
         }
@@ -490,6 +787,7 @@ public final class TTSPlaybackController {
         scheduledBufferCount = 1
         completedBufferCount = 0
         seekFrameOffset = targetFrame
+        seekGeneration += 1
         let frameCount = AVAudioFrameCount(totalFrames - targetFrame)
         playerNode.scheduleSegment(
             file,
@@ -571,7 +869,10 @@ public final class TTSPlaybackController {
     }
 
     private func finishIfNeeded() {
-        guard scheduledBufferCount > 0,
+        // Don't finish while a stream is still producing — the queue draining
+        // between chunks is transient, not end-of-playback.
+        guard !streamProducing,
+              scheduledBufferCount > 0,
               completedBufferCount >= scheduledBufferCount else { return }
         state = .idle
         let callback = onPlaybackEnd
