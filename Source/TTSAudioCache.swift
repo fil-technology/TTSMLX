@@ -24,7 +24,10 @@ public actor TTSAudioCache {
     public let directoryURL: URL
     private let fileManager: FileManager
 
-    private static let supportedExtensions = ["wav", "caf"]
+    // Includes compressed containers so cachedURL/candidateURLs/remove find
+    // AAC and Apple Lossless entries. Size accounting and pruning glob the
+    // whole directory, so they are already codec-agnostic.
+    private static let supportedExtensions = ["wav", "caf", "m4a", "aac"]
 
     public init(directoryURL: URL, fileManager: FileManager = .default) throws {
         self.directoryURL = directoryURL
@@ -311,6 +314,48 @@ public actor TTSAudioCache {
         }
         return moved
     }
+
+#if canImport(AVFoundation)
+    /// Recompress every cache-managed narration bundle to `codec`, reclaiming
+    /// space on an already-generated library. Walks `bundles/*.ttsnarration`,
+    /// transcodes each in place via ``TTSPreparedNarration/recompress(bundleAt:to:fileManager:)``,
+    /// and returns the summed before/after byte totals.
+    ///
+    /// Idempotent — bundles already in `codec` are skipped and contribute
+    /// equal before/after bytes. `progress` fires as `(completed, total)`
+    /// after each bundle, for a host progress bar.
+    @discardableResult
+    public func recompressAllBundles(
+        to codec: TTSAudioCodec,
+        progress: (@Sendable (Int, Int) -> Void)? = nil
+    ) async throws -> (before: Int64, after: Int64) {
+        let bundlesRoot = directoryURL.appendingPathComponent("bundles", isDirectory: true)
+        let suffix = "." + TTSPreparedNarration.bundleExtension
+        guard fileManager.fileExists(atPath: bundlesRoot.path),
+              let entries = try? fileManager.contentsOfDirectory(
+                  at: bundlesRoot,
+                  includingPropertiesForKeys: [.isDirectoryKey],
+                  options: [.skipsHiddenFiles]
+              ) else {
+            return (0, 0)
+        }
+        let bundles = entries.filter { $0.lastPathComponent.hasSuffix(suffix) }
+        var before: Int64 = 0
+        var after: Int64 = 0
+        for (offset, bundle) in bundles.enumerated() {
+            // Use a fresh FileManager rather than the actor-isolated one: the
+            // recompress work is nonisolated, and FileManager.default is safe
+            // to use concurrently for these independent file operations.
+            let result = try await TTSPreparedNarration.recompress(
+                bundleAt: bundle, to: codec
+            )
+            before += result.before
+            after += result.after
+            progress?(offset + 1, bundles.count)
+        }
+        return (before, after)
+    }
+#endif
 
     /// Inspects a legacy bundle directory and returns `(modelID, sourceText)`
     /// from its first available manifest — either the root-level

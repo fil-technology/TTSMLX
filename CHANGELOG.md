@@ -6,6 +6,8 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-30
+
 ### Fixed
 
 - **`onPlaybackEnd` fired prematurely mid-stream** whenever the audio queue
@@ -37,6 +39,26 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ### Added
 
+- **Compressed narration audio (`TTSAudioCodec`).** Narration bundles can now
+  store chunk audio as **AAC-LC** (`.m4a`, ~24–48 kbps mono → **~8–16× smaller**
+  than 24 kHz/16-bit WAV) or **Apple Lossless** (~2×), instead of only WAV.
+  Opt in per synthesis via `TTSSynthesisOptions.audioCodec` (defaults to `.wav`,
+  so existing behavior is unchanged); it flows through `streamAndCacheNarration`
+  and `prepareNarration`. Playback is untouched — `AVAudioFile` decodes every
+  codec transparently — and word-timing/karaoke stays aligned because timings
+  come from the manifest (measured from the PCM frame count *before* encoding),
+  never from file size or sample count. The manifest gains an additive, optional
+  `codec` field and records each chunk's real extension, so old WAV bundles keep
+  playing, a bundle may even **mix codecs** (resume across a codec switch), and
+  the change does not bump the manifest `schemaVersion`. `TTSAudioCache` now
+  recognizes `.m4a`/`.aac` entries alongside `.wav`/`.caf`.
+- **Migration API to recompress already-generated audio.**
+  `TTSPreparedNarration.recompress(bundleAt:to:)` transcodes a bundle in place
+  (all voice/language sub-bundles, or a legacy root bundle), rewriting the
+  manifest and deleting the superseded files — MLX-free and idempotent, so a
+  host can reclaim space on the *current* library, not just future books.
+  `TTSAudioCache.recompressAllBundles(to:progress:)` sweeps the whole managed
+  store and reports before/after byte totals plus `(done, total)` progress.
 - **Realtime conversational TTS loop (`TTSRealtimeSession`).** A low-latency
   controller for the "ask → speak → repeat" flow: feed it text turns (from any
   speech-to-text source) and it speaks them with **barge-in** — a new

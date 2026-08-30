@@ -27,8 +27,12 @@ import Foundation
 ///
 /// `manifest.json` is a versioned JSON document — see
 /// ``TTSPreparedNarrationManifest`` for the schema. Each chunk's audio is a
-/// standalone WAV; they are not concatenated so individual chunks remain
-/// re-renderable in isolation (e.g. for editing a single paragraph).
+/// standalone file whose codec is chosen by ``TTSSynthesisOptions/audioCodec``
+/// — WAV by default, or a compressed `.m4a` (AAC-LC / Apple Lossless). Chunks
+/// are not concatenated, so individual chunks remain re-renderable in isolation
+/// (e.g. for editing a single paragraph). The real extension is recorded per
+/// chunk in the manifest, so readers resolve audio by manifest path and a
+/// bundle can even mix codecs (e.g. after resuming a WAV bundle under AAC).
 ///
 /// ## Author-time flow
 ///
@@ -384,6 +388,17 @@ public struct TTSPreparedNarrationManifest: Sendable, Hashable, Codable {
     public var language: String?
     public var sourceText: String
     public var sampleRate: Int
+    /// The codec the bundle's chunk audio was written with — a
+    /// ``TTSAudioCodec/manifestTag`` such as `"wav"`, `"aac-lc@32000"`, or
+    /// `"alac"`. Optional and additive: legacy bundles predate the field and
+    /// decode it as `nil`, which callers treat as WAV. Each chunk's real
+    /// extension also lives in ``ChunkEntry/audioFile``, so playback resolves
+    /// audio by manifest path and never needs this field; it exists so
+    /// migration and diagnostics can tell AAC from ALAC (both `.m4a`) and know
+    /// which codec to regenerate a missing chunk in. Because it is optional
+    /// with a default, adding it does **not** bump ``currentSchemaVersion`` —
+    /// old readers ignore the extra key and still accept the bundle.
+    public var codec: String?
     public var chunks: [ChunkEntry]
 
     public init(
@@ -394,6 +409,7 @@ public struct TTSPreparedNarrationManifest: Sendable, Hashable, Codable {
         language: String? = nil,
         sourceText: String,
         sampleRate: Int,
+        codec: String? = nil,
         chunks: [ChunkEntry]
     ) {
         self.schemaVersion = schemaVersion
@@ -403,6 +419,7 @@ public struct TTSPreparedNarrationManifest: Sendable, Hashable, Codable {
         self.language = language
         self.sourceText = sourceText
         self.sampleRate = sampleRate
+        self.codec = codec
         self.chunks = chunks
     }
 

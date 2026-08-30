@@ -1104,6 +1104,7 @@ public actor TTSSpeechSynthesizer {
         let modelID = model.id
         let voiceID = options.voice?.identifier
         let languageID = options.language?.identifier
+        let codec = options.audioCodec
 
         let fileManager = FileManager.default
         // Each (voice, language) gets its own sub-bundle inside bundleURL, so
@@ -1144,6 +1145,7 @@ public actor TTSSpeechSynthesizer {
                 language: languageID,
                 sourceText: text,
                 sampleRate: 0,
+                codec: codec.manifestTag,
                 chunks: []
             )
         }
@@ -1181,13 +1183,19 @@ public actor TTSSpeechSynthesizer {
                     if skippedCount > 0, index == skippedCount {
                         synthesizer.info("streamAndCacheNarration[\(modelID)]: SKIPPED \(skippedCount) chunk(s) before offset \(resumeOffset); resuming at chunk \(index + 1)/\(totalChunks)")
                     }
-                    let chunkFilename = String(format: "chunks/%03d.wav", index)
-                    let chunkURL = subBundleURL.appendingPathComponent(chunkFilename, isDirectory: false)
+                    // Fresh chunks are written in the caller's chosen codec.
+                    // Cached chunks are located by their manifest-recorded path,
+                    // which carries the real extension — so a bundle that mixes
+                    // codecs (e.g. a WAV bundle resumed after switching to AAC)
+                    // still replays its existing chunks.
+                    let genFilename = String(format: "chunks/%03d.\(codec.fileExtension)", index)
                     let entry = workingEntries[index]
-                    let fileExists = fileManager.fileExists(atPath: chunkURL.path)
+                    let replayFilename = entry?.audioFile ?? genFilename
+                    let replayURL = subBundleURL.appendingPathComponent(replayFilename, isDirectory: false)
+                    let fileExists = fileManager.fileExists(atPath: replayURL.path)
 
                     if let entry, fileExists, entry.text == info.text,
-                       let chunkFile = try? AVAudioFile(forReading: chunkURL),
+                       let chunkFile = try? AVAudioFile(forReading: replayURL),
                        chunkFile.length > 0,
                        let buffer = AVAudioPCMBuffer(
                            pcmFormat: chunkFile.processingFormat,
@@ -1230,17 +1238,19 @@ public actor TTSSpeechSynthesizer {
                         // file is corrupt/empty. Drop any stale entry first.
                         if entry != nil {
                             workingEntries.removeValue(forKey: index)
-                            try? fileManager.removeItem(at: chunkURL)
+                            try? fileManager.removeItem(at: replayURL)
                             synthesizer.warning("streamAndCacheNarration[\(modelID)]: chunk \(index + 1) cached file invalid, regenerating")
                         }
+                        let genURL = subBundleURL.appendingPathComponent(genFilename, isDirectory: false)
                         try await Self.generateAndPersist(
                             index: index,
                             info: info,
                             model: model,
                             options: options,
                             modelID: modelID,
-                            chunkURL: chunkURL,
-                            chunkFilename: chunkFilename,
+                            codec: codec,
+                            chunkURL: genURL,
+                            chunkFilename: genFilename,
                             bundleURL: subBundleURL,
                             workingManifest: &workingManifest,
                             workingEntries: &workingEntries,
@@ -1273,6 +1283,7 @@ public actor TTSSpeechSynthesizer {
         model: TTSModelDescriptor,
         options: TTSSynthesisOptions,
         modelID: String,
+        codec: TTSAudioCodec,
         chunkURL: URL,
         chunkFilename: String,
         bundleURL: URL,
@@ -1305,14 +1316,11 @@ public actor TTSSpeechSynthesizer {
             }
             if audioFile == nil {
                 chunkSampleRate = buffer.format.sampleRate
-                audioFile = try AVAudioFile(
-                    forWriting: chunkURL,
-                    settings: buffer.format.settings,
-                    commonFormat: buffer.format.commonFormat,
-                    interleaved: buffer.format.isInterleaved
+                audioFile = try TTSAudioEncoder.makeFile(
+                    at: chunkURL, codec: codec, sourceFormat: buffer.format
                 )
             }
-            try audioFile?.write(from: buffer)
+            if let audioFile { try TTSAudioEncoder.write(buffer, to: audioFile) }
             frameCount += AVAudioFramePosition(buffer.frameLength)
             // Persist always happens (to disk, bounded); only the downstream
             // yield is gated, so generation stays within the look-ahead window
@@ -1344,6 +1352,9 @@ public actor TTSSpeechSynthesizer {
         }
         if workingManifest.sampleRate == 0 {
             workingManifest.sampleRate = Int(chunkSampleRate.rounded())
+        }
+        if workingManifest.codec == nil {
+            workingManifest.codec = codec.manifestTag
         }
         let shifted = liveTimings.map { timing -> TTSPreparedNarrationManifest.SerializableWordTiming in
             TTSPreparedNarrationManifest.SerializableWordTiming(
@@ -1401,6 +1412,7 @@ public actor TTSSpeechSynthesizer {
         let fileManager = FileManager.default
         let voiceID = options.voice?.identifier
         let languageID = options.language?.identifier
+        let codec = options.audioCodec
         let subBundleURL = TTSPreparedNarration.subBundleURL(
             in: bundleURL, voice: voiceID, language: languageID
         )
@@ -1418,7 +1430,7 @@ public actor TTSSpeechSynthesizer {
         for (index, info) in chunkInfos.enumerated() {
             try Task.checkCancellation()
             if lifecycle.isShuttingDown { throw CancellationError() }
-            let filename = String(format: "chunks/%03d.wav", index)
+            let filename = String(format: "chunks/%03d.\(codec.fileExtension)", index)
             let chunkURL = subBundleURL.appendingPathComponent(filename, isDirectory: false)
 
             let stream = try await synthesizeStream(
@@ -1440,14 +1452,11 @@ public actor TTSSpeechSynthesizer {
                     if audioFile == nil {
                         let format = buffer.format
                         chunkSampleRate = format.sampleRate
-                        audioFile = try AVAudioFile(
-                            forWriting: chunkURL,
-                            settings: format.settings,
-                            commonFormat: format.commonFormat,
-                            interleaved: format.isInterleaved
+                        audioFile = try TTSAudioEncoder.makeFile(
+                            at: chunkURL, codec: codec, sourceFormat: format
                         )
                     }
-                    try audioFile?.write(from: buffer)
+                    if let audioFile { try TTSAudioEncoder.write(buffer, to: audioFile) }
                     frameCount += AVAudioFramePosition(buffer.frameLength)
                 }
                 audioFile = nil
@@ -1504,6 +1513,7 @@ public actor TTSSpeechSynthesizer {
             language: languageID,
             sourceText: text,
             sampleRate: detectedSampleRate,
+            codec: codec.manifestTag,
             chunks: entries
         )
         let narration = TTSPreparedNarration(manifest: manifest, baseURL: subBundleURL)
