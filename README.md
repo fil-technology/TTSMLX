@@ -110,10 +110,60 @@ print(result.url)
 Add `TTSMLX` to your Swift package dependencies:
 
 ```swift
-.package(url: "https://github.com/fil-technology/TTSMLX.git", from: "0.5.0")
+.package(url: "https://github.com/fil-technology/TTSMLX.git", from: "0.8.0")
 ```
 
 Then depend on the `TTSMLX` product in your target.
+
+### Required dependency versions (forks)
+
+TTSMLX builds against **two forked dependencies**, pinned `exact` in
+`Package.swift`. Both carry patches that are **not in any upstream tagged
+release**, so resolving upstream instead of the fork either fails to compile or
+silently ships without a crash fix. When you add or bump TTSMLX, let it drive
+these — don't pin older versions of them yourself.
+
+| Dependency | Required | Why the fork |
+| --- | --- | --- |
+| `mlx-audio-swift` | `fil-technology/mlx-audio-swift` **≥ 0.1.7-tts.1** | KV-cache reset (`broadcast_shapes` crash on model reuse) **and** companion-repository support (`TTSModelRegistry`, added in `0.1.6-tts.1`), which TTSMLX calls directly. |
+| `mlx-swift` | `fil-technology/mlx-swift` **0.31.5** | Repoints the MLX C++ submodule at `fil-technology/mlx` so iOS background-permission Metal errors are swallowed in `check_error()` (Metal-in-background crash fix). Functionally upstream 0.31.3 + that patch. |
+
+**`mlx-swift` identity conflict.** `mlx-swift-lm` (and upstream `mlx-audio-swift`)
+name `ml-explore/mlx-swift`, so SwiftPM can resolve the shared `mlx-swift`
+identity to upstream — an app **without** the Metal background patch, and the
+build still succeeds. Add this to your app's `.swiftpm/configuration/mirrors.json`
+(both spellings are required; `mlx-swift-lm` omits the `.git`):
+
+```json
+{
+  "object": [
+    { "original": "https://github.com/ml-explore/mlx-swift.git",
+      "mirror": "https://github.com/fil-technology/mlx-swift.git" },
+    { "original": "https://github.com/ml-explore/mlx-swift",
+      "mirror": "https://github.com/fil-technology/mlx-swift.git" }
+  ],
+  "version": 1
+}
+```
+
+`Tools/install-mirrors.sh` installs it and `Tools/verify-mlx-fork.sh` checks the
+resolved submodule URL and greps the patch marker out of `eval.cpp` — wire the
+verify step into CI.
+
+**Common failure: `TTSModelRegistry` is undefined.** `TTSModelRegistry` lives in
+`mlx-audio-swift` (module `MLXAudioTTS`), **not** in TTSMLX's own source. A build
+error that it's undefined means your resolution is compiling TTSMLX against an
+**old `mlx-audio-swift`** (< `0.1.6-tts.1`) — usually a stale `Package.resolved`
+that wasn't re-resolved after bumping TTSMLX. Fix it by moving the fork up:
+
+```bash
+swift package update mlx-audio-swift     # or: rm Package.resolved && swift package resolve
+```
+
+In Xcode: **File ▸ Packages ▸ Reset Package Caches**, then **Update to Latest
+Package Versions**. Confirm your `Package.resolved` then shows
+`fil-technology/mlx-audio-swift` at `0.1.7-tts.1`
+(revision `bb5cda2a2c85bc0d369b102552527643b2463fb9`).
 
 ## Streaming
 
