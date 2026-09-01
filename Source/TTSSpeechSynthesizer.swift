@@ -120,6 +120,25 @@ public actor TTSSpeechSynthesizer {
     /// hearing voice-A still sound like voice-A is worth it.
     private var lastVariantByModel: [String: ModelVariant] = [:]
 
+    /// Maximum number of distinct models kept resident at once. TTS is
+    /// typically used one model at a time, so the default is 1: loading a
+    /// second model evicts the least-recently-used one to bound unified
+    /// memory. Raise it via
+    /// ``init(modelStore:diagnosticHandler:maxResidentModels:)`` when a
+    /// consumer deliberately keeps several models hot. A value < 1 is clamped
+    /// to 1.
+    private let maxResidentModels: Int
+    /// LRU order of resident model ids (front = least-recently-used). Only
+    /// tracks ids actually present in `loadedModels`; the test-only warmed
+    /// marker (`_markWarmedInternal`) does not populate it.
+    private var residencyOrder: [String] = []
+    /// In-flight weight-load Tasks keyed by model id. Lets two concurrent
+    /// first-use calls for the same model share a single load instead of
+    /// racing two — the actor serializes synchronous sections, but the load
+    /// itself suspends on download/MLX work, so without this a second caller
+    /// arriving mid-load would start a duplicate.
+    private var inFlightLoads: [String: Task<LoadedModelBox, Error>] = [:]
+
     private struct ModelVariant: Hashable {
         let voice: String?
         let language: String?
@@ -147,10 +166,12 @@ public actor TTSSpeechSynthesizer {
 
     public init(
         modelStore: TTSModelStore = TTSModelStore(),
-        diagnosticHandler: TTSDiagnosticHandler? = nil
+        diagnosticHandler: TTSDiagnosticHandler? = nil,
+        maxResidentModels: Int = 1
     ) {
         self.modelStore = modelStore
         self.diagnosticHandler = diagnosticHandler
+        self.maxResidentModels = max(1, maxResidentModels)
         // Three observers cover the three ways iOS signals "you're about to
         // lose GPU access": application-level `willResignActive` (still the
         // most reliable on UIApplication-based apps), the scene equivalent
@@ -361,6 +382,18 @@ public actor TTSSpeechSynthesizer {
         return true
     }
 
+    /// Warm a model ahead of first use so the first `synthesize` /
+    /// `synthesizeStream` call doesn't pay the cold-start weight load. A thin
+    /// wrapper over ``warmUp(_:hfToken:progressHandler:)`` for callers who
+    /// don't care whether the work happened this call or was already done.
+    public func preload(
+        _ model: TTSModelDescriptor,
+        hfToken: String? = nil,
+        progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)? = nil
+    ) async throws {
+        _ = try await warmUp(model, hfToken: hfToken, progressHandler: progressHandler)
+    }
+
     /// `true` once ``warmUp(_:hfToken:progressHandler:)`` has run for the
     /// model during this synthesizer's lifetime.
     public func isLoaded(_ modelID: String) -> Bool {
@@ -375,6 +408,7 @@ public actor TTSSpeechSynthesizer {
         let droppedInstance = loadedModels.removeValue(forKey: modelID) != nil
         let droppedMarker = warmedModelIDs.remove(modelID) != nil
         lastVariantByModel.removeValue(forKey: modelID)
+        residencyOrder.removeAll { $0 == modelID }
         if droppedInstance || droppedMarker {
             // Dropping the model object frees its weights, but MLX keeps freed
             // buffers in its own cache — for a codec that allocates attention
@@ -411,11 +445,46 @@ public actor TTSSpeechSynthesizer {
         loadedModels.removeAll()
         warmedModelIDs.removeAll()
         lastVariantByModel.removeAll()
+        residencyOrder.removeAll()
         if !ids.isEmpty { releaseRuntimeBuffers() }
         for id in ids {
             emit(.modelUnloaded(modelID: id))
         }
         log("unloadAll: \(ids.count) model(s)")
+    }
+
+    /// Drop every cached model so the underlying MLX weights are released.
+    /// Alias for ``unloadAll()`` named for consumers managing memory pressure /
+    /// shutdown. After this the next `synthesize` call re-loads lazily.
+    public func unloadCachedModels() {
+        unloadAll()
+    }
+
+    // MARK: - Residency
+
+    /// Mark `id` most-recently-used in the residency LRU. Only ids present in
+    /// `loadedModels` are tracked.
+    private func touchResidency(_ id: String) {
+        residencyOrder.removeAll { $0 == id }
+        residencyOrder.append(id)
+    }
+
+    /// Evict least-recently-used resident models until at most
+    /// ``maxResidentModels`` remain. Called after a fresh load is inserted.
+    private func enforceResidencyCap() {
+        guard maxResidentModels >= 1 else { return }
+        var evicted = false
+        while residencyOrder.count > maxResidentModels {
+            let victim = residencyOrder.removeFirst()
+            if loadedModels.removeValue(forKey: victim) != nil {
+                warmedModelIDs.remove(victim)
+                lastVariantByModel.removeValue(forKey: victim)
+                emit(.modelUnloaded(modelID: victim))
+                log("enforceResidencyCap: evicted LRU model \(victim)")
+                evicted = true
+            }
+        }
+        if evicted { releaseRuntimeBuffers() }
     }
 
     /// One-call helper for iOS memory-warning notifications. Clears the warmed
@@ -429,6 +498,17 @@ public actor TTSSpeechSynthesizer {
     /// MLX. Not part of the public API.
     func _markWarmedInternal(_ modelID: String) {
         warmedModelIDs.insert(modelID)
+    }
+
+    /// Internal seam used by tests to insert a fake resident model and run the
+    /// residency bookkeeping (LRU touch + cap enforcement) without invoking
+    /// MLX. Mirrors what `prepareModel` does on a fresh load. Not public.
+    func _insertLoadedModelForTesting(_ modelID: String, _ model: any SpeechGenerationModel) {
+        loadedModels[modelID] = LoadedModelBox(model)
+        warmedModelIDs.insert(modelID)
+        lastVariantByModel[modelID] = ModelVariant(voice: nil, language: nil)
+        touchResidency(modelID)
+        enforceResidencyCap()
     }
 
     public func synthesize(
@@ -1636,15 +1716,61 @@ public actor TTSSpeechSynthesizer {
             if lastVariantByModel[model.id] == requestedVariant {
                 info("prepareModel: CACHE HIT for \(model.id) sampleRate=\(cached.model.sampleRate) variant=\(requestedVariant.voice ?? "auto").\(requestedVariant.language ?? "auto")")
                 emit(.modelLoadServedFromCache(modelID: model.id))
+                touchResidency(model.id)
                 return cached
             }
             let prior = lastVariantByModel[model.id]
             info("prepareModel: EVICTING cached \(model.id) — variant changed (\(prior?.voice ?? "auto").\(prior?.language ?? "auto") → \(requestedVariant.voice ?? "auto").\(requestedVariant.language ?? "auto"))")
             loadedModels.removeValue(forKey: model.id)
             warmedModelIDs.remove(model.id)
+            residencyOrder.removeAll { $0 == model.id }
             emit(.modelUnloaded(modelID: model.id))
         }
 
+        // Single-flight: if a load for this id is already running (a concurrent
+        // first-use call), join it instead of kicking off a duplicate load.
+        if let existing = inFlightLoads[model.id] {
+            info("prepareModel: JOINING in-flight load for \(model.id)")
+            let box = try await existing.value
+            applyModelSpecificProfile(options.generationProfile, to: box.model)
+            lastVariantByModel[model.id] = requestedVariant
+            touchResidency(model.id)
+            return box
+        }
+
+        let loadTask = Task { try await self.performModelLoad(model, options: options, progressHandler: progressHandler) }
+        inFlightLoads[model.id] = loadTask
+        let box: LoadedModelBox
+        do {
+            box = try await loadTask.value
+        } catch {
+            inFlightLoads.removeValue(forKey: model.id)
+            throw error
+        }
+        inFlightLoads.removeValue(forKey: model.id)
+
+        hasInitializedMLX = true
+        loadedModels[model.id] = box
+        warmedModelIDs.insert(model.id)
+        lastVariantByModel[model.id] = requestedVariant
+        applyModelSpecificProfile(options.generationProfile, to: box.model)
+        touchResidency(model.id)
+        // Bound residency so a second resident model evicts the LRU one.
+        enforceResidencyCap()
+        return box
+    }
+
+    /// Resolve → ensureDownloaded → MLX weight load, emitting the lifecycle
+    /// diagnostics and mapping failures to the right ``TTSError``. Returns the
+    /// boxed instance **without** mutating the actor's cache — the caller
+    /// (`prepareModel`) owns residency/variant bookkeeping so the load owner
+    /// and any single-flight joiner agree on state. Isolated to the actor and
+    /// run inside a per-id Task for single-flight dedup.
+    private func performModelLoad(
+        _ model: TTSModelDescriptor,
+        options: TTSSynthesisOptions,
+        progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)?
+    ) async throws -> LoadedModelBox {
         let resolveStart = Date()
         let wasInstalled = await modelStore.isInstalled(model.id)
         info("prepareModel: resolved \(model.id) installed=\(wasInstalled) in \(String(format: "%.2f", Date().timeIntervalSince(resolveStart)))s")
@@ -1710,13 +1836,7 @@ public actor TTSSpeechSynthesizer {
             modelID: model.id,
             duration: loadDuration
         ))
-        let box = LoadedModelBox(loaded)
-        applyModelSpecificProfile(options.generationProfile, to: loaded)
-        hasInitializedMLX = true
-        loadedModels[model.id] = box
-        warmedModelIDs.insert(model.id)
-        lastVariantByModel[model.id] = requestedVariant
-        return box
+        return LoadedModelBox(loaded)
     }
 }
 

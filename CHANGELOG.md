@@ -6,6 +6,34 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-01
+
+### Added
+
+- **Model-cache management API for long-lived synthesizers.** The synthesizer
+  already keeps a loaded model resident across calls (`prepareModel` caches by
+  `descriptor.id`), so a consumer that holds **one** `TTSSpeechSynthesizer`
+  across requests skips the ~2 s weight reload on every call after the first.
+  This release adds the surface to drive that deliberately:
+  - `preload(_:hfToken:progressHandler:)` — warm a model ahead of first use
+    (thin wrapper over `warmUp` that doesn't return the "did work" Bool).
+  - `unloadCachedModels()` — drop all resident models and return their MLX
+    weights/buffers (alias of `unloadAll()`), for memory-pressure / shutdown.
+  - `init(modelStore:diagnosticHandler:maxResidentModels:)` — bound how many
+    distinct models stay resident.
+  - **Single-flight load dedup:** two concurrent first-use calls for the same
+    model now share one load instead of racing two.
+
+### Changed
+
+- **Default model residency is now capped at 1 (LRU).** Loading a second
+  distinct model on the same synthesizer evicts the least-recently-used one
+  (emitting `modelUnloaded` and returning its buffers) to bound unified memory.
+  This matches real single-model-at-a-time TTS usage; raise the cap via the new
+  `maxResidentModels` init parameter to keep several models hot. No effect on
+  the common path (repeated calls with one model, or voice/language switches on
+  one model — those keep the existing cache-hit / variant-reload behavior).
+
 ## [0.7.0] - 2026-08-30
 
 ### Fixed
