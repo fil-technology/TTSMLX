@@ -182,10 +182,11 @@ struct TTSPreparedNarrationTests {
         try playback.play(narration: narration) { word in
             Task { await firedCounter.record(word.characterRange) }
         }
-        // Let it play to natural end (~0.6s total).
-        try await Task.sleep(nanoseconds: 900_000_000)
-        let fired = await firedCounter.values
+        // Poll until every word has fired (or a generous ceiling) rather than a
+        // fixed sleep: the audio engine's start-up latency varies — a tight
+        // margin flakes on loaded/headless CI where no callbacks land in time.
         let expected = narration.flattenedWordTimeline().map { $0.characterRange }
+        let fired = await waitForWords(firedCounter, expecting: expected.count)
         #expect(fired == expected)
     }
 
@@ -438,5 +439,26 @@ actor WordCounter {
     func record(_ range: Range<Int>) {
         values.append(range)
     }
+}
+
+/// Poll `counter` until it has recorded `expecting` words or a generous ceiling
+/// elapses (default ~5s), checking every 50ms. Returns whatever fired. Replaces
+/// fixed-duration sleeps in playback highlight tests, which flake on CI when the
+/// audio engine is slow to start — the poll exits the instant every word lands,
+/// so it stays fast on a warm machine while tolerating a cold one.
+func waitForWords(
+    _ counter: WordCounter,
+    expecting count: Int,
+    maxPolls: Int = 100,
+    pollNanoseconds: UInt64 = 50_000_000
+) async -> [Range<Int>] {
+    var fired = await counter.values
+    var polls = 0
+    while fired.count < count, polls < maxPolls {
+        try? await Task.sleep(nanoseconds: pollNanoseconds)
+        fired = await counter.values
+        polls += 1
+    }
+    return fired
 }
 #endif

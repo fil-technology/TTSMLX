@@ -213,9 +213,8 @@ struct TTSAudioCodecTests {
         try playback.play(narration: narration) { word in
             Task { await counter.record(word.characterRange) }
         }
-        try await Task.sleep(nanoseconds: 1_100_000_000)
-        let fired = await counter.values
         let expected = narration.flattenedWordTimeline().map { $0.characterRange }
+        let fired = await waitForWords(counter, expecting: expected.count)
         #expect(fired == expected)
     }
 
