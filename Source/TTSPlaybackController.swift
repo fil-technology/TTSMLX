@@ -491,16 +491,39 @@ public final class TTSPlaybackController {
     }
 
     public func pause() {
-        guard playerNode.isPlaying else { return }
-        playerNode.pause()
+        // After an audio-session interruption (phone call, Siri, another
+        // app taking the output) the engine is stopped by the system and
+        // `playerNode.isPlaying` is already false while `state` still says
+        // `.playing`. Pausing must still record the paused state, otherwise
+        // the controller can never be resumed (resume() guards on `.paused`).
+        guard state == .playing else { return }
+        if playerNode.isPlaying { playerNode.pause() }
         state = .paused
     }
 
     public func resume() {
         guard state == .paused else { return }
+        // The system stops the engine on interruptions; calling
+        // `playerNode.play()` on a stopped engine raises an ObjC exception
+        // ("player started when engine not running") and takes the app
+        // down. Restart the engine first — the player node keeps its
+        // scheduled buffers/files across an engine stop, so playback
+        // continues from where it was.
+        if !engine.isRunning {
+            do {
+                try engine.start()
+            } catch {
+                logger.error("resume: engine.start() FAILED: \(error.localizedDescription, privacy: .public)")
+                return
+            }
+        }
         playerNode.play()
         state = .playing
     }
+
+    /// Whether the underlying `AVAudioEngine` is currently rendering. Becomes
+    /// `false` after a system interruption; ``resume()`` restarts it.
+    public var isEngineRunning: Bool { engine.isRunning }
 
     public func stop() {
         playerNode.stop()
@@ -844,7 +867,21 @@ public final class TTSPlaybackController {
     // MARK: - Internals
 
     private func connectIfNeeded(format: AVAudioFormat) throws {
-        if let existing = connectedFormat, existing == format { return }
+        if let existing = connectedFormat, existing == format {
+            // Same graph, but the engine may have been stopped underneath us
+            // by an interruption. Scheduling into a stopped engine plays
+            // nothing and `playerNode.play()` would raise — restart it.
+            if !engine.isRunning {
+                do {
+                    try engine.start()
+                    logger.info("connectIfNeeded: engine restarted after external stop")
+                } catch {
+                    logger.error("connectIfNeeded: engine restart FAILED: \(error.localizedDescription, privacy: .public)")
+                    throw error
+                }
+            }
+            return
+        }
         if connectedFormat != nil {
             logger.info("connectIfNeeded: format CHANGED, resetting graph (was sr=\(self.connectedFormat?.sampleRate ?? 0, privacy: .public) ch=\(self.connectedFormat?.channelCount ?? 0, privacy: .public) → new sr=\(format.sampleRate, privacy: .public) ch=\(format.channelCount, privacy: .public))")
             playerNode.stop()

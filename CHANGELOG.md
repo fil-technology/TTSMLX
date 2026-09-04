@@ -6,6 +6,50 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Word highlight froze after the first generated sub-chunk.**
+  `streamAndCacheNarration` generated each text chunk through the public
+  `synthesizeStream`, which emits `.streamingFinished` per call. The playback
+  controller's stream word observer treats that event as end-of-narration, so
+  after the first *generated* chunk it flushed every known word on the next
+  transient queue drain and stopped following playback; `isDurationFinal` also
+  flipped true far too early. Sub-chunk generation now runs without the
+  terminal diagnostic and `streamAndCacheNarration` emits exactly one
+  `.streamingFinished` (narrated duration, chunk count) when every chunk is
+  done. Fully-cached replays now emit it too, so consumers get one consistent
+  end-of-stream signal regardless of cache state.
+- **Concurrent generations on one model could race.** Only `speakStreaming`
+  guarded against overlap (by cancelling in-flight work); any other pair of
+  callers — a prefetch queue draining while the user tapped Play, or a bake
+  running alongside a live stream — could run two generations against the
+  same cached model instance and corrupt its KV cache ("RoPE cache length
+  exceeded", garbled audio). Every MLX generation now takes a per-synthesizer
+  FIFO gate (`TTSGenerationGate`): overlapping requests queue instead of
+  racing, and a queued request that gets cancelled leaves the queue with
+  `CancellationError`.
+- **Cached chunk replay decoded audio on the main thread.** The
+  `streamAndCacheNarration` drain Task is MainActor-bound (MLX streaming
+  requires it), so replaying a cached chunk decoded the whole AAC/WAV file on
+  the main thread — a visible UI stall at every cached chunk boundary. Replay
+  decoding now runs on a detached task.
+- **`TTSPlaybackController` was unrecoverable after an audio-session
+  interruption.** A phone call or Siri stops the `AVAudioEngine` underneath the
+  controller; `pause()` then no-op'd (the node was no longer "playing"), so
+  `state` stayed `.playing` and `resume()` refused to run — or, if the state
+  was right, `playerNode.play()` on the stopped engine raised an ObjC
+  exception and crashed the app. `pause()` now records `.paused` whenever the
+  controller was playing, and `resume()` / `schedule()` restart the engine
+  before touching the player node. New `isEngineRunning` exposes the engine
+  state for hosts that handle `AVAudioSession.interruptionNotification`.
+- **Resigning active aborted the process where MLX has no Metal backend.**
+  The background handler unconditionally called `Stream.gpu.synchronize()`,
+  which *creates* the Metal device on first touch; in the iOS Simulator that
+  aborts, so an app that had never synthesized anything crashed the first time
+  another app came to the front. The drain now only runs once MLX has actually
+  been initialized by a model load.
+
+
 ## [0.8.0] - 2026-09-01
 
 ### Added

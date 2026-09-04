@@ -455,8 +455,9 @@ struct TTSStreamAndCacheNarrationTests {
 
         // Skipped chunks emit no chunkStarted. The only chunkStarted seen
         // should be for index 1.
-        // Synthesizer doesn't emit streamingFinished for streamAndCacheNarration,
-        // so we cancel the collector explicitly.
+        // `streamAndCacheNarration` emits one `.streamingFinished` once every
+        // chunk is done, which ends the collector; cancelling is a harmless
+        // belt-and-braces in case the event raced the drain.
         collector.cancel()
         let startedIndices = await collector.value
         #expect(!startedIndices.contains(0))
