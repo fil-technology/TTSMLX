@@ -91,6 +91,30 @@ final class TTSLifecycleCoordinator: @unchecked Sendable {
     }
 }
 
+/// How `streamAndCacheNarration` hands generated audio downstream.
+///
+/// `.buffer` yields every streaming buffer (~a quarter second) as soon as it
+/// is generated: fastest time-to-first-audio, but if generation falls behind
+/// playback the audio runs dry in the middle of a sentence. `.chunk` yields
+/// each text chunk (a sentence group) as one buffer once it is fully
+/// generated, so playback can only pause *between* sentences.
+/// `.chunkAfterFirst` streams the first chunk by buffer for a quick start and
+/// yields every later chunk whole — the right default for a reader.
+/// Cached chunks are always replayed whole regardless of this setting.
+public enum TTSStreamGranularity: Sendable, Hashable {
+    case buffer
+    case chunk
+    case chunkAfterFirst
+
+    func yieldsWholeChunk(at index: Int) -> Bool {
+        switch self {
+        case .buffer: return false
+        case .chunk: return true
+        case .chunkAfterFirst: return index > 0
+        }
+    }
+}
+
 /// Serializes MLX generation across every synthesis entry point on one
 /// synthesizer. The cached model instance is **not** safe for concurrent
 /// generation (overlapping runs corrupt the shared KV cache — "RoPE cache
@@ -1154,6 +1178,7 @@ public actor TTSSpeechSynthesizer {
         chunker: TTSTextChunker = .init(),
         startCharacterOffset: Int = 0,
         backpressure: TTSPlaybackBackpressure? = nil,
+        granularity: TTSStreamGranularity = .buffer,
         progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)? = nil
     ) async throws -> AsyncThrowingStream<TTSAudioBufferChunk, Error> {
         let bundleURL = cache.narrationBundle(modelID: model.id, text: text)
@@ -1167,6 +1192,7 @@ public actor TTSSpeechSynthesizer {
             chunker: chunker,
             startCharacterOffset: startCharacterOffset,
             backpressure: backpressure,
+            granularity: granularity,
             progressHandler: progressHandler
         )
     }
@@ -1218,6 +1244,7 @@ public actor TTSSpeechSynthesizer {
         chunker: TTSTextChunker = .init(),
         startCharacterOffset: Int = 0,
         lookAheadSeconds: Double? = nil,
+        granularity: TTSStreamGranularity = .chunkAfterFirst,
         onWord: (@MainActor (TTSWordTiming) -> Void)? = nil,
         onPlaybackEnd: (@MainActor () -> Void)? = nil,
         progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)? = nil
@@ -1242,6 +1269,7 @@ public actor TTSSpeechSynthesizer {
             chunker: chunker,
             startCharacterOffset: startCharacterOffset,
             backpressure: backpressure,
+            granularity: granularity,
             progressHandler: progressHandler
         )
         // Sentence-level highlighting needs the text to find sentence
@@ -1265,6 +1293,7 @@ public actor TTSSpeechSynthesizer {
         chunker: TTSTextChunker = .init(),
         startCharacterOffset: Int = 0,
         backpressure: TTSPlaybackBackpressure? = nil,
+        granularity: TTSStreamGranularity = .buffer,
         progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)? = nil
     ) async throws -> AsyncThrowingStream<TTSAudioBufferChunk, Error> {
         let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1437,6 +1466,7 @@ public actor TTSSpeechSynthesizer {
                             workingEntries: &workingEntries,
                             continuation: continuation,
                             backpressure: backpressure,
+                            yieldWholeChunk: granularity.yieldsWholeChunk(at: index),
                             synthesizer: synthesizer
                         )
                     }
@@ -1485,6 +1515,39 @@ public actor TTSSpeechSynthesizer {
         )
     }
 
+    /// Joins consecutive PCM buffers of one format into a single buffer.
+    /// Returns `nil` (caller keeps the pieces) if the formats differ or the
+    /// data is not float PCM.
+    nonisolated static func concatenate(_ chunks: [TTSAudioBufferChunk]) -> [TTSAudioBufferChunk]? {
+        guard let first = chunks.first else { return [] }
+        if chunks.count == 1 { return chunks }
+        let format = first.buffer.format
+        guard format.commonFormat == .pcmFormatFloat32,
+              chunks.allSatisfy({ $0.buffer.format == format }) else { return nil }
+        let totalFrames = chunks.reduce(0) { $0 + Int($1.buffer.frameLength) }
+        guard totalFrames > 0,
+              let merged = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(totalFrames)),
+              let destination = merged.floatChannelData else { return nil }
+        let channels = Int(format.channelCount)
+        var offset = 0
+        for chunk in chunks {
+            let frames = Int(chunk.buffer.frameLength)
+            guard frames > 0, let source = chunk.buffer.floatChannelData else { continue }
+            if format.isInterleaved {
+                destination[0].advanced(by: offset * channels)
+                    .update(from: source[0], count: frames * channels)
+            } else {
+                for channel in 0..<channels {
+                    destination[channel].advanced(by: offset)
+                        .update(from: source[channel], count: frames)
+                }
+            }
+            offset += frames
+        }
+        merged.frameLength = AVAudioFrameCount(offset)
+        return [TTSAudioBufferChunk(buffer: merged, sampleRate: first.sampleRate)]
+    }
+
     /// Generation helper, factored out so both the fresh-chunk path and the
     /// corrupt-cached-chunk-recovery path share one implementation.
     private static func generateAndPersist(
@@ -1501,13 +1564,15 @@ public actor TTSSpeechSynthesizer {
         workingEntries: inout [Int: TTSPreparedNarrationManifest.ChunkEntry],
         continuation: AsyncThrowingStream<TTSAudioBufferChunk, Error>.Continuation,
         backpressure: TTSPlaybackBackpressure?,
+        yieldWholeChunk: Bool = false,
         synthesizer: TTSSpeechSynthesizer
     ) async throws {
-        synthesizer.info("streamAndCacheNarration[\(modelID)]: chunk \(index + 1) GENERATING")
+        synthesizer.info("streamAndCacheNarration[\(modelID)]: chunk \(index + 1) GENERATING\(yieldWholeChunk ? " (whole-chunk yield)" : "")")
         var didEmitChunkStart = false
         var audioFile: AVAudioFile?
         var frameCount: AVAudioFramePosition = 0
         var chunkSampleRate: Double = 0
+        var heldBuffers: [TTSAudioBufferChunk] = []
         let lifecycle = synthesizer.lifecycle
         // Sub-chunks must NOT emit `.streamingFinished`: consumers such as
         // `TTSPlaybackController`'s word observer treat that event as
@@ -1542,6 +1607,12 @@ public actor TTSSpeechSynthesizer {
             // yield is gated, so generation stays within the look-ahead window
             // of playback. The chunk file is fully written regardless, so a
             // background interruption still leaves a resumable cache.
+            if yieldWholeChunk {
+                // Hold the sentence group back until it is complete so the
+                // player never runs dry mid-sentence (see TTSStreamGranularity).
+                heldBuffers.append(pcm)
+                continue
+            }
             let bufferSeconds = buffer.format.sampleRate > 0
                 ? Double(buffer.frameLength) / buffer.format.sampleRate
                 : 0
@@ -1549,6 +1620,16 @@ public actor TTSSpeechSynthesizer {
             continuation.yield(pcm)
         }
         audioFile = nil
+        if yieldWholeChunk, !heldBuffers.isEmpty {
+            let whole = Self.concatenate(heldBuffers) ?? heldBuffers
+            for pcm in whole {
+                let seconds = pcm.buffer.format.sampleRate > 0
+                    ? Double(pcm.buffer.frameLength) / pcm.buffer.format.sampleRate
+                    : 0
+                await backpressure?.reserve(seconds)
+                continuation.yield(pcm)
+            }
+        }
         guard chunkSampleRate > 0, frameCount > 0 else {
             throw TTSError.generationFailed(modelID: modelID, underlying: NSError(
                 domain: "streamAndCacheNarration", code: -1, userInfo: [
