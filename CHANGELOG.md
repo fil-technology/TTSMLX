@@ -6,6 +6,19 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- **Sentence-granular streaming (`TTSStreamGranularity`).** `streamAndCacheNarration`
+  (and `speakStreaming`) take a `granularity:`: `.buffer` (previous behaviour —
+  every ~¼ s buffer is yielded as generated), `.chunk` (each text chunk is
+  yielded as one buffer once fully generated), or `.chunkAfterFirst` (fast
+  first chunk, whole chunks after). When generation cannot keep up with
+  playback, whole-chunk yields mean audio can only pause *between* sentence
+  groups instead of dying mid-word. `speakStreaming` defaults to
+  `.chunkAfterFirst`; `streamAndCacheNarration` keeps `.buffer` for
+  compatibility. Cached chunks were always replayed whole.
+
+
 ### Fixed
 
 - **Word highlight froze after the first generated sub-chunk.**
