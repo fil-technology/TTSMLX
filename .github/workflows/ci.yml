@@ -20,8 +20,21 @@ jobs:
         with:
           xcode-version: latest-stable
 
+      # mlx-swift-lm and mlx-audio-swift name upstream ml-explore/mlx-swift,
+      # and upstream now publishes the same 0.31.5 tag as our fork, so SwiftPM
+      # would happily resolve the shared identity to upstream — an app without
+      # the Metal-in-background crash fix, or (as of a pinned fork revision) a
+      # checkout failure. The mirror in .swiftpm/configuration/mirrors.json is
+      # tracked; installing it here is idempotent insurance against it going
+      # missing, and the verify step turns silent drift into a hard failure.
+      - name: Install mlx-swift mirror
+        run: Tools/install-mirrors.sh
+
       - name: Resolve package
         run: swift package resolve
+
+      - name: Verify mlx-swift is the background-safe fork
+        run: Tools/verify-mlx-fork.sh
 
       - name: Build package
         run: swift build

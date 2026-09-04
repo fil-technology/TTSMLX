@@ -42,12 +42,30 @@ fil-technology/mlx background-safe fork"), whose submodule
 `fil-technology/mlx@6525eded` does carry the patch (verified by reading
 `mlx/backend/metal/eval.cpp`).
 
-**Still to do:** work out how the drift happened so it cannot recur. A stray
-`swift package update` is the likeliest cause — it moves the pin to a newer
-upstream commit that satisfies `exact: "0.31.5"` by tag name alone. Because
-the demo app's resolution file is gitignored and regenerated, nothing in the
-repo protects against this; consider asserting the expected mlx-swift
-revision in CI, or verifying the resolved submodule URL at build time.
+**Recurrence prevention — DONE (2026-09-04).** The drift bit CI directly:
+`Package.resolved` recorded the `mlx-swift` identity at the *upstream* URL
+while pinning the fork-only revision `82246c3b`. That was harmless while the
+resolved file's stale `originHash` forced SwiftPM to re-resolve from
+`Package.swift` (the fork URL), but once a rebuilt `Package.resolved` with a
+matching hash was committed, SwiftPM trusted the pin, fetched upstream's refs,
+and failed with `unable to read tree (82246c3b)`. Locally it kept working only
+because `.swiftpm/configuration/mirrors.json` existed — and `.swiftpm/` was
+gitignored, so CI never had it.
+
+Fixed by: (1) tracking `.swiftpm/configuration/mirrors.json` in git via a
+`.gitignore` exception, (2) recording the fork URL as `mlx-swift`'s `location`
+in `Package.resolved` so the pin is coherent, (3) running
+`Tools/install-mirrors.sh` and `Tools/verify-mlx-fork.sh` in CI, so any future
+drift is a hard, explained failure instead of a silent one.
+
+**New fact that raises the stakes:** upstream `ml-explore/mlx-swift` has since
+published its own `0.31.5` (= `eb889e01`, the exact drift commit without the
+patch) and `0.31.6`. The "0.31.5 is uniquely ours" assumption is dead; the
+tag name no longer disambiguates, and the mirror is the *only* thing keeping
+resolution on the fork. The durable fix is to **re-tag the fork at a version
+upstream will never publish** and move the `exact:` pin (it must still satisfy
+`mlx-swift-lm`'s `0.31.3..<0.32.0`). That touches the fork repo, so it is a
+deliberate follow-up, not done here.
 
 Note: the `eb889e01` drift is also what made iOS builds fail with
 `encuda-utils.swift: cannot find type 'Process'` — that newer upstream commit
@@ -137,10 +155,13 @@ Every consuming app needs this at its package root, in
 Both spellings are required: `mlx-swift-lm` declares the URL without `.git`.
 
 Verify with `Tools/verify-mlx-fork.sh`, which checks the resolved submodule URL
-and greps the patch marker out of `eval.cpp`. Wire it into CI — this drift has
-appeared three separate ways (a stale `Package.resolved` pin, Xcode resolving
-to upstream, and a poisoned local SwiftPM repository mirror), and every time
-the build succeeded while silently lacking the fix.
+and greps the patch marker out of `eval.cpp`. **Now wired into CI**
+(`.github/workflows/ci.yml` installs the mirror, resolves, then verifies) and
+the mirror itself is tracked in this repo, so TTSMLX's own builds are covered.
+This drift has appeared four separate ways (a stale `Package.resolved` pin,
+Xcode resolving to upstream, a poisoned local SwiftPM repository mirror, and a
+CI checkout failure once upstream published a colliding `0.31.5`) — every
+consuming app still needs its own copy of the mirror, per above.
 
 The durable fix is to fork `mlx-swift-lm` and repoint its `mlx-swift`, after
 which nothing in the graph names upstream and no mirror is needed. That needs

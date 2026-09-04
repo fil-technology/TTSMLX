@@ -31,7 +31,7 @@
     {
       "identity" : "mlx-swift",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/ml-explore/mlx-swift",
+      "location" : "https://github.com/fil-technology/mlx-swift.git",
       "state" : {
         "revision" : "82246c3bc65af04bf1f2c87e21ff86c44323da84",
         "version" : "0.31.5"

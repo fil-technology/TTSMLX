@@ -1,6 +1,12 @@
 .DS_Store
 .build/
-.swiftpm/
+# Keep the mlx-swift mirror config tracked: it is what makes a clean checkout
+# (CI, a fresh clone) resolve `mlx-swift` to the background-safe fork instead
+# of upstream. Everything else under .swiftpm/ stays ignored.
+.swiftpm/*
+!.swiftpm/configuration/
+.swiftpm/configuration/*
+!.swiftpm/configuration/mirrors.json
 
 DemoApp/TTSMLXDemo.xcodeproj/
 DemoApp/build/
