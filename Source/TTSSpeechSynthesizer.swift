@@ -91,6 +91,76 @@ final class TTSLifecycleCoordinator: @unchecked Sendable {
     }
 }
 
+/// Serializes MLX generation across every synthesis entry point on one
+/// synthesizer. The cached model instance is **not** safe for concurrent
+/// generation (overlapping runs corrupt the shared KV cache — "RoPE cache
+/// length exceeded" in CSM/Marvis, garbled audio elsewhere). Before this gate
+/// only `speakStreaming` guarded against overlap, by cancelling whatever was
+/// in flight; a prefetch queue draining while the user tapped Play could still
+/// race two generations on the same weights. The gate is a FIFO mutex with
+/// cooperative cancellation: a waiter that gets cancelled leaves the queue
+/// and throws `CancellationError` instead of eventually running.
+final class TTSGenerationGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isHeld = false
+    private var waiters: [(id: UUID, continuation: CheckedContinuation<Void, Error>)] = []
+
+    /// Number of tasks currently queued behind the holder (diagnostics only).
+    var waitingCount: Int {
+        lock.lock(); defer { lock.unlock() }
+        return waiters.count
+    }
+
+    var isLocked: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return isHeld
+    }
+
+    func acquire() async throws {
+        let id = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                lock.lock()
+                if Task.isCancelled {
+                    lock.unlock()
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+                if !isHeld {
+                    isHeld = true
+                    lock.unlock()
+                    continuation.resume()
+                    return
+                }
+                waiters.append((id, continuation))
+                lock.unlock()
+            }
+        } onCancel: {
+            lock.lock()
+            if let index = waiters.firstIndex(where: { $0.id == id }) {
+                let waiter = waiters.remove(at: index)
+                lock.unlock()
+                waiter.continuation.resume(throwing: CancellationError())
+            } else {
+                lock.unlock()
+            }
+        }
+    }
+
+    func release() {
+        lock.lock()
+        guard isHeld else { lock.unlock(); return }
+        if waiters.isEmpty {
+            isHeld = false
+            lock.unlock()
+            return
+        }
+        let next = waiters.removeFirst()
+        lock.unlock()
+        next.continuation.resume()
+    }
+}
+
 public actor TTSSpeechSynthesizer {
     private let modelStore: TTSModelStore
     private var diagnosticHandler: TTSDiagnosticHandler?
@@ -148,6 +218,10 @@ public actor TTSSpeechSynthesizer {
     /// the notification block and read synchronously by every drain Task
     /// before submitting MLX work. See ``TTSLifecycleCoordinator``.
     nonisolated let lifecycle = TTSLifecycleCoordinator()
+    /// See ``TTSGenerationGate``. Held for the duration of every MLX
+    /// generation (streaming or one-shot) so callers can overlap requests
+    /// safely; they queue instead of racing the model.
+    nonisolated let generationGate = TTSGenerationGate()
 
     /// When `false` (the default), in-flight generation is cancelled the
     /// moment the app enters the background. Set to `true` only if the
@@ -201,13 +275,21 @@ public actor TTSSpeechSynthesizer {
         #if canImport(UIKit) && !os(watchOS)
         let coordinator = lifecycle
         let allowReader = _allowsBackgroundGeneration
+        let gpuReader = _hasInitializedGPU
         let handler: @Sendable (Notification) -> Void = { [weak self] _ in
             // Honor opt-in: apps with their own beginBackgroundTask can
             // continue generating. They take responsibility for OS limits.
             guard !allowReader.withLock({ $0 }) else { return }
             coordinator.setShuttingDown(true)
             let count = coordinator.cancelAllTasks()
-            Stream.gpu.synchronize()
+            // Only drain the GPU if MLX has actually been brought up. Touching
+            // `Stream.gpu` otherwise *creates* the Metal device — which aborts
+            // the process where Metal/MLX is unavailable (the iOS Simulator)
+            // the first time the app merely resigns active, even if it never
+            // synthesized anything.
+            if gpuReader.withLock({ $0 }) {
+                Stream.gpu.synchronize()
+            }
             if count > 0, let self {
                 Task { await self.emit(.cancelledByBackground(cancelledCount: count)) }
             }
@@ -238,6 +320,9 @@ public actor TTSSpeechSynthesizer {
     }
 
     nonisolated private let _allowsBackgroundGeneration = LockedBool(false)
+    /// Flipped the first time MLX is initialized (see `prepareModel`), so the
+    /// background handler knows whether there is a GPU stream to drain.
+    nonisolated private let _hasInitializedGPU = LockedBool(false)
 
     /// Cancel every in-flight generation Task. Streams that were in progress
     /// finish with a `CancellationError`; future `synthesize*` calls are
@@ -560,6 +645,8 @@ public actor TTSSpeechSynthesizer {
             // `MLX.ErrorHandler.dispatch`. The caught error wraps as
             // `TTSError.generationFailed` and propagates through the
             // existing handler chain.
+            try await generationGate.acquire()
+            defer { generationGate.release() }
             samples = try await MLX.withError {
                 try await Self.generateSamples(
                     model: loadedModel,
@@ -681,14 +768,24 @@ public actor TTSSpeechSynthesizer {
         // this Task rather than crossing the boundary from the synthesizer
         // actor.
         let lifecycle = self.lifecycle
+        let gate = self.generationGate
         let drainTask = Task { @MainActor in
+            var holdsGate = false
             defer {
+                if holdsGate { gate.release() }
                 Task { [synthesizer] in await synthesizer.untrackTask(id: taskID) }
             }
             var bufferCount = 0
             var emptyBufferCount = 0
             var firstBufferEmitted = false
             do {
+                try Task.checkCancellation()
+                if lifecycle.isShuttingDown { throw CancellationError() }
+                // Serialize model use. A queued request waits for the current
+                // generation to finish (or be cancelled) rather than running
+                // concurrently against the same weights.
+                try await gate.acquire()
+                holdsGate = true
                 try Task.checkCancellation()
                 if lifecycle.isShuttingDown { throw CancellationError() }
                 let loadedModel = loadedBox.model
@@ -1273,18 +1370,22 @@ public actor TTSSpeechSynthesizer {
                     let replayFilename = entry?.audioFile ?? genFilename
                     let replayURL = subBundleURL.appendingPathComponent(replayFilename, isDirectory: false)
                     let fileExists = fileManager.fileExists(atPath: replayURL.path)
+                    // Decode the cached chunk off the main actor: this drain
+                    // Task is MainActor-bound (MLX streaming requires it), but
+                    // decoding a whole AAC/WAV chunk here would stall the UI
+                    // for tens of milliseconds at every cached chunk boundary.
+                    let replayChunk: TTSAudioBufferChunk?
+                    if let entry, fileExists, entry.text == info.text {
+                        replayChunk = await Task.detached(priority: .userInitiated) {
+                            Self.loadReplayChunk(at: replayURL)
+                        }.value
+                    } else {
+                        replayChunk = nil
+                    }
 
-                    if let entry, fileExists, entry.text == info.text,
-                       let chunkFile = try? AVAudioFile(forReading: replayURL),
-                       chunkFile.length > 0,
-                       let buffer = AVAudioPCMBuffer(
-                           pcmFormat: chunkFile.processingFormat,
-                           frameCapacity: AVAudioFrameCount(chunkFile.length)
-                       ) {
+                    if let entry, let replayChunk {
                         // ────── REPLAY PATH ──────
                         synthesizer.info("streamAndCacheNarration[\(modelID)]: chunk \(index + 1)/\(totalChunks) REPLAY from cache")
-                        try chunkFile.read(into: buffer)
-                        let sampleRate = Int(chunkFile.processingFormat.sampleRate.rounded())
                         await synthesizer.emit(.chunkStarted(
                             modelID: modelID, chunkIndex: index,
                             characterRange: info.characterRange
@@ -1293,7 +1394,7 @@ public actor TTSSpeechSynthesizer {
                         // buffer downstream so cached replay can't race ahead of
                         // playback and pile the whole book into memory either.
                         await backpressure?.reserve(entry.duration)
-                        continuation.yield(.init(buffer: buffer, sampleRate: sampleRate))
+                        continuation.yield(replayChunk)
                         await synthesizer.emit(.chunkFinished(
                             modelID: modelID, chunkIndex: index,
                             duration: entry.duration
@@ -1342,6 +1443,15 @@ public actor TTSSpeechSynthesizer {
                 }
                 synthesizer.info("streamAndCacheNarration[\(modelID)]: ALL \(totalChunks) chunks DONE (replayed=\(cachedCount) generated=\(totalChunks - cachedCount))")
                 progressHandler?(.init(stage: .completed, fractionCompleted: 1, message: "Synthesis + cache finished."))
+                // Exactly one terminal diagnostic per narration (see
+                // `generateAndPersist`). `duration` is the narrated audio
+                // length, `bufferCount` the number of text chunks handled.
+                let narratedDuration = workingEntries.values.reduce(0) { $0 + $1.duration }
+                await synthesizer.emit(.streamingFinished(
+                    modelID: modelID,
+                    duration: narratedDuration,
+                    bufferCount: totalChunks
+                ))
                 continuation.finish()
             } catch is CancellationError {
                 synthesizer.info("streamAndCacheNarration[\(modelID)]: CANCELLED. \(workingEntries.count)/\(totalChunks) chunks cached on disk for next call.")
@@ -1353,6 +1463,26 @@ public actor TTSSpeechSynthesizer {
         }
         trackTask(id: taskID, drainTask)
         return stream
+    }
+
+    /// Reads one cached narration chunk into a single PCM buffer. Returns
+    /// `nil` for a missing, empty, or undecodable file so the caller falls
+    /// through to regeneration. Runs off the main actor (see the replay path
+    /// in `streamAndCacheNarration`).
+    nonisolated private static func loadReplayChunk(at url: URL) -> TTSAudioBufferChunk? {
+        guard let chunkFile = try? AVAudioFile(forReading: url),
+              chunkFile.length > 0,
+              let buffer = AVAudioPCMBuffer(
+                  pcmFormat: chunkFile.processingFormat,
+                  frameCapacity: AVAudioFrameCount(chunkFile.length)
+              ),
+              (try? chunkFile.read(into: buffer)) != nil,
+              buffer.frameLength > 0
+        else { return nil }
+        return TTSAudioBufferChunk(
+            buffer: buffer,
+            sampleRate: Int(chunkFile.processingFormat.sampleRate.rounded())
+        )
     }
 
     /// Generation helper, factored out so both the fresh-chunk path and the
@@ -1379,8 +1509,14 @@ public actor TTSSpeechSynthesizer {
         var frameCount: AVAudioFramePosition = 0
         var chunkSampleRate: Double = 0
         let lifecycle = synthesizer.lifecycle
+        // Sub-chunks must NOT emit `.streamingFinished`: consumers such as
+        // `TTSPlaybackController`'s word observer treat that event as
+        // end-of-narration, and the first generated sub-chunk would then
+        // freeze the highlight for the rest of the text. One terminal event
+        // is emitted by `streamAndCacheNarration` once every chunk is done.
         let chunkStream = try await synthesizer.synthesizeStream(
-            info.text, using: model, options: options, progressHandler: nil
+            info.text, using: model, options: options,
+            emitsTerminalDiagnostic: false, progressHandler: nil
         )
         for try await pcm in chunkStream {
             try Task.checkCancellation()
@@ -1750,6 +1886,7 @@ public actor TTSSpeechSynthesizer {
         inFlightLoads.removeValue(forKey: model.id)
 
         hasInitializedMLX = true
+            _hasInitializedGPU.withLock { $0 = true }
         loadedModels[model.id] = box
         warmedModelIDs.insert(model.id)
         lastVariantByModel[model.id] = requestedVariant
