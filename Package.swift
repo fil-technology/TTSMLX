@@ -28,7 +28,7 @@ let package = Package(
         //   iOS background crash the patch fixed is structurally gone upstream.
         //   See esh docs/research/ios-background-safety-mlx-0.32.md. iOS
         //   background safety is PENDING device validation.
-        .package(url: "https://github.com/fil-technology/mlx-audio-swift.git", exact: "0.1.9-tts.1"),
+        .package(url: "https://github.com/fil-technology/mlx-audio-swift.git", exact: "0.1.10-tts.1"),
         .package(url: "https://github.com/ml-explore/mlx-swift.git", "0.31.6"..<"0.33.0"),
         .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", exact: "3.32.3"),
         .package(url: "https://github.com/huggingface/swift-huggingface.git", "0.9.0"..<"2.0.0")
