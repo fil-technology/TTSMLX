@@ -19,25 +19,17 @@ let package = Package(
         //
         // mlx-audio-swift: our fork carries the Mimi/PocketTTS KV-cache reset
         //   patches (broadcast_shapes crash fix on model-instance reuse).
-        // mlx-swift: our fork is upstream 0.31.3 with the mlx C++ submodule
-        //   repointed at fil-technology/mlx, which swallows iOS
-        //   background-permission Metal errors in check_error()
-        //   (Metal-in-background crash fix). Tagged 0.31.5 (a normal version,
-        //   NOT a prerelease) so it satisfies mlx-swift-lm's 0.31.3..<0.32.0
-        //   range. It is functionally 0.31.3 + the submodule patch.
-        //   CAUTION: upstream has since published its OWN 0.31.5 (eb889e01,
-        //   the very drift commit WITHOUT the patch) and 0.31.6, so the tag
-        //   name no longer distinguishes the fork. The `mlx-swift` identity is
-        //   also named by mlx-swift-lm/mlx-audio-swift as upstream, so the
-        //   ONLY thing keeping resolution on the fork is the SwiftPM mirror in
-        //   .swiftpm/configuration/mirrors.json (tracked in git) plus
-        //   Tools/verify-mlx-fork.sh in CI. Durable fix: re-tag the fork at a
-        //   version upstream will never publish and move this pin.
-        // Both fixes are unavailable in any upstream tagged release as of
-        //   2026-06; see Docs/mlx-swift-bg-safe-fork.md. Re-fork + re-tag when
-        //   bumping the upstream base version.
-        .package(path: "../mlx-audio-swift"),
-        .package(path: "../mlx-swift"),
+        // mlx-swift: UPSTREAM ml-explore/mlx-swift 0.32.x — no fork. The old
+        //   fil-technology/mlx-swift fork (0.31.3 + an iOS background check_error
+        //   swallow) and its SwiftPM mirror were REMOVED here: mlx 0.32.x
+        //   refactored the Metal command path so command-buffer errors are
+        //   stored on the callback thread and thrown on the calling thread
+        //   (Swift-catchable), not thrown from the Metal callback thread — so the
+        //   iOS background crash the patch fixed is structurally gone upstream.
+        //   See esh docs/research/ios-background-safety-mlx-0.32.md. iOS
+        //   background safety is PENDING device validation.
+        .package(url: "https://github.com/fil-technology/mlx-audio-swift.git", exact: "0.1.8-tts.1"),
+        .package(url: "https://github.com/ml-explore/mlx-swift.git", "0.31.6"..<"0.33.0"),
         .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", exact: "3.31.4"),
         .package(url: "https://github.com/huggingface/swift-huggingface.git", "0.9.0"..<"2.0.0")
     ],
