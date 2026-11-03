@@ -22,20 +22,30 @@ public enum TTSGenerationProfile: String, Sendable, Hashable, Codable, CaseItera
         }
     }
 
+    /// Adjusts the model's own `defaultGenerationParameters`.
+    ///
+    /// Since 0.9.0 a profile no longer overrides temperature or top-p: every
+    /// model ships sampling settings its authors tuned (Orpheus and VyvoTTS
+    /// at 0.6 / 0.8 with a repetition penalty, Soprano at 0.7 / 0.95, ...),
+    /// and the old profile values (up to 1.0 / 0.98 for "High Quality")
+    /// made speech-token sampling noticeably less stable — pitch wobble,
+    /// slurred words, the occasional garbage syllable. Explicit
+    /// ``TTSSynthesisOptions/temperature`` / ``TTSSynthesisOptions/topP``
+    /// still override. What a profile does control:
+    ///
+    /// - ``highQuality`` raises the token budget to at least 2048 so long
+    ///   chunks are never truncated.
+    /// - For MOSS-TTS-Nano, the residual codebook count (8 / 12 / 16), the
+    ///   model's real speed-versus-detail dial. See
+    ///   `TTSSpeechSynthesizer.applyModelSpecificProfile`.
     func apply(to parameters: inout GenerateParameters) {
         switch self {
-        case .fast:
-            parameters.maxTokens = 640
-            parameters.temperature = 0.75
-            parameters.topP = 0.85
-        case .balanced:
-            parameters.maxTokens = 1280
-            parameters.temperature = 0.9
-            parameters.topP = 0.95
+        case .fast, .balanced:
+            break
         case .highQuality:
-            parameters.maxTokens = 2048
-            parameters.temperature = 1.0
-            parameters.topP = 0.98
+            if let current = parameters.maxTokens {
+                parameters.maxTokens = max(current, 2048)
+            }
         }
     }
 }
@@ -62,6 +72,10 @@ public struct TTSSynthesisOptions: Sendable, Hashable {
     /// Playback is unaffected — `AVAudioFile` decodes every codec transparently
     /// — and word timings are codec-independent.
     public var audioCodec: TTSAudioCodec
+    /// How chunk audio is stitched together: pauses after sentences and
+    /// paragraphs plus click-free edge fades. Defaults to
+    /// ``TTSChunkJoin/natural``; pass ``TTSChunkJoin/none`` for raw buffers.
+    public var chunkJoin: TTSChunkJoin
 
     public init(
         language: TTSLanguage? = nil,
@@ -75,7 +89,8 @@ public struct TTSSynthesisOptions: Sendable, Hashable {
         topP: Float? = nil,
         hfToken: String? = nil,
         streamingInterval: Double = 2.0,
-        audioCodec: TTSAudioCodec = .wav
+        audioCodec: TTSAudioCodec = .wav,
+        chunkJoin: TTSChunkJoin = .natural
     ) {
         self.language = language
         self.voice = voice
@@ -89,6 +104,7 @@ public struct TTSSynthesisOptions: Sendable, Hashable {
         self.hfToken = hfToken
         self.streamingInterval = streamingInterval
         self.audioCodec = audioCodec
+        self.chunkJoin = chunkJoin
     }
 }
 
@@ -118,10 +134,15 @@ public struct TTSAudioFile: Sendable, Hashable {
 public struct TTSAudioBufferChunk: Sendable {
     public let buffer: AVAudioPCMBuffer
     public let sampleRate: Int
+    /// `true` for silence the synthesizer inserted between chunks (see
+    /// ``TTSChunkJoin``). Play and persist it like any other buffer; skip it
+    /// when measuring how long the *speech* in a chunk is.
+    public let isPadding: Bool
 
-    public init(buffer: AVAudioPCMBuffer, sampleRate: Int) {
+    public init(buffer: AVAudioPCMBuffer, sampleRate: Int, isPadding: Bool = false) {
         self.buffer = buffer
         self.sampleRate = sampleRate
+        self.isPadding = isPadding
     }
 }
 #endif

@@ -33,8 +33,12 @@ struct TTSTextChunkerTests {
             followupChunkCharacterLimit: 200
         )
         let text = "First sentence. Second sentence! Third one?"
-        let chunks = chunker.chunks(for: text)
-        #expect(chunks == ["First sentence", "Second sentence", "Third one"])
+        // Short sentences pack into one chunk (see packing test); the
+        // punctuation is kept because the models need it for intonation.
+        #expect(chunker.chunks(for: text) == ["First sentence. Second sentence! Third one?"])
+
+        let tight = TTSTextChunker(firstChunkCharacterLimit: 16, followupChunkCharacterLimit: 16)
+        #expect(tight.chunks(for: text) == ["First sentence.", "Second sentence!", "Third one?"])
     }
 
     @Test("clause punctuation creates breaks within long sentences")
@@ -44,8 +48,10 @@ struct TTSTextChunkerTests {
             followupChunkCharacterLimit: 200
         )
         let text = "Alpha, beta; gamma: delta."
-        let chunks = chunker.chunks(for: text)
-        #expect(chunks == ["Alpha", "beta", "gamma", "delta"])
+        #expect(chunker.chunks(for: text) == ["Alpha, beta; gamma: delta."])
+
+        let tight = TTSTextChunker(firstChunkCharacterLimit: 6, followupChunkCharacterLimit: 6)
+        #expect(tight.chunks(for: text) == ["Alpha,", "beta;", "gamma:", "delta."])
     }
 
     @Test("word splitter handles segments without any punctuation")
@@ -69,8 +75,10 @@ struct TTSTextChunkerTests {
             followupChunkCharacterLimit: 200
         )
         let text = "Line one\r\nLine two\rLine three"
-        let chunks = chunker.chunks(for: text)
-        #expect(chunks == ["Line one", "Line two", "Line three"])
+        let tight = TTSTextChunker(firstChunkCharacterLimit: 10, followupChunkCharacterLimit: 10)
+        #expect(tight.chunks(for: text) == ["Line one", "Line two", "Line three"])
+        // Newlines separate segments but are never part of a chunk's text.
+        for chunk in chunker.chunks(for: text) { #expect(!chunk.contains("\n")) }
     }
 
     @Test("falls back to the whole input when no boundaries are present")
@@ -162,5 +170,67 @@ struct TTSTextChunkerTests {
         #expect(TTSSpeechSynthesizer.combinedFraction(chunkIndex: 2, chunkFraction: 0.5, chunkCount: 4) == 0.625)
         // bad input
         #expect(TTSSpeechSynthesizer.combinedFraction(chunkIndex: 0, chunkFraction: nil, chunkCount: 0) == nil)
+    }
+
+    // MARK: - Punctuation handling (0.9.0)
+
+    @Test("terminal punctuation stays on every chunk, including runs and closing quotes")
+    func keepsTerminalPunctuation() {
+        let tight = TTSTextChunker(firstChunkCharacterLimit: 24, followupChunkCharacterLimit: 24)
+        let text = "Really?! \"Yes.\" Wait… (Fine!) Done."
+        let infos = tight.chunkInfos(for: text)
+        let texts = infos.map(\.text)
+        #expect(texts == ["Really?! \"Yes.\" Wait…", "(Fine!) Done."])
+        for info in infos {
+            #expect(info.boundary == .sentence)
+            let start = text.index(text.startIndex, offsetBy: info.characterRange.lowerBound)
+            let end = text.index(text.startIndex, offsetBy: info.characterRange.upperBound)
+            #expect(String(text[start..<end]) == info.text)
+        }
+    }
+
+    @Test("marks inside numbers and abbreviations are not boundaries")
+    func numbersAndAbbreviationsSurvive() {
+        let tight = TTSTextChunker(firstChunkCharacterLimit: 12, followupChunkCharacterLimit: 12)
+        #expect(tight.chunks(for: "Pi is 3.14159 today") == ["Pi is", "3.14159", "today"])
+        #expect(tight.chunks(for: "Meet at 10:30, bring 1,000 forms.") == ["Meet at", "10:30,", "bring 1,000", "forms."])
+        #expect(tight.chunks(for: "See www.x.com now") == ["See", "www.x.com", "now"])
+    }
+
+    @Test("punctuation-only segments are dropped, never sent to the model")
+    func punctuationOnlySegmentsDropped() {
+        let chunker = TTSTextChunker(firstChunkCharacterLimit: 10, followupChunkCharacterLimit: 10)
+        #expect(chunker.chunks(for: "... Hello. ---") == ["Hello."])
+        #expect(chunker.chunkInfos(for: "?!").isEmpty)
+        #expect(chunker.chunks(for: "?!") == ["?!"]) // legacy whole-input fallback
+    }
+
+    @Test("boundary kinds: paragraph, sentence, clause, open")
+    func boundaryKinds() {
+        let tight = TTSTextChunker(firstChunkCharacterLimit: 14, followupChunkCharacterLimit: 14)
+        let text = "One done.\n\nTwo here, three\nthe quick brown fox jumped"
+        let infos = tight.chunkInfos(for: text)
+        let kinds = infos.map { ($0.text, $0.boundary) }
+        #expect(kinds.map(\.0) == ["One done.", "Two here,", "three", "the quick", "brown fox", "jumped"])
+        #expect(kinds.map(\.1) == [.paragraph, .clause, .paragraph, .open, .open, .open])
+    }
+
+    @Test("TTSChunkBoundary.infer classifies by last meaningful character")
+    func inferBoundary() {
+        #expect(TTSChunkBoundary.infer(from: "Hello.") == .sentence)
+        #expect(TTSChunkBoundary.infer(from: "Hello?\"  ") == .sentence)
+        #expect(TTSChunkBoundary.infer(from: "Hello…") == .sentence)
+        #expect(TTSChunkBoundary.infer(from: "Hello,") == .clause)
+        #expect(TTSChunkBoundary.infer(from: "Hello;)") == .clause)
+        #expect(TTSChunkBoundary.infer(from: "Hello") == .open)
+        #expect(TTSChunkBoundary.infer(from: "") == .open)
+        #expect(TTSChunkInfo(text: "Hi!", characterRange: 0..<3).boundary == .sentence)
+    }
+
+    @Test("chunks(for:) and chunkInfos(for:) agree on texts")
+    func legacyAndInfoAgree() {
+        let chunker = TTSTextChunker()
+        let text = Array(repeating: "The cat sat on the mat, and then it slept.", count: 20).joined(separator: " ")
+        #expect(chunker.chunks(for: text) == chunker.chunkInfos(for: text).map(\.text))
     }
 }

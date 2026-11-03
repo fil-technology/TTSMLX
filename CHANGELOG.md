@@ -6,6 +6,53 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-03
+
+### Changed — voices sound less robotic
+
+Three framework-level causes of flat, "robotic" output, found while auditing
+why most voices sounded worse than the same models do upstream. None of them
+needs a new model; all three are on by default and the API is additive.
+
+- **The chunker now keeps terminal punctuation.** `TTSTextChunker` cut every
+  chunk just *before* its `.` `!` `?` `,` `;` `:`, so the model never saw the
+  mark that carries intonation and pauses ("How are you" instead of "How are
+  you?"). Every chunk now ends with its punctuation run (closing quotes and
+  brackets included), newlines still break but are never part of a chunk, and
+  a mark only counts as a boundary when whitespace or the end of text
+  follows, so `3.14`, `10:30`, `1,000`, `e.g.` and URLs are no longer split.
+  Punctuation-only segments are dropped instead of being sent to the model.
+  `chunks(for:)` now returns exactly what `chunkInfos(for:)` would (packed
+  short sentences included), so cache keys agree across both APIs.
+  *Migration:* chunk texts change, so content-addressed caches and
+  narration bundles regenerate once; existing bundles keep playing.
+- **`TTSGenerationProfile` no longer overrides temperature / top-p.** The
+  profiles replaced each model's tuned sampling (Orpheus / VyvoTTS 0.6 / 0.8
+  + repetition penalty) with 0.75–1.0 / 0.85–0.98 — `.highQuality` being the
+  hottest and least stable — which produced pitch wobble, slurred words and
+  the occasional garbage syllable. Profiles now leave sampling to the model;
+  `.highQuality` guarantees a token budget of at least 2048 (long chunks are
+  never truncated) and the MOSS-TTS-Nano codebook dial is unchanged.
+  Explicit `TTSSynthesisOptions.temperature` / `topP` still override.
+- **Chunks are joined naturally.** New `TTSSynthesisOptions.chunkJoin`
+  (`TTSChunkJoin`, default `.natural`): an 8 ms raised-cosine fade at both
+  edges of every chunk removes clicks at seams, and a pause follows each
+  chunk sized to its boundary (250 ms sentence, 450 ms paragraph, 120 ms
+  clause, none mid-phrase). The fade holds back only 8 ms of audio, so
+  time-to-first-buffer is unchanged. Pauses are yielded as
+  `TTSAudioBufferChunk` with the new `isPadding` flag, persisted into
+  narration bundles and played back, and excluded from word-timing math
+  (`chunkFinished` durations still include them so playback timelines stay
+  correct). `.none` restores raw buffers.
+
+### Added
+
+- `TTSChunkBoundary` (`.paragraph` / `.sentence` / `.clause` / `.open`) with
+  `infer(from:)`; `TTSChunkInfo.boundary`; `TTSChunkJoin`;
+  `TTSAudioBufferChunk.isPadding`. 12 new tests (chunker punctuation,
+  boundary kinds, edge shaper, pause table, profile behaviour).
+
+
 ## [0.8.2] - 2026-11-03
 
 ### Fixed

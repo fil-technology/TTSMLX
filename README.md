@@ -8,6 +8,7 @@ Small Swift package for text-to-speech with Hugging Face models running through 
 
 - Simple actor-based API
 - Streaming playback API for long-form speech
+- Natural prosody: punctuation-aware chunking, model-tuned sampling, breath-like pauses and click-free seams between chunks (`TTSChunkJoin`)
 - Built-in catalog of supported MLX TTS models
 - Hugging Face model search
 - Lazy model download and cache management
@@ -24,6 +25,10 @@ Small Swift package for text-to-speech with Hugging Face models running through 
 See [Docs/0.5-migration.md](Docs/0.5-migration.md) for the consumer-app upgrade briefing for the 0.5 additions.
 
 ## Supported Models
+
+For every model on the public tts-bench leaderboard — what runs today, what
+arrives with the planned runtime migration, and what is blocked and why — see
+[Docs/model-support.md](Docs/model-support.md).
 
 These models are included in the built-in `TTSMLX.supportedModels` catalog:
 
@@ -189,6 +194,43 @@ for try await chunk in stream {
 Use `synthesize(...)` when you want a finished WAV file.
 Use `synthesizeStream(...)` when you want lower-latency playback and chunk-by-chunk delivery.
 The current wrapper treats streaming as a buffer-delivery API: it does not surface a persisted file artifact for streamed runs, even if future upstream runtimes save one internally.
+
+## Natural prosody (0.9.0)
+
+Three things decide whether a voice reads "robotic" before the model is even
+involved, and the framework now gets all three right by default:
+
+- **Punctuation reaches the model.** `TTSTextChunker` keeps the terminal
+  `.` `!` `?` `…` `,` `;` `:` on every chunk (it used to cut just before it),
+  so questions rise, sentences fall and commas breathe. Marks inside numbers,
+  times and URLs (`3.14`, `10:30`, `1,000`, `www.x.com`) are not boundaries.
+- **The model's own sampling settings are respected.** `TTSGenerationProfile`
+  no longer overrides temperature / top-p; every model ships values its
+  authors tuned (Orpheus and VyvoTTS at 0.6 / 0.8 with a repetition penalty).
+  `.highQuality` only guarantees a token budget of at least 2048, and the
+  profile still drives MOSS-TTS-Nano's codebook count. Explicit
+  `TTSSynthesisOptions.temperature` / `topP` are still honoured.
+- **Chunks are joined like speech, not spliced.** Each chunk gets an 8 ms
+  raised-cosine fade at both edges (no clicks at seams) and is followed by a
+  pause sized to the break it ended on: 250 ms after a sentence, 450 ms after a
+  paragraph, 120 ms after a clause. Pauses are yielded as their own
+  `TTSAudioBufferChunk` with `isPadding == true`, written into narration
+  bundles and played back, but excluded from word-timing math.
+
+```swift
+// Defaults: .natural. Tune or disable per request.
+var options = TTSSynthesisOptions()
+options.chunkJoin = TTSChunkJoin(sentencePause: 0.35, paragraphPause: 0.6)
+options.chunkJoin = .none   // pre-0.9 behaviour: raw buffers, no pause
+```
+
+Every `TTSChunkInfo` now carries a `boundary` (`.paragraph`, `.sentence`,
+`.clause`, `.open`) you can use for your own pacing. Existing narration
+bundles keep playing; regenerate them to pick up the new chunk texts and
+pauses (cache keys include the chunk text, so they miss once).
+
+What is *not* fixed by this: 4-bit model variants flatten timbre (prefer the
+8-bit / bf16 entries where the device allows), and 80–100M models stay small.
 
 ## Reader-app flow — one call
 

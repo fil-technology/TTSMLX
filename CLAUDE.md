@@ -9,7 +9,7 @@ If `URGENT.md` does not exist, this instruction is satisfied — proceed normall
 ## Build and test
 
 - `swift build` — framework.
-- `swift test` — full suite (currently 97 tests across 14 suites; should always be green on `main`).
+- `swift test` — full suite (currently 227 tests across 33 suites; should always be green on `main`).
 - `xcodebuild -project DemoApp/TTSMLXDemo.xcodeproj -scheme TTSMLXDemo-macOS -configuration Debug build` — demo app, macOS target. iOS target also exists.
 - After any change to `mlx-audio-swift` (local path dependency), wipe `~/Library/Developer/Xcode/DerivedData/TTSMLXDemo-*` and reset SwiftPM package caches in Xcode — incremental builds do not pick up local-path package source changes reliably.
 

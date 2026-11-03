@@ -764,6 +764,7 @@ public actor TTSSpeechSynthesizer {
         using model: TTSModelDescriptor = TTSMLX.defaultModels[0],
         options: TTSSynthesisOptions = .init(),
         emitsTerminalDiagnostic: Bool,
+        boundary: TTSChunkBoundary? = nil,
         progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)? = nil
     ) async throws -> AsyncThrowingStream<TTSAudioBufferChunk, Error> {
         let prompt = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -771,6 +772,7 @@ public actor TTSSpeechSynthesizer {
             info("synthesizeStream: REJECTED empty text")
             throw TTSError.emptyText
         }
+        let chunkBoundary = boundary ?? TTSChunkBoundary.infer(from: prompt)
         info("synthesizeStream: ENTRY model=\(model.id) chars=\(prompt.count) voice=\(options.voice?.identifier ?? "nil") interval=\(options.streamingInterval)s")
         emit(.requestStarted(modelID: model.id, textLength: prompt.count))
 
@@ -842,6 +844,30 @@ public actor TTSSpeechSynthesizer {
                     parameters: parameters,
                     streamingInterval: capturedOptions.streamingInterval
                 )
+                // Chunk joining (see TTSChunkJoin): fade the chunk's edges so
+                // seams between chunks are click-free, then append a pause
+                // sized to the boundary the chunk ended on. The shaper holds
+                // back only the fade length, so first-buffer latency is
+                // unaffected beyond ~8 ms.
+                let join = capturedOptions.chunkJoin
+                var shaper = TTSChunkEdgeShaper(fadeFrames: Int(join.edgeFade * Double(sampleRate)))
+                var outputFormat: AVAudioFormat?
+                func yieldShaped(_ shaped: AVAudioPCMBuffer) async {
+                    if !firstBufferEmitted {
+                        firstBufferEmitted = true
+                        let latency = Date().timeIntervalSince(streamStart)
+                        synthesizer.info("synthesizeStream[\(modelID)]: FIRST BUFFER at \(String(format: "%.2f", latency))s, frameLength=\(shaped.frameLength)")
+                        await synthesizer.emit(
+                            .firstBufferYielded(modelID: modelID, latency: latency)
+                        )
+                    }
+                    continuation.yield(.init(buffer: shaped, sampleRate: sampleRate))
+                    bufferCount += 1
+                    // Periodic progress log for long streams (every 25 buffers).
+                    if bufferCount.isMultiple(of: 25) {
+                        synthesizer.info("synthesizeStream[\(modelID)]: \(bufferCount) buffers yielded so far")
+                    }
+                }
                 for try await buffer in upstream {
                     // Gate every iteration on the shared shutdown flag so no
                     // further MLX work is submitted past a background signal.
@@ -850,20 +876,19 @@ public actor TTSSpeechSynthesizer {
                         emptyBufferCount += 1
                         continue
                     }
-                    if !firstBufferEmitted {
-                        firstBufferEmitted = true
-                        let latency = Date().timeIntervalSince(streamStart)
-                        synthesizer.info("synthesizeStream[\(modelID)]: FIRST BUFFER at \(String(format: "%.2f", latency))s, frameLength=\(buffer.frameLength)")
-                        await synthesizer.emit(
-                            .firstBufferYielded(modelID: modelID, latency: latency)
-                        )
-                    }
-                    continuation.yield(.init(buffer: buffer, sampleRate: sampleRate))
-                    bufferCount += 1
-                    // Periodic progress log for long streams (every 25 buffers).
-                    if bufferCount.isMultiple(of: 25) {
-                        synthesizer.info("synthesizeStream[\(modelID)]: \(bufferCount) buffers yielded so far")
-                    }
+                    outputFormat = buffer.format
+                    guard let shaped = shaper.push(buffer) else { continue }
+                    await yieldShaped(shaped)
+                }
+                if let tail = shaper.finish() {
+                    await yieldShaped(tail)
+                }
+                let pause = join.pause(after: chunkBoundary)
+                if bufferCount > 0, pause > 0, let format = outputFormat,
+                   let silence = TTSChunkEdgeShaper.silence(
+                       format: format, frames: Int(pause * format.sampleRate)
+                   ) {
+                    continuation.yield(.init(buffer: silence, sampleRate: sampleRate, isPadding: true))
                 }
                 let totalDuration = Date().timeIntervalSince(streamStart)
                 progressHandler?(.init(stage: .completed, fractionCompleted: 1, message: "Streaming finished."))
@@ -956,12 +981,16 @@ public actor TTSSpeechSynthesizer {
                     // the highlight the moment generation is not exactly
                     // realtime — which it never is.
                     var chunkAudioSeconds: TimeInterval = 0
+                    // Speech only (inserted pauses excluded) — what word
+                    // timings are spread over.
+                    var chunkSpeechSeconds: TimeInterval = 0
 
                     let chunkStream = try await synthesizer.synthesizeStream(
                         info.text,
                         using: model,
                         options: options,
                         emitsTerminalDiagnostic: false,
+                        boundary: info.boundary,
                         progressHandler: { update in
                             guard update.stage != .completed else { return }
                             progressHandler?(.init(
@@ -988,8 +1017,10 @@ public actor TTSSpeechSynthesizer {
                             ))
                         }
                         if pcmChunk.sampleRate > 0 {
-                            chunkAudioSeconds += Double(pcmChunk.buffer.frameLength)
+                            let seconds = Double(pcmChunk.buffer.frameLength)
                                 / Double(pcmChunk.sampleRate)
+                            chunkAudioSeconds += seconds
+                            if !pcmChunk.isPadding { chunkSpeechSeconds += seconds }
                         }
                         totalBufferCount += 1
                         continuation.yield(pcmChunk)
@@ -1012,7 +1043,7 @@ public actor TTSSpeechSynthesizer {
                         duration: chunkAudioSeconds
                     ))
                     totalAudioSeconds += chunkAudioSeconds
-                    let timings = info.wordTimings(forDuration: chunkAudioSeconds)
+                    let timings = info.wordTimings(forDuration: chunkSpeechSeconds)
                     if !timings.isEmpty {
                         await synthesizer.emit(.chunkTimings(
                             modelID: modelID,
@@ -1581,13 +1612,15 @@ public actor TTSSpeechSynthesizer {
         // is emitted by `streamAndCacheNarration` once every chunk is done.
         let chunkStream = try await synthesizer.synthesizeStream(
             info.text, using: model, options: options,
-            emitsTerminalDiagnostic: false, progressHandler: nil
+            emitsTerminalDiagnostic: false, boundary: info.boundary, progressHandler: nil
         )
+        var speechFrames: AVAudioFramePosition = 0
         for try await pcm in chunkStream {
             try Task.checkCancellation()
             if lifecycle.isShuttingDown { throw CancellationError() }
             let buffer = pcm.buffer
             guard buffer.frameLength > 0 else { continue }
+            if !pcm.isPadding { speechFrames += AVAudioFramePosition(buffer.frameLength) }
             if !didEmitChunkStart {
                 didEmitChunkStart = true
                 await synthesizer.emit(.chunkStarted(
@@ -1641,7 +1674,7 @@ public actor TTSSpeechSynthesizer {
         await synthesizer.emit(.chunkFinished(
             modelID: modelID, chunkIndex: index, duration: duration
         ))
-        let liveTimings = info.wordTimings(forDuration: duration)
+        let liveTimings = info.wordTimings(forDuration: TimeInterval(speechFrames) / chunkSampleRate)
         if !liveTimings.isEmpty {
             await synthesizer.emit(.chunkTimings(
                 modelID: modelID, chunkIndex: index, timings: liveTimings
@@ -1734,11 +1767,14 @@ public actor TTSSpeechSynthesizer {
                 info.text,
                 using: model,
                 options: options,
+                emitsTerminalDiagnostic: true,
+                boundary: info.boundary,
                 progressHandler: progressHandler
             )
 
             var audioFile: AVAudioFile?
             var frameCount: AVAudioFramePosition = 0
+            var speechFrames: AVAudioFramePosition = 0
             var chunkSampleRate: Double = 0
             do {
                 for try await chunk in stream {
@@ -1746,6 +1782,7 @@ public actor TTSSpeechSynthesizer {
                     if lifecycle.isShuttingDown { throw CancellationError() }
                     let buffer = chunk.buffer
                     guard buffer.frameLength > 0 else { continue }
+                    if !chunk.isPadding { speechFrames += AVAudioFramePosition(buffer.frameLength) }
                     if audioFile == nil {
                         let format = buffer.format
                         chunkSampleRate = format.sampleRate
@@ -1772,7 +1809,7 @@ public actor TTSSpeechSynthesizer {
             }
 
             let duration = TimeInterval(frameCount) / chunkSampleRate
-            let liveTimings = info.wordTimings(forDuration: duration)
+            let liveTimings = info.wordTimings(forDuration: TimeInterval(speechFrames) / chunkSampleRate)
             let serialized = liveTimings.map { TTSPreparedNarrationManifest.SerializableWordTiming($0) }
                 .map { timing -> TTSPreparedNarrationManifest.SerializableWordTiming in
                     // Re-anchor character ranges so they're relative to the

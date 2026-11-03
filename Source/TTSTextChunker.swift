@@ -16,10 +16,16 @@ public struct TTSChunkInfo: Sendable, Hashable {
     /// ``TTSTextChunker/chunkInfos(for:)``. Counts grapheme clusters, not
     /// UTF-16 code units, so it matches `String.count` arithmetic.
     public let characterRange: Range<Int>
+    /// The kind of break that follows this chunk in the source text. The
+    /// synthesizer uses it to size the pause after the chunk's audio (see
+    /// ``TTSChunkJoin``). Defaults to ``TTSChunkBoundary/infer(from:)`` on
+    /// `text` when not supplied.
+    public let boundary: TTSChunkBoundary
 
-    public init(text: String, characterRange: Range<Int>) {
+    public init(text: String, characterRange: Range<Int>, boundary: TTSChunkBoundary? = nil) {
         self.text = text
         self.characterRange = characterRange
+        self.boundary = boundary ?? TTSChunkBoundary.infer(from: text)
     }
 
     /// Split this chunk's text into word-level timings, proportional to each
@@ -132,9 +138,16 @@ public struct TTSWordTiming: Sendable, Hashable {
 /// the first audible buffer quickly; later chunks use a larger budget so the
 /// overall generation cost stays low. Boundaries are tried in order:
 ///
-/// 1. Sentence-ending punctuation (`.`, `!`, `?`, newline).
+/// 1. Sentence-ending punctuation (`.`, `!`, `?`, `…`, newline).
 /// 2. Clause punctuation (`,`, `;`, `:`).
 /// 3. Whitespace, when a single clause still exceeds the budget.
+///
+/// Punctuation is **kept** at the end of every chunk (since 0.9.0): the
+/// models rely on it for intonation and pauses, so a chunk reads "How are
+/// you?" rather than "How are you". A mark only counts as a boundary when
+/// whitespace or the end of the text follows it, so "3.14", "10:30" and
+/// "1,000" stay intact. Short sentences are packed together up to the
+/// active budget rather than becoming one chunk each.
 public struct TTSTextChunker: Sendable, Hashable {
     public var firstChunkCharacterLimit: Int
     public var followupChunkCharacterLimit: Int
@@ -149,52 +162,17 @@ public struct TTSTextChunker: Sendable, Hashable {
         self.followupChunkCharacterLimit = followupChunkCharacterLimit
     }
 
+    /// Chunk texts only. Line endings are normalized to `\n` first; use
+    /// ``chunkInfos(for:)`` when positions in the original string matter.
+    /// Produces exactly the texts ``chunkInfos(for:)`` would for the
+    /// normalized input, so cache keys agree across both APIs.
     public func chunks(for text: String) -> [String] {
         let normalized = text
             .replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { return [] }
-
-        let coarseSegments = normalized
-            .components(separatedBy: CharacterSet(charactersIn: ".!?\n"))
-            .flatMap { $0.components(separatedBy: CharacterSet(charactersIn: ",;:")) }
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-
-        var chunks: [String] = []
-        var isFirstChunk = true
-
-        for segment in coarseSegments {
-            let limit = isFirstChunk ? firstChunkCharacterLimit : followupChunkCharacterLimit
-
-            if segment.count <= limit {
-                chunks.append(segment)
-                isFirstChunk = false
-                continue
-            }
-
-            var current = ""
-            for word in segment.split(whereSeparator: { $0.isWhitespace }) {
-                let activeLimit = isFirstChunk ? firstChunkCharacterLimit : followupChunkCharacterLimit
-                let candidate = current.isEmpty ? String(word) : "\(current) \(word)"
-                if candidate.count <= activeLimit {
-                    current = candidate
-                } else {
-                    if !current.isEmpty {
-                        chunks.append(current)
-                        isFirstChunk = false
-                    }
-                    current = String(word)
-                }
-            }
-
-            if !current.isEmpty {
-                chunks.append(current)
-                isFirstChunk = false
-            }
-        }
-
+        let chunks = chunkInfos(for: normalized).map(\.text)
         return chunks.isEmpty ? [normalized] : chunks
     }
 
@@ -209,16 +187,21 @@ public struct TTSTextChunker: Sendable, Hashable {
         // We track Character offsets (not String.Index) so the result is
         // Sendable and trivially serializable.
         let scalars = Array(text)
-        let sentenceBoundaries: Set<Character> = [".", "!", "?", "\n"]
-        let clauseBoundaries: Set<Character> = [",", ";", ":"]
 
-        // First pass: produce sentence segments with original-range positions.
+        // First pass: sentence segments. A boundary is a run of sentence
+        // marks plus any closing quotes/brackets after it, kept *inside* the
+        // segment. Newlines always break; other marks only when whitespace
+        // (or the end) follows, so decimals and abbreviations survive.
         var sentenceSegments: [Segment] = []
         var segmentStart = 0
-        for (i, ch) in scalars.enumerated() {
-            if sentenceBoundaries.contains(ch) {
-                appendIfMeaningful(scalars: scalars, start: segmentStart, end: i, into: &sentenceSegments)
-                segmentStart = i + 1
+        var i = 0
+        while i < scalars.count {
+            if let end = Self.boundaryEnd(in: scalars, at: i, marks: Self.sentenceMarks, allowsAnyFollower: scalars[i] == "\n") {
+                appendIfMeaningful(scalars: scalars, start: segmentStart, end: end, into: &sentenceSegments)
+                segmentStart = end
+                i = end
+            } else {
+                i += 1
             }
         }
         appendIfMeaningful(scalars: scalars, start: segmentStart, end: scalars.count, into: &sentenceSegments)
@@ -227,10 +210,15 @@ public struct TTSTextChunker: Sendable, Hashable {
         var clauseSegments: [Segment] = []
         for sentence in sentenceSegments {
             var clauseStart = sentence.range.lowerBound
-            for i in sentence.range {
-                if clauseBoundaries.contains(scalars[i]) {
-                    appendIfMeaningful(scalars: scalars, start: clauseStart, end: i, into: &clauseSegments)
-                    clauseStart = i + 1
+            var j = sentence.range.lowerBound
+            while j < sentence.range.upperBound {
+                if let end = Self.boundaryEnd(in: scalars, at: j, marks: TTSChunkBoundary.clauseMarks, allowsAnyFollower: false),
+                   end <= sentence.range.upperBound {
+                    appendIfMeaningful(scalars: scalars, start: clauseStart, end: end, into: &clauseSegments)
+                    clauseStart = end
+                    j = end
+                } else {
+                    j += 1
                 }
             }
             appendIfMeaningful(scalars: scalars, start: clauseStart, end: sentence.range.upperBound, into: &clauseSegments)
@@ -268,20 +256,20 @@ public struct TTSTextChunker: Sendable, Hashable {
                 var wpStart = segStart
                 var lastWordEnd = segStart
                 var wordStart: Int? = nil
-                for i in segment.range {
-                    if scalars[i].isWhitespace {
+                for k in segment.range {
+                    if scalars[k].isWhitespace {
                         if wordStart != nil {
                             let curLimit = isFirstChunk ? firstChunkCharacterLimit : followupChunkCharacterLimit
-                            if i - wpStart > curLimit, lastWordEnd > wpStart {
+                            if k - wpStart > curLimit, lastWordEnd > wpStart {
                                 appendIfMeaningful(scalars: scalars, start: wpStart, end: lastWordEnd, into: &chunks)
                                 isFirstChunk = false
                                 wpStart = wordStart!
                             }
-                            lastWordEnd = i
+                            lastWordEnd = k
                             wordStart = nil
                         }
                     } else if wordStart == nil {
-                        wordStart = i
+                        wordStart = k
                     }
                 }
                 let curLimit = isFirstChunk ? firstChunkCharacterLimit : followupChunkCharacterLimit
@@ -310,6 +298,12 @@ public struct TTSTextChunker: Sendable, Hashable {
                 packStart = segStart
                 packEnd = segEnd
             }
+            // Never pack across a paragraph break: the pause after a paragraph
+            // is inserted at chunk ends only, and a newline inside a prompt
+            // reads as plain whitespace to the model.
+            if Self.newlineFollows(scalars, from: segEnd) {
+                flushPack()
+            }
         }
         flushPack()
 
@@ -318,15 +312,50 @@ public struct TTSTextChunker: Sendable, Hashable {
 
     // MARK: - Internals
 
+    private static let sentenceMarks: Set<Character> = TTSChunkBoundary.sentenceMarks.union(["\n"])
+
     private struct Segment {
         let text: String
         let range: Range<Int>
+    }
+
+    /// If `index` starts a boundary run (one or more `marks`, then any closing
+    /// quotes/brackets), returns the index just past the run; otherwise `nil`.
+    /// Unless `allowsAnyFollower`, the run must be followed by whitespace or
+    /// the end of text, so "3.14" / "10:30" / "e.g." are not boundaries.
+    private static func boundaryEnd(
+        in scalars: [Character], at index: Int, marks: Set<Character>, allowsAnyFollower: Bool
+    ) -> Int? {
+        guard marks.contains(scalars[index]) else { return nil }
+        var end = index + 1
+        while end < scalars.count, marks.contains(scalars[end]) || TTSChunkBoundary.closers.contains(scalars[end]) {
+            end += 1
+        }
+        if !allowsAnyFollower, end < scalars.count, !scalars[end].isWhitespace {
+            return nil
+        }
+        return end
+    }
+
+    /// True when the whitespace run starting at `index` contains a newline.
+    private static func newlineFollows(_ scalars: [Character], from index: Int) -> Bool {
+        var k = index
+        while k < scalars.count, scalars[k].isWhitespace {
+            if scalars[k].isNewline { return true }
+            k += 1
+        }
+        return false
+    }
+
+    private static func isMeaningful(_ text: String) -> Bool {
+        text.contains { $0.isLetter || $0.isNumber }
     }
 
     private func appendIfMeaningful(scalars: [Character], start: Int, end: Int, into out: inout [Segment]) {
         let (trimmedStart, trimmedEnd) = Self.trimWhitespaceBounds(scalars, start: start, end: end)
         guard trimmedEnd > trimmedStart else { return }
         let text = String(scalars[trimmedStart..<trimmedEnd])
+        guard Self.isMeaningful(text) else { return }
         out.append(Segment(text: text, range: trimmedStart..<trimmedEnd))
     }
 
@@ -334,7 +363,11 @@ public struct TTSTextChunker: Sendable, Hashable {
         let (trimmedStart, trimmedEnd) = Self.trimWhitespaceBounds(scalars, start: start, end: end)
         guard trimmedEnd > trimmedStart else { return }
         let text = String(scalars[trimmedStart..<trimmedEnd])
-        out.append(TTSChunkInfo(text: text, characterRange: trimmedStart..<trimmedEnd))
+        guard Self.isMeaningful(text) else { return }
+        let boundary: TTSChunkBoundary = Self.newlineFollows(scalars, from: trimmedEnd)
+            ? .paragraph
+            : TTSChunkBoundary.infer(from: text)
+        out.append(TTSChunkInfo(text: text, characterRange: trimmedStart..<trimmedEnd, boundary: boundary))
     }
 
     private static func trimWhitespaceBounds(_ scalars: [Character], start: Int, end: Int) -> (Int, Int) {
