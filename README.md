@@ -130,7 +130,7 @@ these — don't pin older versions of them yourself.
 
 | Dependency | Required | Why the fork |
 | --- | --- | --- |
-| `mlx-audio-swift` | `fil-technology/mlx-audio-swift` **≥ 0.1.7-tts.1** | KV-cache reset (`broadcast_shapes` crash on model reuse) **and** companion-repository support (`TTSModelRegistry`, added in `0.1.6-tts.1`), which TTSMLX calls directly. |
+| `mlx-audio-swift` | `fil-technology/mlx-audio-swift` **≥ 0.1.7-tts.2** | KV-cache reset (`broadcast_shapes` crash on model reuse) **and** companion-repository support (`TTSModelRegistry`, added in `0.1.6-tts.1`), which TTSMLX calls directly. |
 | `mlx-swift` | `fil-technology/mlx-swift` **0.31.5** | Repoints the MLX C++ submodule at `fil-technology/mlx` so iOS background-permission Metal errors are swallowed in `check_error()` (Metal-in-background crash fix). Functionally upstream 0.31.3 + that patch. |
 
 **`mlx-swift` identity conflict.** `mlx-swift-lm` (and upstream `mlx-audio-swift`)
@@ -167,7 +167,7 @@ swift package update mlx-audio-swift     # or: rm Package.resolved && swift pack
 
 In Xcode: **File ▸ Packages ▸ Reset Package Caches**, then **Update to Latest
 Package Versions**. Confirm your `Package.resolved` then shows
-`fil-technology/mlx-audio-swift` at `0.1.7-tts.1`
+`fil-technology/mlx-audio-swift` at `0.1.7-tts.2`
 (revision `bb5cda2a2c85bc0d369b102552527643b2463fb9`).
 
 ## Streaming
