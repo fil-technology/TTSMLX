@@ -3,6 +3,14 @@ import Foundation
 public enum TTSMLX {
     /// Languages the Qwen3-TTS family advertises. Shared by every Qwen3-TTS
     /// catalog entry so the list stays consistent across size/quant variants.
+    /// Built-in speakers of the Qwen3-TTS CustomVoice builds (config
+    /// `talker_config.spk_id`). Pass one as the voice, optionally followed by
+    /// a style instruction: `"ryan"` or `"ryan, speak slowly and warmly"`.
+    /// `eric` and `dylan` speak Sichuan / Beijing dialect respectively.
+    static let qwen3CustomVoiceSpeakers: [TTSVoice] = [
+        "ryan", "serena", "vivian", "aiden", "ono_anna", "sohee", "uncle_fu", "eric", "dylan"
+    ]
+
     static let qwen3TTSLanguages: [TTSLanguage] = [
         .english, .spanish, .french, .german, .italian, .portuguese, .dutch,
         .polish, .turkish, .russian, .japanese, .korean, .chinese, .arabic, .hindi
@@ -254,14 +262,14 @@ public enum TTSMLX {
             summary: "Multilingual Qwen3 TTS 1.7B with custom-voice / reference-audio conditioning for voice design and cloning.",
             supportStage: .implemented,
             supportedLanguages: Self.qwen3TTSLanguages,
-            runtimeNotes: "Routes to the qwen3_tts loader (CustomVoice build). Reference-audio / voice-design wiring through the wrapper is pending validation.",
+            runtimeNotes: "Routes to the qwen3_tts loader (CustomVoice build, runtime 0.1.7-tts.2+; earlier runtimes failed to decode its config). Pick a built-in speaker with the voice option (\"serena\", or \"serena, whisper softly\"). Reference-audio wiring is pending validation.",
             modelURL: URL(string: "https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-4bit"),
             descriptor: .init(
                 id: "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-4bit",
                 displayName: "Qwen3 TTS 1.7B (Custom Voice)",
-                summary: "Multilingual Qwen3 TTS with voice cloning.",
+                summary: "Multilingual Qwen3 TTS with built-in speakers.",
                 supportedLanguages: Self.qwen3TTSLanguages,
-                suggestedVoices: [.enUS1],
+                suggestedVoices: Self.qwen3CustomVoiceSpeakers,
                 capabilities: .init(
                     isRuntimeSupported: true,
                     supportsReferenceAudio: true,
@@ -269,6 +277,31 @@ public enum TTSMLX {
                     supportedLanguages: Self.qwen3TTSLanguages,
                     defaultGenerationProfile: .highQuality,
                     peakMemoryMB: 2_800,
+                    minimumDeviceClass: .iPhone
+                )
+            )
+        ),
+        .init(
+            id: "mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-4bit",
+            displayName: "Qwen3 TTS 0.6B (Custom Voice)",
+            summary: "Multilingual Qwen3 TTS 0.6B CustomVoice build — the variant on the public tts-bench leaderboard; lighter than the 1.7B.",
+            supportStage: .implemented,
+            supportedLanguages: Self.qwen3TTSLanguages,
+            runtimeNotes: "Routes to the qwen3_tts loader (CustomVoice build, runtime 0.1.7-tts.2+). Pick a built-in speaker with the voice option (\"serena\", or \"serena, whisper softly\" to add a style instruction). Loads and synthesizes end to end on macOS; this 4-bit build occasionally emits a near-silent chunk that runs to the token cap, so prefer an 8-bit build when one is published. Pending on-device validation.",
+            modelURL: URL(string: "https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-4bit"),
+            descriptor: .init(
+                id: "mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-4bit",
+                displayName: "Qwen3 TTS 0.6B (Custom Voice)",
+                summary: "Multilingual Qwen3 TTS, custom-voice build.",
+                supportedLanguages: Self.qwen3TTSLanguages,
+                suggestedVoices: Self.qwen3CustomVoiceSpeakers,
+                capabilities: .init(
+                    isRuntimeSupported: true,
+                    supportsReferenceAudio: false,
+                    supportsLanguageList: true,
+                    supportedLanguages: Self.qwen3TTSLanguages,
+                    defaultGenerationProfile: .balanced,
+                    peakMemoryMB: 1_200,
                     minimumDeviceClass: .iPhone
                 )
             )
@@ -299,6 +332,42 @@ public enum TTSMLX {
                 modelURL: URL(string: "https://huggingface.co/mlx-community/Soprano-80M-4bit"),
                 files: [
                     "config.json",
+                    "README.md",
+                    "special_tokens_map.json",
+                    "tokenizer.json",
+                    "tokenizer_config.json",
+                    "model.safetensors",
+                    "model.safetensors.index.json"
+                ]
+            )
+        ),
+        .init(
+            id: "mlx-community/Soprano-1.1-80M-bf16",
+            displayName: "Soprano 1.1",
+            summary: "Soprano 1.1 (80M, bf16) — the current Soprano release; rated above the 1.0 weights on public listening tests.",
+            supportStage: .implemented,
+            supportedLanguages: [.english],
+            runtimeNotes: "Routes to the soprano loader (same architecture as the validated Soprano-80M-bf16, newer weights). Loads and synthesizes end to end on macOS; pending on-device validation.",
+            modelURL: URL(string: "https://huggingface.co/mlx-community/Soprano-1.1-80M-bf16"),
+            descriptor: .init(
+                id: "mlx-community/Soprano-1.1-80M-bf16",
+                displayName: "Soprano 1.1",
+                summary: "Compact English voice model, 1.1 weights.",
+                supportedLanguages: [.english],
+                suggestedVoices: [],
+                capabilities: .init(
+                    isRuntimeSupported: true,
+                    supportsReferenceAudio: false,
+                    supportsLanguageList: true,
+                    supportedLanguages: [.english],
+                    defaultGenerationProfile: .balanced,
+                    peakMemoryMB: 220,
+                    minimumDeviceClass: .iPhone
+                ),
+                modelURL: URL(string: "https://huggingface.co/mlx-community/Soprano-1.1-80M-bf16"),
+                files: [
+                    "config.json",
+                    "generation_config.json",
                     "README.md",
                     "special_tokens_map.json",
                     "tokenizer.json",

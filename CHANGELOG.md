@@ -6,6 +6,30 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-03
+
+### Added
+
+- **Soprano 1.1** (`mlx-community/Soprano-1.1-80M-bf16`) catalog entry — the
+  current Soprano release (#7 on the public tts-bench leaderboard). Same
+  architecture as the validated Soprano-80M; loads and synthesizes end to end.
+- **Qwen3-TTS 0.6B CustomVoice** (`mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-4bit`)
+  catalog entry, and **named speakers for both CustomVoice builds**: pass
+  `"ryan"`, `"serena"`, `"vivian"`, `"aiden"`, `"ono_anna"`, `"sohee"`,
+  `"uncle_fu"`, `"eric"` or `"dylan"` as the voice, optionally followed by a
+  style instruction (`"serena, whisper softly"`). `suggestedVoices` lists them.
+- `Docs/model-support.md` now records the status of every leaderboard model.
+
+### Fixed
+
+- **Qwen3-TTS CustomVoice models failed to load** (`DecodingError.typeMismatch`
+  on `talker_config.spk_id`), including the 1.7B CustomVoice entry already in
+  the catalog, and the speaker table was never used, so every speaker sounded
+  the same. Fixed in the runtime fork (`mlx-audio-swift` **0.1.7-tts.2**,
+  ported from upstream v0.1.8): flexible config decoding plus speaker-token
+  injection into the codec prefix. Consumers must resolve the new fork tag.
+
+
 ## [0.9.0] - 2026-11-03
 
 ### Changed — voices sound less robotic
