@@ -6,6 +6,20 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-11-03
+
+### Fixed
+
+- **`installedModels()` listed ordinary language models as installed TTS
+  models** (regression in 0.8.1). The 0.8.1 listing fix accepted any model
+  the runtime registry could map, but that mapping is for *loading* — it
+  turns `llama` into Orpheus and `qwen3` into Qwen3-TTS, which are also the
+  model types of plain Llama / Qwen3 LLMs — so an LLM that mlx-lm left in the
+  shared hub cache showed up as a voice and failed at load. A registry match
+  now counts only alongside a TTS-specific signal: the repo is in TTSMLX's
+  catalog, or its files sit in the TTS runtime's own `mlx-audio/` download
+  layout. Soprano, VyvoTTS and Qwen3-TTS downloaded by TTSMLX stay listed.
+
 ## [0.8.1] - 2026-11-03
 
 ### Fixed

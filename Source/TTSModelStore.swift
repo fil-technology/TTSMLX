@@ -715,15 +715,22 @@ extension TTSModelStore {
             architectures: metadata.architectures
         )
 
-        // A model the runtime registry can load is a TTS model by definition;
-        // the name heuristics below are only for repos the registry does not
-        // know. Without this, an installed Soprano ("soprano" /
-        // "SopranoForCausalLM"), VyvoTTS ("qwen3") or Orpheus ("llama") that
-        // is not in the validated default list vanished from
-        // `installedModels()` right after a successful download — the app
-        // then reported it as not installed.
+        // The registry's model-type mapping is for *loading*: it turns
+        // "llama" into Orpheus and "qwen3" into Qwen3-TTS, which are also the
+        // model types of ordinary Llama / Qwen3 language models. So a
+        // registry match alone must not classify what is installed — an LLM
+        // that mlx-lm left in the shared hub cache would be listed as a voice
+        // and fail at load. It counts only alongside a TTS-specific signal:
+        // the repo is in TTSMLX's catalog, or the files sit in the TTS
+        // runtime's own `mlx-audio/<owner>_<repo>` layout (only TTS downloads
+        // land there). That keeps Soprano ("soprano" / "SopranoForCausalLM"),
+        // VyvoTTS ("qwen3") and Orpheus ("llama") downloaded by TTSMLX listed
+        // even though they are `.implemented` rather than validated and
+        // nothing in their config says "tts".
+        let inCatalog = TTSMLX.modelCatalog.contains { $0.id.lowercased() == repoID.lowercased() }
+        let inTTSRuntimeLayout = location.deletingLastPathComponent().lastPathComponent == "mlx-audio"
         let looksLikeTTS = fallback != nil
-            || supportedType != nil
+            || (supportedType != nil && (inCatalog || inTTSRuntimeLayout))
             || metadata.modelType?.lowercased().contains("tts") == true
             || metadata.architectures.contains(where: { $0.lowercased().contains("tts") })
 

@@ -91,6 +91,44 @@ struct TTSModelDownloadLocationTests {
         #expect(listed.first?.descriptor.capabilities.isRuntimeSupported == true)
     }
 
+    /// The registry maps `llama` → Orpheus and `qwen3` → Qwen3-TTS for
+    /// loading, but those are also plain language-model types. An LLM that
+    /// mlx-lm left in the shared hub cache (plain `models--` layout, not in
+    /// the catalog) must not be listed as an installed voice, while a catalog
+    /// Soprano in the TTS runtime's `mlx-audio/` layout next to it still is.
+    @Test("an ordinary language model in the hub cache is not listed as a TTS model")
+    func plainLanguageModelIsNotListed() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ttsmlx-llm-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        for (dir, config) in [
+            ("models--mlx-community--Llama-3.2-1B-Instruct-4bit",
+             #"{"model_type": "llama", "architectures": ["LlamaForCausalLM"]}"#),
+            ("models--mlx-community--Qwen3-0.6B-4bit",
+             #"{"model_type": "qwen3", "architectures": ["Qwen3ForCausalLM"]}"#),
+        ] {
+            let url = root.appendingPathComponent(dir, isDirectory: true)
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            try Data(config.utf8).write(to: url.appendingPathComponent("config.json"))
+            try Data(repeating: 0, count: 16).write(to: url.appendingPathComponent("model.safetensors"))
+        }
+        let sopranoID = "mlx-community/Soprano-80M-4bit"
+        let soprano = root
+            .appendingPathComponent("mlx-audio", isDirectory: true)
+            .appendingPathComponent(sopranoID.replacingOccurrences(of: "/", with: "_"), isDirectory: true)
+        try FileManager.default.createDirectory(at: soprano, withIntermediateDirectories: true)
+        try Data(#"{"model_type": "soprano", "architectures": ["SopranoForCausalLM"]}"#.utf8)
+            .write(to: soprano.appendingPathComponent("config.json"))
+        try Data(repeating: 0, count: 16).write(to: soprano.appendingPathComponent("model.safetensors"))
+
+        let store = TTSModelStore(cacheRoots: [root])
+        let listed = try await store.installedModels().map(\.id)
+        #expect(listed == [sopranoID])
+        #expect(!listed.contains("mlx-community/Llama-3.2-1B-Instruct-4bit"))
+        #expect(!listed.contains("mlx-community/Qwen3-0.6B-4bit"))
+    }
+
     // MARK: - Error text
 
     private struct BlankError: LocalizedError {
