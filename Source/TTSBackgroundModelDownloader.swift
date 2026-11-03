@@ -403,8 +403,17 @@ public final class TTSBackgroundModelDownloader: NSObject, @unchecked Sendable {
 
     /// Files worth fetching. Mirrors the runtime's own download globs plus
     /// `*.model`, which is how SentencePiece tokenizers arrive.
+    ///
+    /// Nested paths are included: the runtime's snapshot download matches them
+    /// too, and models keep required files in subdirectories (Qwen3-TTS's
+    /// `speech_tokenizer/`, pocket-tts's `embeddings/`). Skipping them produced
+    /// a download that reported complete and then could not load. Hidden
+    /// components (`.git/…`) and traversal are still refused.
     static func isWanted(_ filename: String) -> Bool {
-        guard !filename.hasPrefix("."), !filename.contains("/") else { return false }
+        let components = filename.split(separator: "/", omittingEmptySubsequences: false)
+        guard !components.isEmpty,
+              components.allSatisfy({ !$0.isEmpty && $0 != ".." && !$0.hasPrefix(".") })
+        else { return false }
         let wanted = ["safetensors", "json", "txt", "wav", "model"]
         return wanted.contains((filename as NSString).pathExtension.lowercased())
     }

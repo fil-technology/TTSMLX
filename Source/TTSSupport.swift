@@ -1,4 +1,5 @@
 import Foundation
+import HuggingFace
 import MLXAudioTTS
 @preconcurrency import MLXLMCommon
 #if canImport(AVFoundation)
@@ -167,12 +168,12 @@ public enum TTSError: LocalizedError, @unchecked Sendable {
         case let .outOfMemory(modelID):
             return "Not enough memory to run \(modelID). Unload other models or pick a smaller one."
         case let .modelLoadFailed(modelID, underlying):
-            return "Loading \(modelID) failed: \(underlying.localizedDescription)"
+            return "Loading \(modelID) failed: \(Self.describe(underlying))"
         case let .generationFailed(modelID, underlying):
-            return "Generating audio with \(modelID) failed: \(underlying.localizedDescription)"
+            return "Generating audio with \(modelID) failed: \(Self.describe(underlying))"
         case let .networkUnavailable(underlying):
             if let underlying {
-                return "Network unavailable: \(underlying.localizedDescription)"
+                return "Network unavailable: \(Self.describe(underlying))"
             }
             return "Network unavailable."
         case let .modelDownloadFailed(file, status):
@@ -182,6 +183,18 @@ public enum TTSError: LocalizedError, @unchecked Sendable {
 }
 
 extension TTSError {
+    /// Text for an underlying error that is never blank. Some runtime failures
+    /// (MLX C++ errors, bare `NSError`s) carry an empty `localizedDescription`,
+    /// which left apps showing an alert with no message at all; fall back to
+    /// the error's structural description and, failing that, its type.
+    static func describe(_ error: Error) -> String {
+        let localized = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !localized.isEmpty { return localized }
+        let structural = String(describing: error).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !structural.isEmpty { return structural }
+        return String(describing: type(of: error))
+    }
+
     /// Wraps an arbitrary error thrown during a known stage so callers can
     /// pattern-match. Network failures become ``networkUnavailable``, load
     /// failures become ``modelLoadFailed`` etc. Pass-throughs preserve existing
@@ -206,10 +219,18 @@ extension TTSError {
 }
 
 enum MLXTTSModelLoader {
-    static func load(descriptor: TTSModelDescriptor, hfToken: String?) async throws -> any SpeechGenerationModel {
+    /// `cache` is where the runtime resolves (and, if needed, downloads) the
+    /// model files. Pass the store's cache so loading looks in the same place
+    /// the store downloaded to; the default is the runtime's own default cache.
+    static func load(
+        descriptor: TTSModelDescriptor,
+        hfToken: String?,
+        cache: HubCache = .default
+    ) async throws -> any SpeechGenerationModel {
         try await TTS.loadModel(
             modelRepo: descriptor.id,
-            hfToken: hfToken
+            hfToken: hfToken,
+            cache: cache
         )
     }
 }
