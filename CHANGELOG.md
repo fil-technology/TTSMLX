@@ -6,6 +6,45 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-03
+
+### Fixed
+
+- **Model downloads were broken for every catalog model** (reported from a
+  consuming app as Soprano "404 for README.md", VyvoTTS "fails with an empty
+  error", and Qwen3 "downloads 1.9 GB, then reports not installed"). Three
+  distinct bugs in the download path:
+  - **Direct (`modelURL` + `files`) downloads requested the bare
+    `<repo>/<file>` path on Hugging Face**, which is the HTML site and answers
+    404 for every file — `README.md` was just the first HEAD to fail. Soprano
+    (both variants) and pocket-tts use this path. Files are now fetched from
+    `resolve/main/<file>`; static mirrors keep plain path appending.
+  - **A finished download could be reported as "not installed".** The hub
+    download and the MLX loader used the runtime's default cache
+    (`HubCache.default`, which honours `HF_HOME` / `HF_HUB_CACHE`) while
+    `isInstalled` / `installedModels()` searched the store's `cacheRoots` — so
+    a custom root, or that environment, split them. `TTSModelStore` now
+    routes download, load and lookup through one cache rooted at its first
+    cache root (new `modelCacheDirectory`), the default roots lead with the
+    runtime's cache directory, and `ensureDownloaded` trusts the directory it
+    just populated rather than re-deriving it.
+  - **`TTSBackgroundModelDownloader` skipped every nested file**, so
+    Qwen3-TTS's `speech_tokenizer/` and pocket-tts's `embeddings/` never
+    arrived and the "complete" download could not load. Nested paths are now
+    selected (hidden components and traversal still refused), matching the
+    runtime's own snapshot globs.
+- **`installedModels()` dropped freshly downloaded models.** It listed a model
+  only when the catalog's *validated* list contained it or its `config.json`
+  literally mentioned "tts" — so Soprano (`model_type: soprano`), VyvoTTS
+  (`qwen3`) and Orpheus (`llama`), all `.implemented` rather than validated,
+  vanished from the list the moment they finished downloading, and an app
+  driving its UI from that list showed them as not installed. Any model the
+  runtime registry can load is now listed.
+- **Load failures no longer surface with an empty message.** `ensureDownloaded`
+  wraps loader errors as `TTSError.modelLoadFailed`, and `TTSError` falls back
+  to the error's structural description (then its type) when the underlying
+  `localizedDescription` is blank — some MLX/runtime failures are.
+
 ### Added
 
 - **Sentence-granular streaming (`TTSStreamGranularity`).** `streamAndCacheNarration`

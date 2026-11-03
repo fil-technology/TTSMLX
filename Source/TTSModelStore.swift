@@ -8,6 +8,17 @@ public actor TTSModelStore {
     private let session: URLSession
     private let defaultModels: [TTSModelDescriptor]
     private let cacheRoots: [URL]
+    /// The Hugging Face cache every download *and* every runtime load goes
+    /// through. Rooted at the first entry of `cacheRoots`, so what this store
+    /// downloads, what the MLX loader resolves, and what `isInstalled` /
+    /// `installedModels()` report all agree on one directory. Before this the
+    /// hub download and the loader used the runtime's default cache while the
+    /// lookup used `cacheRoots` — with a custom root (or `HF_HOME`) a model
+    /// could download completely and then be reported as not installed.
+    nonisolated let hubCache: HubCache
+
+    /// Directory model files are downloaded to and loaded from.
+    public nonisolated var modelCacheDirectory: URL { hubCache.cacheDirectory }
 
     public init(
         defaultModels: [TTSModelDescriptor] = TTSMLX.defaultModels,
@@ -18,7 +29,9 @@ public actor TTSModelStore {
         self.defaultModels = defaultModels
         self.session = session
         self.fileManager = fileManager
-        self.cacheRoots = cacheRoots ?? Self.defaultModelCacheRoots()
+        let roots = cacheRoots ?? Self.defaultModelCacheRoots()
+        self.cacheRoots = roots
+        self.hubCache = roots.first.map { HubCache(cacheDirectory: $0) } ?? .default
     }
 
     public func recommendedModels() -> [TTSModelDescriptor] {
@@ -122,7 +135,7 @@ public actor TTSModelStore {
             ))
         }
 
-        try await downloadModelSnapshot(
+        let downloadedLocation = try await downloadModelSnapshot(
             descriptor: descriptor,
             hfToken: hfToken,
             progressHandler: progressHandler
@@ -135,10 +148,17 @@ public actor TTSModelStore {
             ))
         }
 
-        _ = try await MLXTTSModelLoader.load(descriptor: descriptor, hfToken: hfToken)
-        guard let location = modelCacheLocation(for: descriptor.id) else {
-            throw TTSError.modelNotFound(descriptor.id)
+        do {
+            _ = try await MLXTTSModelLoader.load(descriptor: descriptor, hfToken: hfToken, cache: hubCache)
+        } catch {
+            // Surface load failures as a typed, never-blank error: a raw
+            // runtime error here reached apps with an empty message.
+            throw TTSError.wrap(error, modelID: descriptor.id, stage: .loadingModel)
         }
+        // The files were just written to `downloadedLocation`. Prefer the
+        // lookup (it may find an existing hub-layout copy), but never report a
+        // model that just finished downloading as missing.
+        let location = modelCacheLocation(for: descriptor.id) ?? downloadedLocation
 
         let installed = TTSInstalledModel(
             descriptor: descriptor,
@@ -695,7 +715,15 @@ extension TTSModelStore {
             architectures: metadata.architectures
         )
 
+        // A model the runtime registry can load is a TTS model by definition;
+        // the name heuristics below are only for repos the registry does not
+        // know. Without this, an installed Soprano ("soprano" /
+        // "SopranoForCausalLM"), VyvoTTS ("qwen3") or Orpheus ("llama") that
+        // is not in the validated default list vanished from
+        // `installedModels()` right after a successful download — the app
+        // then reported it as not installed.
         let looksLikeTTS = fallback != nil
+            || supportedType != nil
             || metadata.modelType?.lowercased().contains("tts") == true
             || metadata.architectures.contains(where: { $0.lowercased().contains("tts") })
 
@@ -749,27 +777,37 @@ extension TTSModelStore {
         return nil
     }
 
+    /// Where installed models are looked for, most authoritative first. The
+    /// runtime's own cache directory (`HubCache.default`, which honours
+    /// `HF_HUB_CACHE` / `HF_HOME`) leads, so lookups always cover the place the
+    /// runtime downloads to; the platform-conventional locations follow for
+    /// models installed by earlier versions or by hand.
     static func defaultModelCacheRoots() -> [URL] {
         let home = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+        let conventional: [URL]
         #if os(iOS) || os(tvOS) || os(watchOS) || os(visionOS)
-        return [
+        conventional = [
             home.appendingPathComponent("Library/Caches/huggingface/hub", isDirectory: true),
             home.appendingPathComponent("Library/Application Support/huggingface/hub", isDirectory: true)
         ]
         #else
         let isSandboxed = ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil
         if isSandboxed {
-            return [
+            conventional = [
+                home.appendingPathComponent("Library/Caches/huggingface/hub", isDirectory: true),
+                home.appendingPathComponent("Library/Application Support/huggingface/hub", isDirectory: true)
+            ]
+        } else {
+            conventional = [
+                home.appendingPathComponent(".cache/huggingface/hub", isDirectory: true),
                 home.appendingPathComponent("Library/Caches/huggingface/hub", isDirectory: true),
                 home.appendingPathComponent("Library/Application Support/huggingface/hub", isDirectory: true)
             ]
         }
-        return [
-            home.appendingPathComponent(".cache/huggingface/hub", isDirectory: true),
-            home.appendingPathComponent("Library/Caches/huggingface/hub", isDirectory: true),
-            home.appendingPathComponent("Library/Application Support/huggingface/hub", isDirectory: true)
-        ]
         #endif
+        let runtime = HubCache.default.cacheDirectory
+        let runtimePath = runtime.standardizedFileURL.path
+        return [runtime] + conventional.filter { $0.standardizedFileURL.path != runtimePath }
     }
 
     func modelCacheRoots() -> [URL] {
@@ -799,14 +837,17 @@ extension TTSModelStore {
 }
 
 extension TTSModelStore {
+    /// Downloads the model's files and returns the directory they landed in —
+    /// `<cache>/mlx-audio/<repo with underscores>`, the layout the runtime
+    /// loader reads.
+    @discardableResult
     func downloadModelSnapshot(
         descriptor: TTSModelDescriptor,
         hfToken: String?,
         progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)?
-    ) async throws {
+    ) async throws -> URL {
         if let baseURL = descriptor.modelURL, let files = descriptor.files {
-            let cacheRoot = modelCacheRoots().first ?? TTSModelStore.defaultModelCacheRoots().first!
-            let modelDirectory = cacheRoot
+            let modelDirectory = hubCache.cacheDirectory
                 .appendingPathComponent("mlx-audio", isDirectory: true)
                 .appendingPathComponent(descriptor.id.replacingOccurrences(of: "/", with: "_"), isDirectory: true)
 
@@ -816,7 +857,7 @@ extension TTSModelStore {
                 to: modelDirectory,
                 progressHandler: progressHandler
             )
-            return
+            return modelDirectory
         }
 
         guard let repoID = Repo.ID(rawValue: descriptor.id) else {
@@ -825,12 +866,12 @@ extension TTSModelStore {
 
         let client: HubClient
         if let hfToken, !hfToken.isEmpty {
-            client = HubClient(host: HubClient.defaultHost, bearerToken: hfToken, cache: .default)
+            client = HubClient(host: HubClient.defaultHost, bearerToken: hfToken, cache: hubCache)
         } else {
-            client = HubClient(cache: .default)
+            client = HubClient(cache: hubCache)
         }
 
-        let cache = client.cache ?? .default
+        let cache = client.cache ?? hubCache
         let modelDirectory = cache.cacheDirectory
             .appendingPathComponent("mlx-audio", isDirectory: true)
             .appendingPathComponent(descriptor.id.replacingOccurrences(of: "/", with: "_"), isDirectory: true)
@@ -864,6 +905,26 @@ extension TTSModelStore {
                 ))
             }
         )
+        return modelDirectory
+    }
+
+    /// Raw-content URL for one file of a direct (`modelURL` + `files`)
+    /// download. A Hugging Face repository URL only serves file bytes under
+    /// `resolve/<revision>/`; the bare `<repo>/<file>` path is the HTML site and
+    /// answers 404 for every file — reported as "404 for README.md" because
+    /// that was merely the first HEAD to fail. Static mirrors keep plain path
+    /// appending, and a URL that already points inside `resolve/` is left alone.
+    static func directFileURL(baseURL: URL, file: String, revision: String = "main") -> URL {
+        let host = (baseURL.host ?? "").lowercased()
+        let isHuggingFace = host == "huggingface.co" || host.hasSuffix(".huggingface.co") || host == "hf.co"
+        let alreadyRaw = baseURL.pathComponents.contains("resolve")
+        guard isHuggingFace, !alreadyRaw else {
+            return baseURL.appendingPathComponent(file)
+        }
+        return baseURL
+            .appendingPathComponent("resolve", isDirectory: true)
+            .appendingPathComponent(revision, isDirectory: true)
+            .appendingPathComponent(file)
     }
 
     private func downloadDirect(
@@ -878,7 +939,7 @@ extension TTSModelStore {
         var contentLengths: [String: Int64] = [:]
         try await withThrowingTaskGroup(of: (String, Int64).self) { group in
             for file in files {
-                let fileURL = baseURL.appendingPathComponent(file)
+                let fileURL = Self.directFileURL(baseURL: baseURL, file: file)
                 group.addTask {
                     var request = URLRequest(url: fileURL)
                     request.httpMethod = "HEAD"
@@ -903,7 +964,7 @@ extension TTSModelStore {
 
         // 2. Download files sequentially and track progress
         for file in files {
-            let fileURL = baseURL.appendingPathComponent(file)
+            let fileURL = Self.directFileURL(baseURL: baseURL, file: file)
             let destinationURL = destinationDir.appendingPathComponent(file)
 
             try fileManager.createDirectory(at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)

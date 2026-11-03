@@ -371,7 +371,7 @@ struct TTSModelStoreTests {
         )
 
         let progressUpdates = DirectDownloadTestArray<TTSProgressUpdate>()
-        try await store.downloadModelSnapshot(
+        let downloadedTo = try await store.downloadModelSnapshot(
             descriptor: descriptor,
             hfToken: nil,
             progressHandler: { update in
@@ -400,6 +400,13 @@ struct TTSModelStoreTests {
         #expect(FileManager.default.fileExists(atPath: file1.path))
         #expect(FileManager.default.fileExists(atPath: file2.path))
         #expect(FileManager.default.fileExists(atPath: file3.path))
+        // The returned directory is the one the files landed in — what
+        // ensureDownloaded falls back to so a finished download is never
+        // reported as "not installed".
+        #expect(downloadedTo.standardizedFileURL == localDir.standardizedFileURL)
+        // A static mirror keeps plain path appending (no `resolve/main`).
+        #expect(requestedUrls.get().allSatisfy { $0.hasPrefix("https://r2.my-weights-mirror.com/pocket-tts/") })
+        #expect(requestedUrls.get().contains("https://r2.my-weights-mirror.com/pocket-tts/embeddings/alba.safetensors"))
 
         #expect(try Data(contentsOf: file1).count == 100)
         #expect(try Data(contentsOf: file2).count == 100)

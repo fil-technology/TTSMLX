@@ -2039,8 +2039,11 @@ public actor TTSSpeechSynthesizer {
             // fail at the C++ layer; without this wrapper those failures
             // would terminate the process via `fatalError` inside MLX's
             // ErrorHandler.
+            // Hoisted: referencing the actor-owned store inside the closure
+            // makes it non-Sendable under region isolation; the cache itself is.
+            let cache = modelStore.hubCache
             loaded = try await MLX.withError {
-                try await MLXTTSModelLoader.load(descriptor: model, hfToken: options.hfToken)
+                try await MLXTTSModelLoader.load(descriptor: model, hfToken: options.hfToken, cache: cache)
             }
         } catch {
             logError("prepareModel.MLXLoad", modelID: model.id, stage: "loadingModel", error: error)

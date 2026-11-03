@@ -73,8 +73,23 @@ struct TTSBackgroundModelDownloaderTests {
         // downloaded and still fail to load.
         #expect(TTSBackgroundModelDownloader.isWanted("tokenizer.model"))
 
-        for name in [".gitattributes", "README.md", "assets/sample.wav", "figure.png"] {
+        for name in [".gitattributes", "README.md", "figure.png",
+                     ".git/config.json", "../escape.json", "embeddings/.hidden.safetensors", ""] {
             #expect(!TTSBackgroundModelDownloader.isWanted(name), "\(name) should be skipped")
+        }
+    }
+
+    /// Models keep required files in subdirectories — Qwen3-TTS's speech
+    /// tokenizer, pocket-tts's voice embeddings. The runtime's own snapshot
+    /// download fetches them (its globs are not path-anchored), so a
+    /// background download that skipped them reported complete and then could
+    /// not load. A nested sample `.wav` rides along for the same reason the
+    /// runtime fetches it: the file filter is by type, not by location.
+    @Test("nested files the loader needs are selected")
+    func nestedFilesAreSelected() {
+        for name in ["speech_tokenizer/model.safetensors", "speech_tokenizer/config.json",
+                     "embeddings/alba.safetensors", "assets/sample.wav"] {
+            #expect(TTSBackgroundModelDownloader.isWanted(name), "\(name) should be downloaded")
         }
     }
 
