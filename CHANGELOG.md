@@ -6,6 +6,25 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-11-04
+
+### Fixed
+- Kokoro with a non-English `TTSSynthesisOptions.language` threw
+  `LexiconError.unsupportedLanguage("french")`: the runtime keys its lexicons
+  by ISO code (`fr`, `ja`, `cmn`, `en-us`) while `TTSLanguage` identifiers are
+  names. `TTSSpeechSynthesizer` now maps names to Kokoro's codes for that
+  loader only (other loaders, such as Qwen3-TTS, keep the name); an unknown
+  name becomes nil so Kokoro infers the language from the voice prefix.
+
+### Added
+- Model previews: `Docs/model-previews.md` (per model: status, languages,
+  voices, features, catalog peak memory, and one MP3 clip per voice, all
+  saying the same sentence) and `Docs/previews/index.html`, a page with
+  inline players. Clips live under `Docs/previews/audio` and were generated
+  on an Apple-silicon Mac with `Tools/previews` (a temporary executable
+  target; see the header comment) and rendered with
+  `Tools/render-previews.py`. README links both.
+
 ## [0.10.2] - 2026-11-04
 
 ### Changed
