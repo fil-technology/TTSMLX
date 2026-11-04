@@ -70,42 +70,26 @@ Residual: the runtime's Pocket-TTS voice loader fetches voice embeddings with
 `HubCache.default` (a few MB, re-fetched automatically if purged); fixing it
 needs a fork change.
 
-## 5. Consumers must add a SwiftPM mirror for `mlx-swift`
+## 5. Consumers must add a SwiftPM mirror for `mlx-swift` — RESOLVED (0.15.0)
 
-Two packages name `mlx-swift`: TTSMLX names the background-safe fork, while
-upstream `mlx-audio-swift` names `ml-explore/mlx-swift` (`mlx-swift-lm` left
-the graph in 0.10.0). SwiftPM resolves the shared identity to whichever URL it
-meets first — and the build succeeds either way. Xcode was observed picking
-upstream, which ships an app **without** the Metal background patch.
+Two packages used to name `mlx-swift`: TTSMLX named the background-safe fork
+while upstream `mlx-audio-swift` named `ml-explore/mlx-swift`, and SwiftPM
+resolved the shared identity to whichever it met first. Xcode was observed
+picking upstream, shipping an app without the Metal background patch, so
+every consumer needed a `.swiftpm/configuration/mirrors.json`.
 
-Every consuming app needs this at its package root, in
-`.swiftpm/configuration/mirrors.json`:
+**Fix (0.15.0):** the `mlx-audio-swift` fork (`0.1.8-tts.5`) names
+`fil-technology/mlx-swift.git` at `exact: "0.33.100"` itself. Nothing in a
+consumer's graph names upstream any more, so no mirror is needed.
+`Tools/verify-consumer-resolution.sh` resolves a throwaway mirror-less
+consumer package in CI and fails if it gets anything but the fork. The repo
+no longer ships `.swiftpm/configuration/mirrors.json` (with a mirror in
+effect SwiftPM records the *original* upstream URL in `Package.resolved`,
+which is what kept the drift noise alive); `Tools/install-mirrors.sh` stays
+for consumers on older versions and `Tools/verify-mlx-fork.sh` still checks
+a resolved checkout. The one-line URL change has to be carried over whenever
+the fork is rebased on a new upstream release; the consumer check makes a
+miss visible.
 
-```json
-{
-  "object": [
-    { "original": "https://github.com/ml-explore/mlx-swift.git",
-      "mirror": "https://github.com/fil-technology/mlx-swift.git" },
-    { "original": "https://github.com/ml-explore/mlx-swift",
-      "mirror": "https://github.com/fil-technology/mlx-swift.git" }
-  ],
-  "version": 1
-}
-```
-
-Both spellings are required: some packages declare the URL without `.git`.
-
-Verify with `Tools/verify-mlx-fork.sh`, which checks the resolved submodule URL
-and greps the patch marker out of `device.cpp`. **Now wired into CI**
-(`.github/workflows/ci.yml` installs the mirror, resolves, then verifies) and
-the mirror itself is tracked in this repo, so TTSMLX's own builds are covered.
-This drift has appeared four separate ways (a stale `Package.resolved` pin,
-Xcode resolving to upstream, a poisoned local SwiftPM repository mirror, and a
-CI checkout failure once upstream published a colliding `0.31.5`) — every
-consuming app still needs its own copy of the mirror, per above.
-
-The durable fix would be to declare the fork URL inside the mlx-audio-swift
-fork too, after which nothing in the graph names upstream and no mirror is
-needed. Not done: upstream's own `Package.swift` keeps naming upstream, and the
-fork is rebased on every upstream release, so the mirror stays the one place
-that redirects every declaration at once.
+All five items are resolved; this file can be deleted once the 0.15.0
+release is confirmed on a consuming app.

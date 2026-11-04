@@ -79,6 +79,9 @@ public struct TTSSynthesisOptions: Sendable, Hashable {
     /// How closely the output follows the voice, 0...1 (Chatterbox CFG weight,
     /// default 0.5).
     public var voiceGuidance: Float?
+    /// A voice prepared with `prepareVoice`. Ignored when `referenceAudio` is
+    /// also set.
+    public var preparedVoice: TTSPreparedVoice?
     // Used by synthesize(_:using:options:...). The streaming API currently yields buffers only
     // and does not surface a persisted output artifact through the wrapper.
     public var outputURL: URL?
@@ -122,8 +125,10 @@ public struct TTSSynthesisOptions: Sendable, Hashable {
         targetDuration: TimeInterval? = nil,
         seed: UInt64? = nil,
         expressiveness: Float? = nil,
-        voiceGuidance: Float? = nil
+        voiceGuidance: Float? = nil,
+        preparedVoice: TTSPreparedVoice? = nil
     ) {
+        self.preparedVoice = preparedVoice
         self.instruction = instruction
         self.emotion = emotion
         self.speed = speed
@@ -150,7 +155,7 @@ public struct TTSSynthesisOptions: Sendable, Hashable {
     /// True when any delivery control is set.
     public var hasControls: Bool {
         instruction != nil || emotion != nil || speed != nil || rate != nil || targetDuration != nil
-            || seed != nil || expressiveness != nil || voiceGuidance != nil
+            || seed != nil || expressiveness != nil || voiceGuidance != nil || preparedVoice != nil
     }
 
     /// `rate`, or the rate `speed` stands for.
@@ -163,6 +168,27 @@ public struct TTSSynthesisOptions: Sendable, Hashable {
         return "|instruction=\(instruction ?? "")|emotion=\(emotion?.rawValue ?? "")|speed=\(speed?.rawValue ?? "")"
             + "|rate=\(rate.map { String($0) } ?? "")|target=\(targetDuration.map { String($0) } ?? "")|seed=\(seed.map { String($0) } ?? "")"
             + "|expr=\(expressiveness.map { String($0) } ?? "")|guide=\(voiceGuidance.map { String($0) } ?? "")"
+            + "|prepared=\(preparedVoice?.referenceURL.standardizedFileURL.path ?? "")"
+    }
+}
+
+/// A reference voice prepared once with `TTSSpeechSynthesizer.prepareVoice`,
+/// to be reused across calls through `TTSSynthesisOptions.preparedVoice`.
+/// On Chatterbox the speaker conditioning is computed at preparation and
+/// reused; on other models the clip itself is reused, so separate calls still
+/// sound like the same speaker. The handle is only valid on the synthesizer
+/// that produced it.
+public struct TTSPreparedVoice: Sendable, Hashable, Codable, Identifiable {
+    public let id: UUID
+    public let modelID: String
+    public let referenceURL: URL
+    public let referenceText: String?
+
+    public init(id: UUID = UUID(), modelID: String, referenceURL: URL, referenceText: String? = nil) {
+        self.id = id
+        self.modelID = modelID
+        self.referenceURL = referenceURL
+        self.referenceText = referenceText
     }
 }
 

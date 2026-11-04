@@ -6,6 +6,31 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-04
+
+### Fixed
+- Consumers no longer need a SwiftPM mirror for `mlx-swift`. The
+  `mlx-audio-swift` fork (`0.1.8-tts.5`) now names
+  `fil-technology/mlx-swift` at `0.33.100` itself, so nothing in a consuming
+  app's dependency graph names `ml-explore/mlx-swift` and SwiftPM cannot pick
+  the unpatched upstream. CI resolves a mirror-less throwaway consumer and
+  fails if it gets anything else. Closes URGENT item 5, the last one.
+
+### Changed
+- Runtime pin: `fil-technology/mlx-audio-swift` `0.1.8-tts.5`.
+
+### Added
+- `TTSSpeechSynthesizer.prepareVoice(from:referenceText:using:)` returns a
+  `TTSPreparedVoice` for `TTSSynthesisOptions.preparedVoice`. On Chatterbox
+  the speaker conditioning is computed once and reused by every later call
+  (fork change: `ChatterboxModel.prepareReferenceConditioning` and
+  `preparedConditioning`); on other models the clip is reused. Regenerating
+  one line now matches its neighbours without re-encoding the voice. Verified
+  bit-identical against the per-call clip path under the same seed.
+- `TTSSynthesisOptions.seed` now seeds MLX's global random state before each
+  take as well as the runtime parameters, so reproducible takes work on every
+  model (0.14.0 noted that Soprano ignored the forwarded parameter).
+
 ## [0.14.0] - 2026-11-04
 
 Narration toolkit, from a list of pain points a narration app (Rendma) hit
