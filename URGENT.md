@@ -59,32 +59,25 @@ Still open before `.validated`:
   after the speech. The text chunker limits that to one chunk; the catalog
   entry documents it.
 
-## 4. Downloaded models live in a directory iOS is allowed to delete
+## 4. Downloaded models live in a directory iOS is allowed to delete — RESOLVED (0.11.1)
 
-`HubCache.default` resolves to `URL.cachesDirectory/huggingface/hub` on iOS —
-i.e. inside `~/Library/Caches`. iOS purges that directory under storage
-pressure, without notice and without telling the app.
+`HubCache.default` resolves to `Library/Caches/huggingface/hub` on iOS, which
+the system purges under storage pressure without telling the app.
 
-For a news app that downloads ~375 MB once during onboarding, that means the
-model can silently disappear and the next article stalls on a re-download. The
-risk is proportional to how tight the user's storage is.
+**Fix (0.11.1):** on iOS-family systems `TTSModelStore.defaultModelCacheRoots()`
+leads with `Library/Application Support/huggingface/hub`; the store's
+`hubCache` (what the synthesizer hands the runtime loader) and
+`TTSBackgroundModelDownloader.destinationDirectory` both use that first root,
+so every download lands there and every load looks there first. The directory
+is marked `isExcludedFromBackup`. `Library/Caches` stays in the lookup list,
+and installs found there are moved into the durable root on the store's first
+lookup (same-volume renames; a durable copy wins over a stale cached one).
+macOS behaviour is unchanged, and an explicit `HF_HOME` / `HF_HUB_CACHE` still
+wins everywhere. Covered by `Tests/TTSDurableModelCacheTests.swift`.
 
-Both halves already agree on this location — the runtime loader
-(`ModelUtils`) and `TTSBackgroundModelDownloader` — so moving it is a single
-coherent change rather than a hunt:
-
-* `TTS.loadModel(modelRepo:hfToken:cache:)` and
-  `ModelUtils.resolveOrDownloadModel(..., cache:)` already accept a `HubCache`.
-  `MLXTTSModelLoader.load` is what currently drops it and falls back to
-  `.default`.
-* A custom `HubCache(cacheDirectory:)` under Application Support would be
-  durable. Application Support is backed up, so the model directory should be
-  marked `isExcludedFromBackup` or users get ~375 MB added to their iCloud
-  backup.
-* Existing installs would need either a migration or one re-download.
-
-Not changed here because it alters where every model lives and needs a
-migration decision.
+Residual: the runtime's Pocket-TTS voice loader fetches voice embeddings with
+`HubCache.default` (a few MB, re-fetched automatically if purged); fixing it
+needs a fork change.
 
 ## 5. Consumers must add a SwiftPM mirror for `mlx-swift`
 
