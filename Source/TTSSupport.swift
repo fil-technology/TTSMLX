@@ -55,6 +55,14 @@ public struct TTSSynthesisOptions: Sendable, Hashable {
     public var voice: TTSVoice?
     public var referenceAudio: URL?
     public var referenceText: String?
+    /// Free-form delivery instruction ("warm, unhurried storytelling voice").
+    /// Honoured by models with `TTSModelFeature.instruction`; ignored elsewhere
+    /// with a `TTSDiagnostic.controlsIgnored` event.
+    public var instruction: String?
+    /// Discrete emotion, for models with `TTSModelFeature.emotion`.
+    public var emotion: TTSEmotion?
+    /// Speaking rate, for models with `TTSModelFeature.speed`.
+    public var speed: TTSSpeed?
     // Used by synthesize(_:using:options:...). The streaming API currently yields buffers only
     // and does not surface a persisted output artifact through the wrapper.
     public var outputURL: URL?
@@ -90,8 +98,14 @@ public struct TTSSynthesisOptions: Sendable, Hashable {
         hfToken: String? = nil,
         streamingInterval: Double = 2.0,
         audioCodec: TTSAudioCodec = .wav,
-        chunkJoin: TTSChunkJoin = .natural
+        chunkJoin: TTSChunkJoin = .natural,
+        instruction: String? = nil,
+        emotion: TTSEmotion? = nil,
+        speed: TTSSpeed? = nil
     ) {
+        self.instruction = instruction
+        self.emotion = emotion
+        self.speed = speed
         self.language = language
         self.voice = voice
         self.referenceAudio = referenceAudio
@@ -105,6 +119,16 @@ public struct TTSSynthesisOptions: Sendable, Hashable {
         self.streamingInterval = streamingInterval
         self.audioCodec = audioCodec
         self.chunkJoin = chunkJoin
+    }
+
+    /// True when any of `instruction`, `emotion` or `speed` is set.
+    public var hasControls: Bool { instruction != nil || emotion != nil || speed != nil }
+
+    /// Cache-key suffix for the controls; empty when none are set so keys of
+    /// plain requests are unchanged.
+    var controlsCacheSuffix: String {
+        guard hasControls else { return "" }
+        return "|instruction=\(instruction ?? "")|emotion=\(emotion?.rawValue ?? "")|speed=\(speed?.rawValue ?? "")"
     }
 }
 

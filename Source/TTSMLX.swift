@@ -8,8 +8,62 @@ public enum TTSMLX {
     /// a style instruction: `"ryan"` or `"ryan, speak slowly and warmly"`.
     /// `eric` and `dylan` speak Sichuan / Beijing dialect respectively.
     static let qwen3CustomVoiceSpeakers: [TTSVoice] = [
-        "ryan", "serena", "vivian", "aiden", "ono_anna", "sohee", "uncle_fu", "eric", "dylan"
+        TTSVoice("ryan", displayName: "Ryan", language: .english, gender: .male, summary: "Energetic, conversational"),
+        TTSVoice("serena", displayName: "Serena", language: .chinese, gender: .female, summary: "Warm, gentle"),
+        TTSVoice("vivian", displayName: "Vivian", language: .chinese, gender: .female, summary: "Bright, young"),
+        TTSVoice("aiden", displayName: "Aiden", language: .english, gender: .male, summary: "Sunny American"),
+        TTSVoice("ono_anna", displayName: "Ono Anna", language: .japanese, gender: .female, summary: "Playful"),
+        TTSVoice("sohee", displayName: "Sohee", language: .korean, gender: .female, summary: "Warm, emotional"),
+        TTSVoice("uncle_fu", displayName: "Uncle Fu", language: .chinese, gender: .male, summary: "Seasoned, resonant"),
+        TTSVoice("eric", displayName: "Eric", language: .chinese, gender: .male, summary: "Sichuan dialect"),
+        TTSVoice("dylan", displayName: "Dylan", language: .chinese, gender: .male, summary: "Beijing dialect"),
     ]
+
+    static let orpheusVoices: [TTSVoice] = [
+        TTSVoice("tara", displayName: "Tara", language: .english, gender: .female, summary: "Default, conversational"),
+        TTSVoice("leah", displayName: "Leah", language: .english, gender: .female),
+        TTSVoice("jess", displayName: "Jess", language: .english, gender: .female),
+        TTSVoice("leo", displayName: "Leo", language: .english, gender: .male),
+        TTSVoice("dan", displayName: "Dan", language: .english, gender: .male),
+        TTSVoice("mia", displayName: "Mia", language: .english, gender: .female),
+        TTSVoice("zac", displayName: "Zac", language: .english, gender: .male),
+        TTSVoice("zoe", displayName: "Zoe", language: .english, gender: .female),
+    ]
+
+    /// Orpheus renders these inline tags (`<laugh>` and friends).
+    static let orpheusEventTags: [TTSEventTag: String] = [
+        .laugh: "<laugh>", .chuckle: "<chuckle>", .sigh: "<sigh>", .cough: "<cough>",
+        .sniffle: "<sniffle>", .groan: "<groan>", .yawn: "<yawn>", .gasp: "<gasp>",
+    ]
+
+    static let pocketTTSVoices: [TTSVoice] = [
+        TTSVoice("alba", displayName: "Alba", language: .english), TTSVoice("marius", displayName: "Marius", language: .english),
+        TTSVoice("javert", displayName: "Javert", language: .english), TTSVoice("jean", displayName: "Jean", language: .english),
+    ]
+
+    static let mingVoices: [TTSVoice] = [
+        TTSVoice("UK_George", displayName: "George", language: .english, gender: .male, summary: "British. Audiobooks and formal announcements"),
+        TTSVoice("US_Emma", displayName: "Emma", language: .english, gender: .female, summary: "American. Assistants, narration, product dialogue"),
+        TTSVoice("UK_Charlotte", displayName: "Charlotte", language: .english, gender: .female, summary: "British. Audiobooks, measured narration"),
+        TTSVoice("灵小柔", displayName: "灵小柔", language: .chinese, gender: .female, summary: "Clear, sweet, patient. Customer service"),
+        TTSVoice("灵楷", displayName: "灵楷", language: .chinese, gender: .male, summary: "Warm, resonant. Radio, documentary, audiobooks"),
+        TTSVoice("灵小萌", displayName: "灵小萌", language: .chinese, gender: .female, summary: "Bright, brisk. Audiobook narration"),
+        TTSVoice("灵阅川", displayName: "灵阅川", language: .chinese, gender: .male, summary: "Deep, composed documentary narrator"),
+        TTSVoice("灵妩月", displayName: "灵妩月", language: .chinese, gender: .female, summary: "Gentle, thoughtful companion"),
+    ]
+
+    /// Ming-3.0 paralinguistic tags (case-sensitive, brackets included).
+    static let mingEventTags: [TTSEventTag: String] = [
+        .laugh: "[Laughter]", .sigh: "[Sigh]", .cough: "[Cough]", .breath: "[Breathing]", .hesitation: "[Uhm]",
+    ]
+
+    /// Chatterbox Turbo's documented event tags.
+    static let chatterboxTurboEventTags: [TTSEventTag: String] = [
+        .laugh: "[laugh]", .chuckle: "[chuckle]", .sigh: "[sigh]", .cough: "[cough]", .gasp: "[gasp]", .groan: "[groan]",
+    ]
+
+    /// The regular (multilingual) Chatterbox weights react to a smaller set.
+    static let chatterboxEventTags: [TTSEventTag: String] = [.laugh: "[laughter]", .sigh: "[sigh]"]
 
     static let qwen3TTSLanguages: [TTSLanguage] = [
         .english, .spanish, .french, .german, .italian, .portuguese, .dutch,
@@ -28,7 +82,9 @@ public enum TTSMLX {
     /// bundled with the runtime fork, not voices baked into the checkpoint.
     /// `en_news` (a newsreader read) is the runtime's default.
     static let mossTTSNanoVoices: [TTSVoice] = [
-        "en_news", "en_2", "en_3", "en_4", "en_6", "en_7", "en_8"
+        TTSVoice("en_news", displayName: "News", language: .english, summary: "Newsreader"),
+        TTSVoice("en_2", language: .english), TTSVoice("en_3", language: .english), TTSVoice("en_4", language: .english),
+        TTSVoice("en_6", language: .english), TTSVoice("en_7", language: .english), TTSVoice("en_8", language: .english),
     ]
 
     /// Kokoro's 54 preset voices, named `<lang><gender>_<name>`: `a`merican /
@@ -49,6 +105,11 @@ public enum TTSMLX {
     /// The 23 languages of the Chatterbox multilingual checkpoint, as `[xx]` tags
     /// in its tokenizer: ar da de el en es fi fr he hi it ja ko ms nl no pl pt
     /// ru sv sw tr zh.
+    /// Ming-3.0-TTS target languages. Chinese and English need no language
+    /// option; the other five are passed to the runtime as a target-language
+    /// line in the prompt (`TTSSynthesisOptions.language`).
+    static let mingLanguages: [TTSLanguage] = [.chinese, .english, .japanese, .korean, .german, .french, .spanish]
+
     static let chatterboxLanguages: [TTSLanguage] = [
         .english, .french, .german, .spanish, .italian, .portuguese, .dutch, .polish,
         .turkish, .russian, .japanese, .korean, .chinese, .arabic, .hindi, .danish,
@@ -59,7 +120,22 @@ public enum TTSMLX {
         .english, .spanish, .french, .hindi, .italian, .japanese, .portuguese, .chinese
     ]
 
-    static let kokoroVoices: [TTSVoice] = kokoroVoiceNames.map { TTSVoice($0) }
+    static let kokoroVoices: [TTSVoice] = kokoroVoiceNames.map(kokoroVoice)
+
+    static let kokoroVoiceLanguages: [Character: (TTSLanguage, String)] = [
+        "a": (.english, "American"), "b": (.english, "British"), "e": (.spanish, "Spanish"), "f": (.french, "French"),
+        "h": (.hindi, "Hindi"), "i": (.italian, "Italian"), "j": (.japanese, "Japanese"), "p": (.portuguese, "Brazilian Portuguese"),
+        "z": (.chinese, "Mandarin"),
+    ]
+
+    /// Decodes Kokoro's `<lang><gender>_<name>` convention into voice metadata.
+    static func kokoroVoice(_ name: String) -> TTSVoice {
+        let parts = name.split(separator: "_", maxSplits: 1)
+        guard parts.count == 2, let prefix = parts.first, prefix.count == 2 else { return TTSVoice(name) }
+        let language = kokoroVoiceLanguages[prefix.first!]
+        let gender: TTSVoiceGender? = prefix.last == "f" ? .female : prefix.last == "m" ? .male : nil
+        return TTSVoice(name, displayName: parts[1].capitalized, language: language?.0, gender: gender, summary: language?.1)
+    }
 
     /// The checkpoint plus every voice embedding, so a background download
     /// leaves nothing for the first synthesis to fetch.
@@ -67,7 +143,11 @@ public enum TTSMLX {
         + kokoroVoiceNames.map { "voices/\($0).safetensors" }
 
     /// MeloTTS English accents (the checkpoint's speaker ids).
-    static let meloTTSVoices: [TTSVoice] = ["EN-US", "EN-BR", "EN_INDIA", "EN-AU", "EN-Default"]
+    static let meloTTSVoices: [TTSVoice] = [
+        TTSVoice("EN-US", displayName: "American", language: .english), TTSVoice("EN-BR", displayName: "British", language: .english),
+        TTSVoice("EN_INDIA", displayName: "Indian", language: .english), TTSVoice("EN-AU", displayName: "Australian", language: .english),
+        TTSVoice("EN-Default", displayName: "Default", language: .english),
+    ]
 
     public static let modelCatalog: [TTSModelCatalogEntry] = [
         validatedEntry(
@@ -84,7 +164,8 @@ public enum TTSMLX {
                     supportedLanguages: [.english],
                     defaultGenerationProfile: .balanced,
                     peakMemoryMB: 400,
-                    minimumDeviceClass: .iPhone
+                    minimumDeviceClass: .iPhone,
+                    sampleRate: 24_000
                 )
             ),
             modelURL: URL(string: "https://huggingface.co/Marvis-AI/marvis-tts-250m-v0.2-MLX-8bit")
@@ -95,7 +176,7 @@ public enum TTSMLX {
                 displayName: "Pocket TTS",
                 summary: "Small and fast.",
                 supportedLanguages: [.english],
-                suggestedVoices: [.alba, .marius, .javert, .jean],
+                suggestedVoices: pocketTTSVoices,
                 capabilities: .init(
                     isRuntimeSupported: true,
                     supportsReferenceAudio: false,
@@ -108,7 +189,8 @@ public enum TTSMLX {
                     // hard `minimumDeviceClass: .iPad` was overly conservative
                     // and regressed iPhone users who ran Pocket TTS fine in 0.3.
                     peakMemoryMB: 600,
-                    minimumDeviceClass: .iPhone
+                    minimumDeviceClass: .iPhone,
+                    sampleRate: 24_000
                 ),
                 modelURL: URL(string: "https://huggingface.co/mlx-community/pocket-tts"),
                 files: [
@@ -144,7 +226,8 @@ public enum TTSMLX {
                     supportedLanguages: [.english],
                     defaultGenerationProfile: .balanced,
                     peakMemoryMB: 220,
-                    minimumDeviceClass: .iPhone
+                    minimumDeviceClass: .iPhone,
+                    sampleRate: 32_000
                 ),
                 modelURL: URL(string: "https://huggingface.co/mlx-community/Soprano-80M-bf16"),
                 files: [
@@ -165,7 +248,7 @@ public enum TTSMLX {
                 displayName: "VyvoTTS",
                 summary: "English Qwen3-based model with a small footprint.",
                 supportedLanguages: [.english],
-                suggestedVoices: [.enUS1],
+                suggestedVoices: [TTSVoice("en-us-1", displayName: "Default", language: .english)],
                 capabilities: .init(
                     isRuntimeSupported: true,
                     supportsReferenceAudio: false,
@@ -173,7 +256,8 @@ public enum TTSMLX {
                     supportedLanguages: [.english],
                     defaultGenerationProfile: .balanced,
                     peakMemoryMB: 500,
-                    minimumDeviceClass: .iPhone
+                    minimumDeviceClass: .iPhone,
+                    sampleRate: 24_000
                 )
             ),
             modelURL: URL(string: "https://huggingface.co/mlx-community/VyvoTTS-EN-Beta-4bit")
@@ -184,7 +268,7 @@ public enum TTSMLX {
                 displayName: "Orpheus",
                 summary: "Higher-capacity LlamaTTS model with multiple built-in voices.",
                 supportedLanguages: [.english],
-                suggestedVoices: [.tara, .leah, .jess, .leo, .dan, .mia, .zac, .zoe],
+                suggestedVoices: orpheusVoices,
                 capabilities: .init(
                     isRuntimeSupported: true,
                     supportsReferenceAudio: false,
@@ -201,7 +285,9 @@ public enum TTSMLX {
                     // Lift this gate only after empirical iOS-side validation
                     // shows the app survives a full chapter at peak.
                     peakMemoryMB: 6_000,
-                    minimumDeviceClass: .mac
+                    minimumDeviceClass: .mac,
+                    eventTags: orpheusEventTags,
+                    sampleRate: 24_000
                 )
             ),
             modelURL: URL(string: "https://huggingface.co/mlx-community/orpheus-3b-0.1-ft-bf16")
@@ -212,7 +298,7 @@ public enum TTSMLX {
                 displayName: "Qwen3 TTS",
                 summary: "Higher quality multilingual model.",
                 supportedLanguages: Self.qwen3TTSLanguages,
-                suggestedVoices: [.enUS1],
+                suggestedVoices: [TTSVoice("en-us-1", displayName: "Default", language: .english)],
                 capabilities: .init(
                     isRuntimeSupported: true,
                     supportsReferenceAudio: false,
@@ -226,7 +312,8 @@ public enum TTSMLX {
                     // non-memory reason and inherited the same conservative
                     // paranoia that regressed Pocket TTS for iPhone users.
                     peakMemoryMB: 800,
-                    minimumDeviceClass: .iPhone
+                    minimumDeviceClass: .iPhone,
+                    sampleRate: 24_000
                 )
             ),
             modelURL: URL(string: "https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit")
@@ -256,7 +343,7 @@ public enum TTSMLX {
                 displayName: "Qwen3 TTS 0.6B (4-bit)",
                 summary: "Smaller-footprint multilingual Qwen3 TTS.",
                 supportedLanguages: Self.qwen3TTSLanguages,
-                suggestedVoices: [.enUS1],
+                suggestedVoices: [TTSVoice("en-us-1", displayName: "Default", language: .english)],
                 capabilities: .init(
                     isRuntimeSupported: true,
                     supportsReferenceAudio: false,
@@ -264,7 +351,8 @@ public enum TTSMLX {
                     supportedLanguages: Self.qwen3TTSLanguages,
                     defaultGenerationProfile: .balanced,
                     peakMemoryMB: 700,
-                    minimumDeviceClass: .iPhone
+                    minimumDeviceClass: .iPhone,
+                    sampleRate: 24_000
                 )
             )
         ),
@@ -281,7 +369,7 @@ public enum TTSMLX {
                 displayName: "Qwen3 TTS 1.7B",
                 summary: "Higher-quality multilingual Qwen3 TTS.",
                 supportedLanguages: Self.qwen3TTSLanguages,
-                suggestedVoices: [.enUS1],
+                suggestedVoices: [TTSVoice("en-us-1", displayName: "Default", language: .english)],
                 capabilities: .init(
                     isRuntimeSupported: true,
                     supportsReferenceAudio: false,
@@ -291,7 +379,8 @@ public enum TTSMLX {
                     // Estimate only (not measured). 1.7B @ 4-bit ≈ 0.9GB weights
                     // plus codec/speaker-encoder/tokenizer + activations.
                     peakMemoryMB: 2_800,
-                    minimumDeviceClass: .iPhone
+                    minimumDeviceClass: .iPhone,
+                    sampleRate: 24_000
                 )
             )
         ),
@@ -316,7 +405,9 @@ public enum TTSMLX {
                     supportedLanguages: Self.qwen3TTSLanguages,
                     defaultGenerationProfile: .highQuality,
                     peakMemoryMB: 2_800,
-                    minimumDeviceClass: .iPhone
+                    minimumDeviceClass: .iPhone,
+                    features: [.instruction, .emotion, .speed],
+                    sampleRate: 24_000
                 )
             )
         ),
@@ -341,7 +432,9 @@ public enum TTSMLX {
                     supportedLanguages: Self.qwen3TTSLanguages,
                     defaultGenerationProfile: .balanced,
                     peakMemoryMB: 1_200,
-                    minimumDeviceClass: .iPhone
+                    minimumDeviceClass: .iPhone,
+                    features: [.instruction, .emotion, .speed],
+                    sampleRate: 24_000
                 )
             )
         ),
@@ -366,7 +459,8 @@ public enum TTSMLX {
                     supportedLanguages: [.english],
                     defaultGenerationProfile: .fast,
                     peakMemoryMB: 150,
-                    minimumDeviceClass: .iPhone
+                    minimumDeviceClass: .iPhone,
+                    sampleRate: 32_000
                 ),
                 modelURL: URL(string: "https://huggingface.co/mlx-community/Soprano-80M-4bit"),
                 files: [
@@ -401,7 +495,8 @@ public enum TTSMLX {
                     supportedLanguages: [.english],
                     defaultGenerationProfile: .balanced,
                     peakMemoryMB: 220,
-                    minimumDeviceClass: .iPhone
+                    minimumDeviceClass: .iPhone,
+                    sampleRate: 32_000
                 ),
                 modelURL: URL(string: "https://huggingface.co/mlx-community/Soprano-1.1-80M-bf16"),
                 files: [
@@ -446,7 +541,9 @@ public enum TTSMLX {
                     supportedLanguages: Self.kokoroLanguages,
                     defaultGenerationProfile: .balanced,
                     peakMemoryMB: 500,
-                    minimumDeviceClass: .iPhone
+                    minimumDeviceClass: .iPhone,
+                    features: [.speed],
+                    sampleRate: 24_000
                 ),
                 modelURL: URL(string: "https://huggingface.co/mlx-community/Kokoro-82M-bf16"),
                 files: Self.kokoroFiles
@@ -482,7 +579,8 @@ public enum TTSMLX {
                     supportedLanguages: [.english],
                     defaultGenerationProfile: .balanced,
                     peakMemoryMB: 300,
-                    minimumDeviceClass: .iPhone
+                    minimumDeviceClass: .iPhone,
+                    sampleRate: 24_000
                 ),
                 modelURL: URL(string: "https://huggingface.co/gradium/phonon-31m-en"),
                 files: [
@@ -527,7 +625,8 @@ public enum TTSMLX {
                     supportedLanguages: [.english],
                     defaultGenerationProfile: .balanced,
                     peakMemoryMB: 1_000,
-                    minimumDeviceClass: .iPhone
+                    minimumDeviceClass: .iPhone,
+                    sampleRate: 44_100
                 ),
                 modelURL: URL(string: "https://huggingface.co/mlx-community/MeloTTS-English-MLX"),
                 files: ["config.json", "model.safetensors", "bert_weights.npz"]
@@ -583,7 +682,8 @@ public enum TTSMLX {
                     // ~17s generation at the default chunk budget (1.36-1.53GB
                     // observed). Rounded up; re-measure on device.
                     peakMemoryMB: 1_600,
-                    minimumDeviceClass: .iPhone
+                    minimumDeviceClass: .iPhone,
+                    sampleRate: 48_000
                 ),
                 modelURL: URL(string: "https://huggingface.co/mlx-community/MOSS-TTS-Nano-100M")
             )
@@ -629,7 +729,9 @@ public enum TTSMLX {
                     supportedLanguages: [.english],
                     defaultGenerationProfile: .balanced,
                     peakMemoryMB: 2_500,
-                    minimumDeviceClass: .iPhone
+                    minimumDeviceClass: .iPhone,
+                    eventTags: chatterboxTurboEventTags,
+                    sampleRate: 24_000
                 ),
                 modelURL: URL(string: "https://huggingface.co/mlx-community/chatterbox-turbo-4bit"),
                 files: [
@@ -688,7 +790,10 @@ public enum TTSMLX {
                     supportedLanguages: chatterboxLanguages,
                     defaultGenerationProfile: .balanced,
                     peakMemoryMB: 3_000,
-                    minimumDeviceClass: .iPhone
+                    minimumDeviceClass: .iPhone,
+                    features: [.emotion],
+                    eventTags: chatterboxEventTags,
+                    sampleRate: 24_000
                 ),
                 modelURL: URL(string: "https://huggingface.co/mlx-community/chatterbox-4bit"),
                 files: [
@@ -698,6 +803,77 @@ public enum TTSMLX {
                     "model.safetensors.index.json",
                     "tokenizer.json",
                     "Cangjie5_TC.json"
+                ]
+            )
+        ),
+
+        .init(
+            id: "mlx-community/Ming-3.0-tts-0.5B-bf16",
+            displayName: "Ming-3.0-TTS 0.5B",
+            summary: "Ant Group Ming-3.0-TTS (Qwen2.5-0.5B + flow-matching DiT head over a 44.1 kHz audio VAE): #14 on the tts-bench board. 7 languages, built-in English and Chinese voices, cloning from a clip, voice design and delivery controls. MIT.",
+            supportStage: .implemented,
+            supportedLanguages: mingLanguages,
+            runtimeNotes: """
+                Routes to the dense (Ming) loader. The mlx-community checkpoint bundles its \
+                CAM++ speaker encoder (`campplus.safetensors`), so nothing else is fetched; the \
+                runtime lists `mlx-community/Step-Audio-2-token2wav` as a companion only for \
+                checkpoints without it. Voices: `UK_George`, `US_Emma`, `UK_Charlotte` and the \
+                Chinese voices (`灵小柔`, `灵楷`, …) through the voice option; with no voice the \
+                model picks its own speaker. Cloning from a clip through `referenceAudio` \
+                (resampled to 44.1 kHz; add `referenceText` to condition on the clip's words \
+                too). Chinese and English need no language option; German, Spanish, French, \
+                Japanese and Korean are passed as the prompt's target-language line from \
+                `TTSSynthesisOptions.language`. Uniform controls: `instruction` (free-form \
+                delivery or voice design; replaces the built-in voice), `emotion` and `speed` \
+                (Ming's structured instruction) and the `TTSEventTag` markers (`[Laughter]`, \
+                `[Sigh]`, `[Cough]`, `[Breathing]`, `[Uhm]`). Validated end to end on macOS: \
+                built-in voices in English, French and Chinese, no voice, a 48 kHz reference \
+                clip, emotion, a free-form instruction and event tags. Generation runs per text \
+                fragment (about 24 words) and yields no audio before a fragment completes: \
+                8-10 s of audio takes 25-50 s warm in a debug build (0.2-0.35x realtime), and a \
+                streaming request delivers everything at the end. Memory on macOS: MLX peak \
+                4.2 GB (active 2.85 GB); the buffer cache grows to 2 GB per run unless capped \
+                (`MLX.Memory.cacheLimit`; 512 MB held the process at 4.6-4.9 GB). bf16 weights, \
+                3 GB download; plan on an 8 GB device. Keep to one event tag per sentence: \
+                two tags inside one ~24-word fragment made the model loop (27 s of audio for \
+                a 20-word sentence), while the same tags in separate sentences behave. Pending \
+                on-device validation.
+                """,
+            modelURL: URL(string: "https://huggingface.co/mlx-community/Ming-3.0-tts-0.5B-bf16"),
+            projectURL: URL(string: "https://github.com/inclusionAI/Ming-3.0-tts"),
+            descriptor: .init(
+                id: "mlx-community/Ming-3.0-tts-0.5B-bf16",
+                displayName: "Ming-3.0-TTS 0.5B",
+                summary: "Multilingual 44.1 kHz model with built-in English and Chinese voices and reference-clip cloning.",
+                supportedLanguages: mingLanguages,
+                suggestedVoices: mingVoices,
+                capabilities: .init(
+                    isRuntimeSupported: true,
+                    supportsReferenceAudio: true,
+                    supportsLanguageList: true,
+                    supportedLanguages: mingLanguages,
+                    defaultGenerationProfile: .balanced,
+                    // bf16 0.5B LLM + DiT + VAE: 2.85 GB active, 4.2 GB MLX peak on
+                    // macOS. Fits 8 GB devices; the memory check keeps 4 GB ones out.
+                    peakMemoryMB: 4_500,
+                    minimumDeviceClass: .iPhone,
+                    features: [.instruction, .emotion, .speed, .voiceDesign],
+                    eventTags: mingEventTags,
+                    sampleRate: 44_100
+                ),
+                modelURL: URL(string: "https://huggingface.co/mlx-community/Ming-3.0-tts-0.5B-bf16"),
+                files: [
+                    "config.json",
+                    "configuration.json",
+                    "model.safetensors",
+                    "model.safetensors.index.json",
+                    "campplus.safetensors",
+                    "tokenizer.json",
+                    "tokenizer_config.json",
+                    "vocab.json",
+                    "merges.txt",
+                    "added_tokens.json",
+                    "special_tokens_map.json"
                 ]
             )
         ),
@@ -746,16 +922,6 @@ public enum TTSMLX {
             runtimeNotes: "Routes to the longcat_audiodit loader. Not validated here: 5.7 GB bf16 download; the 4-bit build is the candidate for phones. Non-streaming by design, so time to first audio equals the whole chunk.",
             modelURL: URL(string: "https://huggingface.co/mlx-community/LongCat-AudioDiT-1B-bf16"),
             projectURL: URL(string: "https://github.com/meituan-longcat/LongCat-AudioDiT")
-        ),
-        .init(
-            id: "mlx-community/Ming-3.0-tts-0.5B-bf16",
-            displayName: "Ming-3.0-TTS 0.5B",
-            summary: "Ant Group Ming-3.0-TTS (Qwen2.5-0.5B + flow-matching head, 44.1 kHz): #14 on the board. 7 languages, 100+ voices, cloning, voice design, emotion/speed/pitch tags. MIT.",
-            supportStage: .implemented,
-            supportedLanguages: [.chinese, .english, .japanese, .korean, .german, .french, .spanish],
-            runtimeNotes: "Routes to the dense (Ming) loader; fetches CAM++ speaker weights from mlx-community/Step-Audio-2-token2wav. Not validated here: 3 GB download.",
-            modelURL: URL(string: "https://huggingface.co/mlx-community/Ming-3.0-tts-0.5B-bf16"),
-            projectURL: URL(string: "https://github.com/inclusionAI/Ming")
         ),
         .init(
             id: "mlx-community/maya1-4bit",

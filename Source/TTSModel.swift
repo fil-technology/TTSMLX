@@ -41,6 +41,14 @@ public struct TTSModelCapabilities: Sendable, Hashable, Codable {
     public let supportedLanguages: [TTSLanguage]
     public let defaultGenerationProfile: TTSGenerationProfile
     public let supportsStreaming: Bool
+    /// Everything the model can do, in the uniform vocabulary. Always includes
+    /// the members implied by the boolean fields and the voice list.
+    public let features: Set<TTSModelFeature>
+    /// The model's spelling of each supported `TTSEventTag`; empty when the
+    /// model has none. The synthesizer rewrites canonical markers with it.
+    public let eventTags: [TTSEventTag: String]
+    /// Output sample rate in Hz, when known.
+    public let sampleRate: Int?
     /// Empirical peak resident memory in MB while generating. `nil` means unknown.
     ///
     /// Prefer this over ``minimumDeviceClass`` for any **memory-pressure**
@@ -69,7 +77,11 @@ public struct TTSModelCapabilities: Sendable, Hashable, Codable {
         defaultGenerationProfile: TTSGenerationProfile = .balanced,
         supportsStreaming: Bool = true,
         peakMemoryMB: Int? = nil,
-        minimumDeviceClass: TTSDeviceClass? = nil
+        minimumDeviceClass: TTSDeviceClass? = nil,
+        features: Set<TTSModelFeature> = [],
+        eventTags: [TTSEventTag: String] = [:],
+        sampleRate: Int? = nil,
+        hasBuiltInVoices: Bool = false
     ) {
         self.isRuntimeSupported = isRuntimeSupported
         self.supportsReferenceAudio = supportsReferenceAudio
@@ -79,7 +91,29 @@ public struct TTSModelCapabilities: Sendable, Hashable, Codable {
         self.supportsStreaming = supportsStreaming
         self.peakMemoryMB = peakMemoryMB
         self.minimumDeviceClass = minimumDeviceClass
+        self.eventTags = eventTags
+        self.sampleRate = sampleRate
+        self.features = Self.impliedFeatures(
+            explicit: features, supportsStreaming: supportsStreaming,
+            supportsReferenceAudio: supportsReferenceAudio, languageCount: supportedLanguages.count,
+            eventTags: !eventTags.isEmpty, hasBuiltInVoices: hasBuiltInVoices)
     }
+
+    static func impliedFeatures(
+        explicit: Set<TTSModelFeature>, supportsStreaming: Bool, supportsReferenceAudio: Bool,
+        languageCount: Int, eventTags: Bool, hasBuiltInVoices: Bool
+    ) -> Set<TTSModelFeature> {
+        var features = explicit
+        if supportsStreaming { features.insert(.streaming) }
+        if supportsReferenceAudio { features.insert(.voiceCloning) }
+        if languageCount > 1 { features.insert(.multilingual) }
+        if eventTags { features.insert(.eventTags) }
+        if hasBuiltInVoices { features.insert(.builtInVoices) }
+        return features
+    }
+
+    /// `features` in display order.
+    public var sortedFeatures: [TTSModelFeature] { features.sorted() }
 
     /// Decode tolerates older encoded values without the device fields.
     public init(from decoder: Decoder) throws {
@@ -92,10 +126,30 @@ public struct TTSModelCapabilities: Sendable, Hashable, Codable {
         self.supportsStreaming = try c.decodeIfPresent(Bool.self, forKey: .supportsStreaming) ?? true
         self.peakMemoryMB = try c.decodeIfPresent(Int.self, forKey: .peakMemoryMB)
         self.minimumDeviceClass = try c.decodeIfPresent(TTSDeviceClass.self, forKey: .minimumDeviceClass)
+        self.eventTags = try c.decodeIfPresent([TTSEventTag: String].self, forKey: .eventTags) ?? [:]
+        self.sampleRate = try c.decodeIfPresent(Int.self, forKey: .sampleRate)
+        let explicit = try c.decodeIfPresent(Set<TTSModelFeature>.self, forKey: .features) ?? []
+        self.features = Self.impliedFeatures(
+            explicit: explicit, supportsStreaming: supportsStreaming,
+            supportsReferenceAudio: supportsReferenceAudio, languageCount: supportedLanguages.count,
+            eventTags: !eventTags.isEmpty, hasBuiltInVoices: explicit.contains(.builtInVoices))
     }
 }
 
 public extension TTSModelDescriptor {
+    /// `capabilities.features` plus `.builtInVoices` when the descriptor lists voices.
+    var features: Set<TTSModelFeature> {
+        suggestedVoices.isEmpty ? capabilities.features : capabilities.features.union([.builtInVoices])
+    }
+
+    /// `features` in display order.
+    var sortedFeatures: [TTSModelFeature] { features.sorted() }
+
+    /// Event tags the model renders, in canonical order.
+    var supportedEventTags: [TTSEventTag] {
+        TTSEventTag.allCases.filter { capabilities.eventTags[$0] != nil }
+    }
+
     /// Returns `true` when this model's known requirements fit the profile.
     /// Models with no recorded capability data (peakMemoryMB / minimumDeviceClass)
     /// are treated as "unknown → allow", since we can't prove they will fail.
@@ -164,15 +218,55 @@ public struct TTSLanguage: Sendable, Hashable, Codable, ExpressibleByStringLiter
     public static let greek: Self = "Greek"
 }
 
+/// A voice the runtime selects by `identifier`. Catalog voices also carry the
+/// metadata the model's documentation gives (display name, language, gender,
+/// a one-line description) so an app can build a picker without a lookup
+/// table per model. Equality and hashing use the identifier only: a literal
+/// `"alba"` matches the catalog's annotated `alba`, and cache keys stay stable.
 public struct TTSVoice: Sendable, Hashable, Codable, ExpressibleByStringLiteral {
     public let identifier: String
+    public let displayName: String?
+    public let language: TTSLanguage?
+    public let gender: TTSVoiceGender?
+    public let summary: String?
 
-    public init(_ identifier: String) {
+    public init(
+        _ identifier: String,
+        displayName: String? = nil,
+        language: TTSLanguage? = nil,
+        gender: TTSVoiceGender? = nil,
+        summary: String? = nil
+    ) {
         self.identifier = identifier
+        self.displayName = displayName
+        self.language = language
+        self.gender = gender
+        self.summary = summary
     }
 
     public init(stringLiteral value: StringLiteralType) {
-        self.identifier = value
+        self.init(value)
+    }
+
+    /// `displayName`, or the identifier.
+    public var name: String { displayName ?? identifier }
+
+    public static func == (lhs: Self, rhs: Self) -> Bool { lhs.identifier == rhs.identifier }
+    public func hash(into hasher: inout Hasher) { hasher.combine(identifier) }
+
+    public init(from decoder: Decoder) throws {
+        if let single = try? decoder.singleValueContainer(), let identifier = try? single.decode(String.self) {
+            self.init(identifier)
+            return
+        }
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            try c.decode(String.self, forKey: .identifier),
+            displayName: try c.decodeIfPresent(String.self, forKey: .displayName),
+            language: try c.decodeIfPresent(TTSLanguage.self, forKey: .language),
+            gender: try c.decodeIfPresent(TTSVoiceGender.self, forKey: .gender),
+            summary: try c.decodeIfPresent(String.self, forKey: .summary)
+        )
     }
 
     public static let alba: Self = "alba"

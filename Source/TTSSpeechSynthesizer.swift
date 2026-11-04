@@ -435,7 +435,7 @@ public actor TTSSpeechSynthesizer {
         logger.error("ERROR \(site, privacy: .public): modelID=\(id, privacy: .public) stage=\(s, privacy: .public) underlying=\(description, privacy: .public)")
     }
 
-    private func emit(_ event: TTSDiagnostic) {
+    func emit(_ event: TTSDiagnostic) {
         diagnosticHandler?(event)
         for continuation in eventContinuations.values {
             continuation.yield(event)
@@ -648,7 +648,15 @@ public actor TTSSpeechSynthesizer {
             parameters.topP = topP
         }
 
-        let referenceAudio = try options.referenceAudio.map(Self.loadReferenceAudio)
+        let referenceAudio = try options.referenceAudio.map {
+            try Self.loadReferenceAudio(from: $0, sampleRate: loadedModel.sampleRate)
+        }
+        let resolved = Self.applyControls(
+            options, text: prompt, descriptor: model, to: loadedModel, hasReference: referenceAudio != nil)
+        if !resolved.ignored.isEmpty {
+            emit(.controlsIgnored(modelID: model.id, controls: resolved.ignored))
+        }
+        let resolvedText = resolved.text, resolvedVoice = resolved.voice
 
         if let progressHandler {
             await progressHandler(.init(
@@ -673,9 +681,9 @@ public actor TTSSpeechSynthesizer {
             samples = try await MLX.withError {
                 try await Self.generateSamples(
                     model: loadedModel,
-                    text: prompt,
+                    text: resolvedText,
                     language: options.language?.identifier,
-                    voice: options.voice?.identifier,
+                    voice: resolvedVoice,
                     referenceAudio: referenceAudio,
                     referenceText: options.referenceText,
                     parameters: parameters
@@ -815,7 +823,15 @@ public actor TTSSpeechSynthesizer {
                 if lifecycle.isShuttingDown { throw CancellationError() }
                 let loadedModel = loadedBox.model
                 let parameters = Self.makeParameters(for: loadedModel, options: capturedOptions)
-                let referenceAudio = try capturedOptions.referenceAudio.map(Self.loadReferenceAudio)
+                let referenceAudio = try capturedOptions.referenceAudio.map {
+                    try Self.loadReferenceAudio(from: $0, sampleRate: loadedModel.sampleRate)
+                }
+                let resolved = Self.applyControls(
+                    capturedOptions, text: capturedPrompt, descriptor: model, to: loadedModel,
+                    hasReference: referenceAudio != nil)
+                if !resolved.ignored.isEmpty {
+                    await synthesizer.emit(.controlsIgnored(modelID: model.id, controls: resolved.ignored))
+                }
                 let sampleRate = loadedModel.sampleRate
                 progressHandler?(.init(
                     stage: .generatingAudio,
@@ -835,8 +851,8 @@ public actor TTSSpeechSynthesizer {
                 // generatePCMBufferStream drops its @MainActor isolation.
                 let upstream = try await Self.makePCMBufferStream(
                     model: loadedModel,
-                    text: capturedPrompt,
-                    voice: capturedOptions.voice?.identifier,
+                    text: resolved.text,
+                    voice: resolved.voice,
                     referenceAudio: referenceAudio,
                     referenceText: capturedOptions.referenceText,
                     language: capturedOptions.language?.identifier,
@@ -1878,7 +1894,8 @@ public actor TTSSpeechSynthesizer {
         let chunks = chunker.chunks(for: initialText)
         guard let firstChunk = chunks.first else { throw TTSError.emptyText }
 
-        let key = cache.key(modelID: model.id, voice: options.voice, text: firstChunk)
+        let key = cache.key(payload: TTSAudioCache.standardPayload(
+            modelID: model.id, voice: options.voice, text: firstChunk) + options.controlsCacheSuffix)
         if let cachedURL = await cache.cachedURL(forKey: key) {
             return cachedURL
         }
@@ -2098,8 +2115,12 @@ public actor TTSSpeechSynthesizer {
 }
 
 private extension TTSSpeechSynthesizer {
-    static func loadReferenceAudio(from url: URL) throws -> MLXArray {
-        let (_, audio) = try loadAudioArray(from: url)
+    /// Runtime models receive a bare sample array and assume it is at their own
+    /// rate (Chatterbox conditions at 24 kHz, Ming at 44.1 kHz, MOSS at 48 kHz),
+    /// so the clip is resampled to `sampleRate` here; passing it through at its
+    /// native rate shifted the pitch and tempo of the cloned voice.
+    static func loadReferenceAudio(from url: URL, sampleRate: Int) throws -> MLXArray {
+        let (_, audio) = try loadAudioArray(from: url, sampleRate: sampleRate)
         return audio
     }
 

@@ -8,6 +8,7 @@ Small Swift package for text-to-speech with Hugging Face models running through 
 
 - Simple actor-based API
 - Streaming playback API for long-form speech
+- One voice, feature and control surface across every model: `TTSModelDescriptor.features`, annotated `TTSVoice`s, `TTSSynthesisOptions.instruction` / `emotion` / `speed` and canonical `TTSEventTag` markers, translated per loader
 - Natural prosody: punctuation-aware chunking, model-tuned sampling, breath-like pauses and click-free seams between chunks (`TTSChunkJoin`)
 - Built-in catalog of supported MLX TTS models
 - Hugging Face model search
@@ -70,7 +71,7 @@ Quick picking guide:
 Current upstream note:
 
 - As of `0.10.0`, `TTSMLX` runs on upstream `Blaizzy/mlx-audio-swift` v0.1.8 through the thin fork `fil-technology/mlx-audio-swift @ 0.1.8-tts.4` (38 TTS families; the fork only adds `TTSModelRegistry`, MOSS-TTS-Nano bundled voices and the regular-Chatterbox text-pipeline fixes), and on `fil-technology/mlx-swift @ 0.33.100` (upstream 0.33.0 whose `mlx` C++ submodule points at `mlx @ v0.33.0-tts-bg-safe.1`, the iOS background-safe Metal patch). `mlx-swift-lm` is no longer a dependency. See `Docs/mlx-swift-bg-safe-fork.md` and `Docs/model-support.md`.
-- The catalog lists a model with a descriptor (selectable by apps) only once TTSMLX has synthesized with it end to end; the 0.1.8 runtime routes to 38 families, and the ones not yet validated here (Higgs v3, OmniVoice, Voxtral, LongCat, Ming, Dia, ...) are listed discovery-only with the reason in their `runtimeNotes`. `Docs/model-support.md` has the full tts-bench leaderboard matrix.
+- The catalog lists a model with a descriptor (selectable by apps) only once TTSMLX has synthesized with it end to end; the 0.1.8 runtime routes to 38 families, and the ones not yet validated here (Higgs v3, OmniVoice, Voxtral, LongCat, Dia, ...) are listed discovery-only with the reason in their `runtimeNotes`. `Docs/model-support.md` has the full tts-bench leaderboard matrix.
 - `Kitten TTS` stays discovery-only: the runtime's loader needs `voices.safetensors`, and the mlx-community checkpoint ships `voices.npz`.
 - `MOSS-TTS-Nano` runs on upstream's port plus the fork's bundled voices; reference-audio cloning now works through upstream's codec encoder.
 - Upstream additions outside the TTS wrapper scope, such as `Cohere Transcribe ASR`, `Qwen2-Audio-7B-Instruct`, `Moshi STS`, and Distil-Whisper documentation updates, are not exposed through `TTSMLX` yet.
@@ -173,6 +174,39 @@ In Xcode: **File ▸ Packages ▸ Reset Package Caches**, then **Update to Lates
 Package Versions**. Confirm your `Package.resolved` then shows
 `fil-technology/mlx-audio-swift` at `0.1.8-tts.4` and `mlx-swift` at
 `0.33.100` from `fil-technology/mlx-swift`.
+
+## Voices, features and controls
+
+Every descriptor answers the same questions, whichever loader is behind it:
+
+```swift
+let model = TTSMLX.modelCatalog.first { $0.id == "mlx-community/Ming-3.0-tts-0.5B-bf16" }!.descriptor!
+
+model.sortedFeatures            // [.streaming, .builtInVoices, .voiceCloning, .multilingual, .eventTags, .instruction, .emotion, .speed, .voiceDesign]
+model.capabilities.sampleRate   // 44_100
+model.supportedEventTags        // [.laugh, .sigh, .cough, .breath, .hesitation]
+for voice in model.suggestedVoices {
+    voice.name       // "George"
+    voice.language   // .english
+    voice.gender     // .male
+    voice.summary    // "British. Audiobooks and formal announcements"
+}
+```
+
+The options are uniform too. Set what you want; the synthesizer translates it into the loaded model's own knobs (Ming's structured instruction, Qwen3 CustomVoice's `"speaker, instruction"` voice string, Chatterbox's exaggeration scalar, Kokoro's rate factor) and reports anything the model cannot honour through `TTSDiagnostic.controlsIgnored` rather than failing:
+
+```swift
+let text = "That's the news. \(TTSEventTag.laugh) Back to you."   // "[laugh]" → "[Laughter]" on Ming, "<laugh>" on Orpheus, dropped elsewhere
+let options = TTSSynthesisOptions(
+    voice: "UK_George",
+    instruction: nil,            // free-form delivery, e.g. "warm, unhurried storytelling voice"
+    emotion: .happy,             // TTSEmotion
+    speed: .slow                 // TTSSpeed
+)
+let audio = try await synthesizer.synthesize(text, using: model, options: options)
+```
+
+`model.features.contains(.emotion)` tells you up front whether a knob will be used. `Docs/model-previews.md` lists the features, voices and languages of every entry with a clip per voice.
 
 ## Streaming
 

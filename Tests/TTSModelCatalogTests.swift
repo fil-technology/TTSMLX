@@ -73,6 +73,21 @@ struct TTSModelCatalogTests {
             == ["mlx-community/S3TokenizerV2"])
     }
 
+    @Test("Ming-3.0-TTS 0.5B has built-in voices, 7 languages and cloning")
+    func mingEntry() throws {
+        let e = try #require(entry("mlx-community/Ming-3.0-tts-0.5B-bf16"))
+        let descriptor = try #require(e.descriptor)
+        #expect(e.supportStage == .implemented)
+        #expect(descriptor.capabilities.supportsReferenceAudio)
+        #expect(descriptor.suggestedVoices.first == "UK_George")
+        #expect(descriptor.supportedLanguages.count == 7)
+        #expect(descriptor.supportedLanguages.contains(.korean))
+        let files = try #require(descriptor.files)
+        #expect(files.contains("campplus.safetensors"))
+        // The mlx-community checkpoint bundles its CAM++ speaker encoder.
+        #expect(TTSBackgroundModelDownloader.companionRepositories(for: descriptor).isEmpty)
+    }
+
     @Test("Soprano-80M-4bit is a tiny, fast English entry")
     func sopranoFastVariant() throws {
         let e = try #require(entry("mlx-community/Soprano-80M-4bit"))
