@@ -1,6 +1,6 @@
 import AVFoundation
 import Foundation
-import MLXLMCommon
+import MLXAudioCore
 import Testing
 @testable import TTSMLX
 
@@ -93,7 +93,7 @@ struct TTSChunkJoinTests {
 
     @Test("profiles no longer override the model's sampling settings")
     func profilesRespectModelSampling() {
-        var params = MLXLMCommon.GenerateParameters(maxTokens: 1200, temperature: 0.6, topP: 0.8, repetitionPenalty: 1.3)
+        var params = GenerateParameters(maxTokens: 1200, temperature: 0.6, topP: 0.8, repetitionPenalty: 1.3)
         TTSGenerationProfile.balanced.apply(to: &params)
         #expect(params.temperature == 0.6)
         #expect(params.topP == 0.8)
@@ -104,7 +104,7 @@ struct TTSChunkJoinTests {
         #expect(params.temperature == 0.6)
         #expect(params.topP == 0.8)
         #expect(params.maxTokens == 2048)
-        var big = MLXLMCommon.GenerateParameters(maxTokens: 4096, temperature: 0.9)
+        var big = GenerateParameters(maxTokens: 4096, temperature: 0.9)
         TTSGenerationProfile.highQuality.apply(to: &big)
         #expect(big.maxTokens == 4096)
     }

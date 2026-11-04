@@ -1,84 +1,78 @@
 # Model support matrix
 
 Status of every model on the [tts-bench](https://github.com/5uck1ess/tts-bench)
-leaderboard (Elo ranking as of 2026-11-03) against what TTSMLX can run today,
-what it could run after the planned runtime migration, and what is blocked and
-why. Verified 2026-11-03 from the Hugging Face model cards, the upstream
-`Blaizzy/mlx-audio-swift` v0.1.8 source tree, Python `mlx-audio` v0.6.4 and
-the `fil-technology/mlx-audio-swift` fork TTSMLX is pinned to (`0.1.7-tts.1`).
+leaderboard (Elo ranking as of 2026-11-03) against what TTSMLX can run, and
+what is blocked and why. Verified 2026-11-03 from the Hugging Face model
+cards, the upstream `Blaizzy/mlx-audio-swift` v0.1.8 source tree and Python
+`mlx-audio` v0.6.4; statuses updated 2026-11-04 after the runtime migration
+shipped in TTSMLX 0.10.0.
 
 ## The one fact that decides most rows
 
-TTSMLX runs models through `fil-technology/mlx-audio-swift`, a fork cut from
-upstream **v0.1.3** (July 2026) plus 11 commits (Mimi/PocketTTS KV-cache reset,
-companion-repository downloads, MOSS-TTS-Nano, `TTSModelRegistry`). Upstream
-has since shipped v0.1.6–v0.1.8 (20 Oct – 2 Nov 2026), adding **about 25 TTS
-families, 9 codecs and a G2P target** — 421 commits the fork does not have.
-Upstream also dropped `MLXLMCommon`/`mlx-swift-lm` and now requires
-`mlx-swift ≥ 0.33.0`, whereas TTSMLX pins a `0.31.5` fork of `mlx-swift` that
-carries the iOS background-Metal crash fix (see
-`Docs/mlx-swift-bg-safe-fork.md`).
-
-So "add support for as much as possible" is **not** 25 Swift ports. It is one
-runtime migration (tracked below as **M**), after which most of the top of the
-leaderboard loads through the same `TTSSpeechSynthesizer` API. Re-implementing
-those families inside the old fork would duplicate work upstream has already
-done and tested.
+TTSMLX runs models through `fil-technology/mlx-audio-swift`. Until 0.9.1 that
+fork was cut from upstream **v0.1.3** plus 11 commits, 421 commits behind an
+upstream that had meanwhile added about 25 TTS families, 9 codecs and a G2P
+target. **Since 0.10.0 the fork is cut from upstream v0.1.8** (`0.1.8-tts.3`)
+and adds only `TTSModelRegistry`, one model-type alias and the MOSS-TTS-Nano
+voice pack, so every family upstream implements loads through the same
+`TTSSpeechSynthesizer` API. What remains per model is validation (an
+end-to-end run, memory and throughput on device) and licence review, not
+porting.
 
 Legend for the **Status** column:
 
 | Code | Meaning |
 |---|---|
-| ✅ | Runs with TTSMLX today (catalog entry exists or the family loads) |
-| **M** | Implemented upstream in mlx-audio-swift v0.1.8; available after the runtime migration, no model code to write |
-| **M+** | As M, plus a small TTSMLX-side addition (catalog entry, prompt format, download rule) |
-| ⛔ | Blocked for reasons that migration does not fix (stated per row) |
+| ✅ | Catalog entry with a descriptor: TTSMLX has synthesized with it end to end (`.implemented`; `.validated` once measured on device) |
+| ✅ (runtime) | The runtime loads the family, but no catalog entry yet (licence, size or no suitable weights) |
+| **D** | Discovery-only catalog entry: the runtime routes to it, TTSMLX has not synthesized with it yet; `runtimeNotes` says why |
+| ⛔ | Blocked for reasons the runtime does not fix (stated per row) |
 
 ## Leaderboard
 
 | # | Model | Elo | Status | Licence (commercial?) | Architecture · codec · size · SR | Features we can expose | Why not today / what is missing |
 |---|---|---|---|---|---|---|---|
-| 1 | Kokoro 82M | 1341 | **M** | Apache-2.0 (yes) | StyleTTS2-derived, non-autoregressive, ISTFTNet · 82M · 24 kHz | 54 preset voices, 8 languages, fast | Upstream `StyleTTS2/Kokoro` shares the stack with our KittenTTS but needs the multilingual G2P target (`MLXAudioG2P`) the fork lacks. MLX weights: `mlx-community/Kokoro-82M-{bf16,4,6,8bit}`. |
-| 2 | Chatterbox | 1317 | **M** | MIT (yes) | T3 Llama ~0.5B over S3 tokens → S3Gen flow matching + HiFT-GAN · 24 kHz | Cloning from a wav, exaggeration/CFG knobs, 23 languages (v3) | Needs S3TokenizerV2, S3Gen, HiFT, CAMPPlus and the voice encoder — all present upstream, none in the fork. |
-| 3 | Chatterbox Turbo | 1257 | **M** | MIT (yes) | GPT-2-medium T3 ~350M + one-step distilled S3Gen · 24 kHz · English | Cloning, bundled default voice, `[laugh]` `[cough]` tags | Same stack as Chatterbox. |
-| 4 | Higgs Audio v3 TTS | 1196 | **M** ⚠️ | Boson research / **non-commercial** | ~4B Qwen3-style AR over Higgs tokenizer (8 codebooks @ 25 fps) · 24 kHz | 100+ languages, cloning, 21 emotion + style/SFX tags, streaming | Runtime-wise fine after M (upstream `HiggsAudio3TTS` + Higgs codec). Licence forbids commercial use; list it as research-only. ~8 GB bf16, no mlx-community quant yet. |
+| 1 | Kokoro 82M | 1341 | ✅ (0.10.0) | Apache-2.0 (yes) | StyleTTS2-derived, non-autoregressive, ISTFTNet · 82M · 24 kHz | 54 preset voices, 8 languages, fast | Catalog entry `mlx-community/Kokoro-82M-bf16` (`.implemented`, all 54 voices listed); synthesizes end to end on macOS, 1.5 s to first audio. English G2P weights come from `beshkenadze/kitten-tts-g2p` (9 MB, prefetched as a companion repo); other languages fetch an IPA lexicon on first use. |
+| 2 | Chatterbox | 1317 | **D** | MIT (yes) | T3 Llama ~0.5B over S3 tokens → S3Gen flow matching + HiFT-GAN · 24 kHz | Cloning from a wav, exaggeration/CFG knobs, 23 languages (v3) | Runtime 0.1.8-tts.3 routes to it (`chatterbox` loader + `mlx-community/S3TokenizerV2`). Discovery-only entry `mlx-community/chatterbox-fp16`; not validated here because the 3 GB download did not fit this machine's disk during the 0.10.0 cycle. |
+| 3 | Chatterbox Turbo | 1257 | **D** | MIT (yes) | GPT-2-medium T3 ~350M + one-step distilled S3Gen · 24 kHz · English | Cloning, bundled default voice, `[laugh]` `[cough]` tags | Same stack; discovery-only entry `mlx-community/chatterbox-turbo-fp16`. Validate the 4-bit build first (`chatterbox-turbo-4bit`, the most downloaded). |
+| 4 | Higgs Audio v3 TTS | 1196 | **D** ⚠️ | Boson research / **non-commercial** | ~4B Qwen3-style AR over Higgs tokenizer (8 codebooks @ 25 fps) · 24 kHz | 100+ languages, cloning, 21 emotion + style/SFX tags, streaming | Runtime routes to it; discovery-only entry `bosonai/higgs-tts-3-4b` flagged research-only. Licence forbids commercial use; ~8 GB bf16, no mlx-community quant yet. |
 | 5 | Supertonic 3 | 1192 | ⛔ | OpenRAIL-M weights, MIT code (use-restricted) | ONNX-only: text encoder + duration predictor + flow-matching estimator + vocoder · ~99M · 44.1 kHz | 31 languages, preset voices, 10 tags | No MLX implementation anywhere (Python or Swift). Weights exist only as ONNX graphs plus a third-party JSON/NPZ dump; the latent-flow + speech-autoencoder pipeline would be a from-scratch port with a weight conversion. Candidate for a later dedicated effort, not this cycle. |
-| 6 | Pocket-TTS v4 | 1172 | ✅ → **M+** | CC-BY-4.0 weights (yes) | ~100M transformer → Mimi · 24 kHz | 7 languages, 26 voices, cloning, ~200 ms streaming | Catalog entry `mlx-community/pocket-tts` runs today. The fork predates upstream's Mimi context-window and `resetState` fixes (#357, #368); M picks them up. |
+| 6 | Pocket-TTS v4 | 1172 | ✅ | CC-BY-4.0 weights (yes) | ~100M transformer → Mimi · 24 kHz | 7 languages, 26 voices, cloning, ~200 ms streaming | Catalog entry `mlx-community/pocket-tts`; re-validated on the 0.1.8 runtime (0.8 s to first audio), which includes upstream's Mimi context-window and `resetState` fixes (#357, #368). |
 | 7 | Soprano 1.1 80M | 1155 | ✅ (0.9.1) | Apache-2.0 (yes) | Qwen3-arch LM 80M + custom decoder · 32 kHz · English | One voice, streaming | Catalog entry `mlx-community/Soprano-1.1-80M-bf16` (`.implemented`); synthesizes end to end on macOS, on-device validation pending. |
-| 8 | OmniVoice | 1148 | **M** ⚠️ | Code Apache-2.0, weights **CC-BY-NC** | Bidirectional diffusion-LM over Qwen3-0.6B, 9 RVQ codebooks via Higgs v2 codec · ~1B · 24 kHz | 600+ languages, cloning, voice design, `[laughter]` | Upstream has it; needs Higgs v2 codec + diffusion sampler. Weights are non-commercial. |
+| 8 | OmniVoice | 1148 | **D** ⚠️ | Code Apache-2.0, weights **CC-BY-NC** | Bidirectional diffusion-LM over Qwen3-0.6B, 9 RVQ codebooks via Higgs v2 codec · ~1B · 24 kHz | 600+ languages, cloning, voice design, `[laughter]` | Runtime routes to it; discovery-only entry `mlx-community/OmniVoice` flagged research-only (weights are non-commercial). |
 | 9 | Orpheus-TTS 3B | 1146 | ✅ | Apache-2.0 (yes, gated) | Llama-3B AR over SNAC · 24 kHz · English | 8 voices, `<laugh>` `<sigh>` … tags, streaming | Catalog entry `mlx-community/orpheus-3b-0.1-ft-bf16`. Tags pass through unchanged today; see "Features to expose" below. |
-| 10 | Voxtral 4B TTS | 1122 | **M** ⚠️ | **CC-BY-NC-4.0** | Ministral-3B backbone + Voxtral audio decoder · ~4B · 24 kHz | 9 languages, 20 preset voices, cloning, streaming | Upstream `VoxtralTTS` (streaming landed on `main` after v0.1.8). Non-commercial. |
+| 10 | Voxtral 4B TTS | 1122 | **D** ⚠️ | **CC-BY-NC-4.0** | Ministral-3B backbone + Voxtral audio decoder · ~4B · 24 kHz | 9 languages, 20 preset voices, cloning, streaming | Runtime routes to it; discovery-only entry `mlx-community/Voxtral-4B-TTS-2603-mlx-4bit` flagged research-only. Upstream's streaming fix (#370) landed after v0.1.8. |
 | 11 | dots.tts (soar) | 1121 | ⛔ | Apache-2.0 (yes) | Qwen2.5-1.5B + AR flow-matching DiT head over a 48 kHz AudioVAE · 2B | 24 languages, cloning | No implementation in Python mlx-audio or upstream Swift; third-party `dots-tts-mlx` weights have no runtime. Architecturally near VoxCPM2/Ming (which upstream has), so a port is plausible later. |
-| 12 | LongCat-AudioDiT 3.5B | 1112 | **M** | MIT (yes) | Non-AR DiT in Wav-VAE latent space, UMT5 text encoder · 3.8B · 24 kHz | zh + en, cloning, ≤ 30 s utterances | Upstream `LongCatAudioDiT` (README lists the 1B; 3.5B weights exist as `mlx-community/LongCat-AudioDiT-3.5B-*`, needs validation). Non-streaming by design. |
-| 13 | Phonon 31m | 1110 | **M+** | Apache-2.0 (yes) | Pocket-TTS derivative: flow-matching transformer → Mimi · 31M · 24 kHz | ~100 voices (`gradium/phonon-voices`), streaming | Upstream added Phonon conditioning to `PocketTTS` in v0.1.6 (PR #288). Our fork's PocketTTS predates it. No mlx-community weights; upstream loads the `gradium` repo directly, so a download rule is needed. |
-| 14 | Ming-3.0-TTS 0.5B | 1100 | **M** | MIT (yes) | Qwen2.5-0.5B + flow-matching DiT head + audio VAE, CAM++ · 1.5B · 44.1 kHz | 7 languages, 100+ voices, cloning, voice design, emotion/speed/pitch, 14 tags | Upstream `Ming` (dense). Needs the Ming flow + VAE + CAMPPlus stack. |
-| 15 | LFM2.5-Audio 1.5B | 1094 | ✅ (runtime) → **M+** | LFM Open License v1.0 (read before shipping) | LFM2-1.2B hybrid + RQ-transformer → 8 Mimi-compatible codebooks → ISTFT detokenizer · 24 kHz | 4 voices via system prompt, token streaming | The fork already contains `STS/LFMAudio`; TTSMLX does not route to it because it is not a `SpeechGenerationModel`. Needs an adapter in `TTSSpeechSynthesizer` — independent of M. |
-| 16 | Maya1 | 1092 | **M+** (maybe ✅) | Apache-2.0 (yes) | Llama-style 3.3B AR over SNAC (7 tokens/frame) · 24 kHz | Natural-language voice description, 20 emotion tags, streaming | Same Llama + SNAC path as Orpheus. Needs the `<description="…">` prompt format and a catalog entry (`mlx-community/maya1-4bit`). Unverified on the fork; validate before listing. |
-| 17 | Sesame CSM-1B | 1092 | **M+** (maybe ✅) | Apache-2.0 (yes, gated) | Llama-1B backbone + small AR audio decoder over Mimi · 24 kHz | Speaker id, context turns (cloning via a prior turn) | Our Marvis family is CSM-based and upstream routes `csm`/`sesame` to it. The fork has no `csm-1b` mapping; validate the load, then add a catalog entry. |
+| 12 | LongCat-AudioDiT 3.5B | 1112 | **D** | MIT (yes) | Non-AR DiT in Wav-VAE latent space, UMT5 text encoder · 3.8B · 24 kHz | zh + en, cloning, ≤ 30 s utterances | Runtime routes to it; the 1B has a discovery-only entry, the 3.5B (`mlx-community/LongCat-AudioDiT-3.5B-*`) loads through the same loader. Non-streaming by design. |
+| 13 | Phonon 31m | 1110 | ✅ (0.10.0) | Apache-2.0 (yes) | Pocket-TTS derivative: flow-matching transformer → Mimi · 31M · 24 kHz | ~100 voices (`gradium/phonon-voices`), streaming | Catalog entry `gradium/phonon-31m-en` (`.implemented`); synthesizes end to end on macOS, 0.8 s to first audio. Needed a fork fix: the checkpoint's `model_type` is `gradium_phonon_tts`, which upstream's loader did not map. |
+| 14 | Ming-3.0-TTS 0.5B | 1100 | **D** | MIT (yes) | Qwen2.5-0.5B + flow-matching DiT head + audio VAE, CAM++ · 1.5B · 44.1 kHz | 7 languages, 100+ voices, cloning, voice design, emotion/speed/pitch, 14 tags | Runtime routes to it; discovery-only entry `mlx-community/Ming-3.0-tts-0.5B-bf16` (3 GB, not validated here). |
+| 15 | LFM2.5-Audio 1.5B | 1094 | ⛔ (for now) | LFM Open License v1.0 (read before shipping) | LFM2-1.2B hybrid + RQ-transformer → 8 Mimi-compatible codebooks → ISTFT detokenizer · 24 kHz | 4 voices via system prompt, token streaming | Upstream keeps it under `MLXAudioSTS`, not as a `SpeechGenerationModel`; TTSMLX would need an adapter in `TTSSpeechSynthesizer`. |
+| 16 | Maya1 | 1092 | **D** | Apache-2.0 (yes) | Llama-style 3.3B AR over SNAC (7 tokens/frame) · 24 kHz | Natural-language voice description, 20 emotion tags, streaming | Discovery-only entry `mlx-community/maya1-4bit` (Llama + SNAC path). Needs the `<description="…">` prompt format wired through the voice option, then validation. |
+| 17 | Sesame CSM-1B | 1092 | **D** | Apache-2.0 (yes, gated) | Llama-1B backbone + small AR audio decoder over Mimi · 24 kHz | Speaker id, context turns (cloning via a prior turn) | Discovery-only entry `mlx-community/csm-1b-8bit`; routes to the Marvis/CSM loader. Validate the load and speaker-id mapping, then add a descriptor. |
 | 18 | MiraTTS | 1077 | ⛔ | **CC-BY-NC-SA-4.0** on HF (bench says MIT; HF wins) | Qwen2 0.5B + FastBiCodec + FlashSR upsampler · 48 kHz | en + zh, cloning | Non-commercial, LMDeploy-only runtime, no MLX port anywhere; needs a BiCodec variant and FlashSR. |
-| 19 | OuteTTS 1.0 1B | 1070 | **M** ⚠️ | **CC-BY-NC-SA-4.0** + Llama 3.2 | Llama-3.2-1B AR over IBM DAC-speech (2 codebooks) · 24 kHz | 12+ languages, default speaker + cloning profiles | Upstream `OuteTTS` + Descript codec. Non-commercial. |
-| 20 | Phonon 40m | 1055 | **M+** ⚠️ | **CC-BY-NC-4.0** (gated) | As #13 · 40M | As #13 | As #13; non-commercial variant. |
-| 21 | LongCat-AudioDiT 1B | 1047 | **M** | MIT (yes) | As #12 · 1.4B | As #12 | Upstream's primary LongCat target. |
+| 19 | OuteTTS 1.0 1B | 1070 | **D** ⚠️ | **CC-BY-NC-SA-4.0** + Llama 3.2 | Llama-3.2-1B AR over IBM DAC-speech (2 codebooks) · 24 kHz | 12+ languages, default speaker + cloning profiles | Discovery-only entry `mlx-community/Llama-OuteTTS-1.0-1B-fp16` flagged research-only (non-commercial). |
+| 20 | Phonon 40m | 1055 | ✅ (runtime) ⚠️ | **CC-BY-NC-4.0** (gated) | As #13 · 40M | As #13 | Same loader as #13; no catalog entry because the weights are gated and non-commercial. |
+| 21 | LongCat-AudioDiT 1B | 1047 | **D** | MIT (yes) | As #12 · 1.4B | As #12 | Discovery-only entry `mlx-community/LongCat-AudioDiT-1B-bf16` (5.7 GB bf16; validate the 4-bit build on phones). |
 | 22 | Vaniq-Edge | 1027 | ⛔ | MIT (yes) | Compressed VITS with built-in waveform decoder · 8.9M · 24 kHz | One voice, speed knob | No MLX implementation; needs a VITS port (posterior/flow + HiFi-GAN-style decoder). Tiny; a reasonable later port alongside MeloTTS. |
-| 23 | Ming-3.0-TTS tiny | 1023 | **M** | MIT (yes) | Ling V3 MoE ~8B total / ~1.3B active + DiT head · 44.1 kHz | As #14 plus podcast dialogue | Upstream `MingTiny`. Memory-heavy for phones (MoE weights are all resident). |
+| 23 | Ming-3.0-TTS tiny | 1023 | ✅ (runtime) | MIT (yes) | Ling V3 MoE ~8B total / ~1.3B active + DiT head · 44.1 kHz | As #14 plus podcast dialogue | Runtime routes to it (`lingv3_tts`); no catalog entry yet, memory-heavy for phones (MoE weights are all resident). |
 | 24 | LFM3-Audio 2B | 1021 | ⛔ (for now) | LFM Open License v1.0 | LFM3-1.7B + LiquidCodec (12 tokens / 80 ms) · 24 kHz | 18 languages, male/female via system prompt, streaming | Python `sts/lfm3_audio` exists; **no Swift implementation** upstream yet (README covers LFM2.5 only). Needs the LiquidCodec decoder in Swift. |
 | 25 | DramaBox | 999 | ⛔ | LTX-2 Community (non-commercial per bench) | 3.3B audio-only DiT + VAE + Gemma-3-12B text encoder · 48 kHz | Prompt-described voice, cloning | ~24 GB working set; impractical on device regardless of runtime. Not in upstream Swift. |
 | 26 | KittenTTS 2 | 998 | ⛔ (for now) | Stellon Labs Community (free up to $1M revenue) | 1.7B Qwen3-arch LM (ternary-packed) → S3 tokens → decoder · 24 kHz | 16 languages, 115 voices, cloning, emotion tags (beta) | Neither Python nor Swift mlx-audio has it; needs a ternary weight unpacker and the S3-token decoder (upstream S3Gen may fit; unverified). |
-| 27 | VibeVoice Realtime 0.5B | 994 | **M** | MIT (yes) | Qwen2.5-0.5B + 40M diffusion head + σ-VAE tokenizer · 24 kHz | 25 preset voices, streaming | Upstream `VibeVoice`. |
+| 27 | VibeVoice Realtime 0.5B | 994 | **D** | MIT (yes) | Qwen2.5-0.5B + 40M diffusion head + σ-VAE tokenizer · 24 kHz | 25 preset voices, streaming | Discovery-only entry `mlx-community/VibeVoice-Realtime-0.5B-8bit`. |
 | 28 | Inflect-Micro v2 | 993 | ⛔ | Apache-2.0 (yes) | Compressed VITS · 9.4M | One voice, speed/variation | VITS port needed (see #22). |
 | 29 | Hojo-TTS-Light 40M | 992 | ⛔ | Apache-2.0 (yes) | ONNX three-stage token LM over a 50 Hz codec · ~80M | zh + en, 15 voices | ONNX-only release; no MLX port anywhere. |
-| 30 | KittenTTS Nano 0.8 | 990 | ✅ | Apache-2.0 (yes) | StyleTTS2 / ISTFTNet · 15M · 24 kHz | 8 voices | Catalog entry `mlx-community/kitten-tts-mini-0.8`; nano/micro variants load through the same family. |
-| 31 | Audio8 TTS 0.6B | 973 | **M** | Apache-2.0 (yes) | Dual-AR + bundled 44.1 kHz 10-codebook codec | 11 languages, cloning | Upstream `Audio8`. |
+| 30 | KittenTTS Nano 0.8 | 990 | ⛔ (checkpoint) | Apache-2.0 (yes) | StyleTTS2 / ISTFTNet · 15M · 24 kHz | 8 voices | Entry `mlx-community/kitten-tts-mini-0.8` stays discovery-only: the loader requires `voices.safetensors` and the mlx-community checkpoint ships only `voices.npz`, which upstream rejects by design ("convert with scripts/convert_voices_npz.py"). Needs a converted voices file. |
+| 31 | Audio8 TTS 0.6B | 973 | **D** | Apache-2.0 (yes) | Dual-AR + bundled 44.1 kHz 10-codebook codec | 11 languages, cloning | Discovery-only entry `mlx-community/Audio8-TTS-Preview-0.6b-bf16`. |
 | 32 | Magpie-TTS 357M | 973 | ⛔ | NVIDIA Open Model License (commercial OK, gated) | Encoder-decoder + local transformer over NanoCodec · 22.05 kHz | 12 languages, 5 voices | Needs NanoCodec; no mlx-audio port. Third-party MLX weights only. |
 | 33 | Inflect-Nano v2 | 966 | ⛔ | Apache-2.0 | VITS · 4M | As #28 | VITS port needed. |
 | 34 | StyleTTS 2 (generic) | 957 | ⛔ | MIT code, voice-use conditions | Style diffusion + PL-BERT + iSTFTNet · ~148M | Cloning via reference style | Upstream has the StyleTTS2 stack only as used by Kokoro/Kitten; the style-diffusion sampler and PL-BERT are missing. |
-| 35 | Miso TTS 8B | 954 | **M+** (maybe) | "modified MIT" (terms unverified) | CSM-style Llama-8B + 300M decoder over Mimi · 24 kHz | Continuation cloning | Routes to the Marvis/CSM path upstream; 8B is too large for most devices. |
-| 36 | VoxCPM2 2B | 948 | **M** | Apache-2.0 (yes) | MiniCPM-4 + LocDiT local diffusion + AudioVAE v2 · 48 kHz | 30 languages, cloning, voice design, streaming | Upstream `VoxCPM2`. |
+| 35 | Miso TTS 8B | 954 | ✅ (runtime, maybe) | "modified MIT" (terms unverified) | CSM-style Llama-8B + 300M decoder over Mimi · 24 kHz | Continuation cloning | Routes to the Marvis/CSM path upstream; 8B is too large for most devices. |
+| 36 | VoxCPM2 2B | 948 | **D** | Apache-2.0 (yes) | MiniCPM-4 + LocDiT local diffusion + AudioVAE v2 · 48 kHz | 30 languages, cloning, voice design, streaming | Discovery-only entry `mlx-community/VoxCPM2-4bit`. |
 | 37 | Parler-TTS Mini v1 | 944 | ⛔ | Apache-2.0 (yes) | T5 encoder + AR decoder over DAC · 0.9B · 44.1 kHz | Description prompting, 34 named speakers | No port in current upstream trees. |
 | 38 | Scylla's Band | 938 | ⛔ | Apache-2.0 (yes) | Duration predictor + rectified-flow latent generator + Vocos · ~103M | 14 voices / 7 locales | We have Vocos; the flow latent generator is missing and there is no mlx-audio port. |
 | 39 | Qwen3-TTS 0.6B CustomVoice | 937 | ✅ (0.9.1) | Apache-2.0 (yes) | Qwen3 talker + 12 Hz tokenizer · 24 kHz | 9 built-in speakers (`ryan`, `serena`, …) via the voice option, optional style instruction after a comma, 10 languages, streaming | Catalog entries for 0.6B and 1.7B CustomVoice. Needed a runtime fix (fork 0.1.7-tts.2): the config's `spk_id` table did not decode and speakers were never selected. The 4-bit 0.6B build occasionally emits a near-silent chunk that runs to the token cap; prefer 8-bit once published. |
-| 40 | Dia 1.6B | 927 | **M** | Apache-2.0 (yes) | Encoder-decoder AR over 9 DAC codebooks with CFG · 44.1 kHz | `[S1]`/`[S2]` dialogue, ~20 nonverbal tags, cloning | Upstream `Dia` + Descript codec. |
-| 41 | MeloTTS | 918 | **M** | MIT (yes) | VITS + BERT prosody + HiFi-GAN · ~52M · 44.1 kHz | 5 English accents | Upstream `MeloTTS`. |
+| 40 | Dia 1.6B | 927 | **D** | Apache-2.0 (yes) | Encoder-decoder AR over 9 DAC codebooks with CFG · 44.1 kHz | `[S1]`/`[S2]` dialogue, ~20 nonverbal tags, cloning | Discovery-only entry `mlx-community/Dia-1.6B` (+ `mlx-community/descript-audio-codec-44khz`). |
+| 41 | MeloTTS | 918 | ✅ (0.10.0) | MIT (yes) | VITS + BERT prosody + HiFi-GAN · ~52M · 44.1 kHz | 5 English accents | Catalog entry `mlx-community/MeloTTS-English-MLX` (`.implemented`, 5 accents); synthesizes end to end on macOS, 0.5 s to first audio. Frontend resources (g2p_en, NLTK) come from GitHub at first load. |
 | 42 | SteerTTS | 889 | ⛔ | **CC-BY-NC-4.0** weights | FastPitch-style + bidirectional Mamba + Vocos · 23–41M | 2,825 voices, 12 knobs, 51 tags | Non-commercial; no port; Mamba blocks are not in mlx-audio. |
 | 43 | Coqui XTTS-v2 | 880 | ⛔ | CPML (**non-commercial**) | GPT-2 AR + HiFi-GAN decoder · ~750M · 24 kHz | 17 languages, 6 s cloning | Non-commercial; no port. |
 | 44 | AuroraTTS-100K | 874 | ⛔ | Apache-2.0 | FastPitch-like + DSP harmonic/noise synth · 96K params | One voice | No port; quality below our smallest supported model. |
@@ -90,7 +84,7 @@ Legend for the **Status** column:
 Marvis-250M (`Marvis-AI/marvis-tts-250m-v0.2-MLX-8bit`), VyvoTTS-EN-Beta and
 MOSS-TTS-Nano are supported today but are not on the leaderboard.
 
-## Features to expose per family (after M, on the TTSMLX API)
+## Features to expose per family (on the TTSMLX API)
 
 These are things the models already understand and TTSMLX currently drops or
 does not surface. Each is an additive option on `TTSSynthesisOptions` or a
@@ -111,45 +105,44 @@ catalog capability flag:
   is currently flagged `supportsReferenceAudio: false`).
 - **Preset voices** — Kokoro (54), Voxtral (20), VibeVoice (25), Ming (100+),
   Phonon (~100), Pocket (26). `TTSVoice` lists are per catalog entry.
-- **Languages** — exposed through `supportsLanguageList` today; many M-tier
-  families are multilingual and need their language tables added.
+- **Languages** — exposed through `supportsLanguageList` today; the
+  discovery-only families are mostly multilingual and need their language
+  tables audited when they get descriptors.
 
-## The migration (M), concretely
+## The migration, as shipped in 0.10.0
 
-1. **mlx-swift fork at 0.33.x.** Re-fork `ml-explore/mlx-swift` at the 0.33
-   release upstream mlx-audio-swift v0.1.8 requires, point its `mlx` submodule
-   at `fil-technology/mlx` rebased onto the matching upstream commit with the
-   background-safe `check_error` patch re-applied, and tag it with a version
-   upstream will never publish (e.g. `0.33.1-bgsafe.1`) so the pin can no
-   longer be confused with upstream (closes the URGENT.md follow-up).
-2. **mlx-audio-swift fork rebased on v0.1.8.** Re-apply only what upstream
-   still lacks: companion-repository downloads (check whether upstream's
-   loader covers SNAC / speech_tokenizer side repos now) and
-   `TTSModelRegistry` (or replace its two call sites in TTSMLX with
-   upstream's `TTSModel` loader). MOSS-TTS-Nano and the Mimi reset fixes exist
-   upstream; drop the fork copies.
-3. **TTSMLX adaptation.** Coupling is small: `GenerateParameters` moves from
-   `MLXLMCommon` to the upstream audio package; `TTS.loadModel`,
-   `generatePCMBufferStream` and `MossTTSNanoModel.codebookCount` need their
-   upstream equivalents; `TTSModelRegistry` has two call sites
-   (`TTSModelStore`, `TTSBackgroundModelDownloader`). Public TTSMLX API does
-   not leak any of these types, so consumers are unaffected.
-4. **Catalog + validation.** Add entries for the M-tier models in leaderboard
-   order (Kokoro, Chatterbox, Chatterbox Turbo, Higgs v3 [research-only],
-   Pocket v4, Soprano 1.1, OmniVoice [research-only], Voxtral [research-only],
-   LongCat 1B/3.5B, Phonon, Ming 0.5B, Maya1, CSM-1B, …), each validated
-   end-to-end on device before it moves from `.implemented` to `.validated`.
-   Validation needs roughly 25 GB of free disk for the downloads.
+1. **mlx-swift fork at 0.33.0** — `fil-technology/mlx-swift` tag `0.33.100`
+   (branch `tts-bg-safe-0.33.0`): upstream 0.33.0 with the `mlx` submodule at
+   `fil-technology/mlx` `v0.33.0-tts-bg-safe.1`. The background-safe patch
+   moved from `check_error()` in `eval.cpp` to the command-buffer completion
+   handler in `device.cpp`, where upstream now records Metal errors. The tag
+   is a normal version (prerelease tags are excluded from `from: "0.33.0"`
+   ranges) with a reserved patch number, which closes the URGENT.md re-tag
+   follow-up. Details: `Docs/mlx-swift-bg-safe-fork.md`.
+2. **mlx-audio-swift fork restarted from v0.1.8** — branch `tts/0.1.8`, tag
+   `0.1.8-tts.3`. Kept from the old fork: `TTSModelRegistry` (now a thin view
+   over upstream's loader switch, with a companion-repository table covering
+   SNAC, the MOSS codec, S3TokenizerV2, the Kokoro/Kitten G2P weights, DAC
+   and others) and the MOSS-TTS-Nano voice pack, codebook dial and per-chunk
+   decoding. Dropped because upstream has them: the Mimi reset fix, the
+   Qwen3-TTS CustomVoice speaker fix, the old MOSS port. Added: the
+   `gradium_phonon_tts` model-type alias.
+3. **TTSMLX adaptation** — `GenerateParameters` from `MLXAudioCore`,
+   `MaterializedArray` at the `SpeechGenerationModel` boundary, `mlx-swift-lm`
+   removed, `swift-huggingface` 0.12.0, CI on `macos-26` (Swift 6.3
+   toolchain). Public TTSMLX API unchanged.
+4. **Catalog + validation** — re-validated Pocket-TTS, Soprano, Marvis and
+   MOSS; added Kokoro, Phonon 31M and MeloTTS with descriptors; added
+   discovery-only rows for the rest of the routable leaderboard. Validation
+   on this machine was gated by disk (about 3 GB free at the end of the
+   cycle), which is why Chatterbox, Ming, LongCat and the 3 GB-class models
+   are still **D**.
 
-Estimated effort: steps 1–3 are two to three days of focused work plus CI
-time; step 4 is incremental and gated by disk and device time.
+## Next, in leaderboard order
 
-## Why not port models into the current fork instead
-
-- Every top-10 model that is not already supported needs at least one codec
-  or decoder the fork lacks (S3Gen + HiFT, Higgs tokenizer, Voxtral decoder,
-  Mimi conditioning, G2P). Upstream has all of them, tested.
-- The fork's base is 421 commits behind; every port would be done against
-  APIs upstream has already refactored, doubling the eventual merge cost.
-- The runtime migration also brings upstream's Qwen3-TTS sliding-window,
-  Mimi and streaming fixes to the families we already ship.
+Each needs an end-to-end run plus a descriptor; none needs model code:
+Chatterbox Turbo 4-bit (#3, 1 GB-class), Chatterbox (#2), Ming-3.0-TTS 0.5B
+(#14, 3 GB), LongCat-AudioDiT 1B 4-bit (#21), CSM-1B 8-bit (#17), Maya1 4-bit
+(#16, needs the description prompt), VibeVoice Realtime (#27), VoxCPM2 (#36),
+Dia (#40, needs dialogue-script formatting), Audio8 (#31). Research-only
+(non-commercial weights): Higgs v3, OmniVoice, Voxtral, OuteTTS.

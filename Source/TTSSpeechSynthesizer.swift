@@ -3,7 +3,6 @@ import OSLog
 @preconcurrency import MLX
 import MLXAudioCore
 import MLXAudioTTS
-@preconcurrency import MLXLMCommon
 #if canImport(AVFoundation)
 @preconcurrency import AVFoundation
 #endif
@@ -2113,6 +2112,8 @@ private extension TTSSpeechSynthesizer {
         referenceText: String?,
         parameters: GenerateParameters
     ) async throws -> [Float] {
+        // The runtime takes fully evaluated snapshots at its boundary.
+        let referenceAudio = referenceAudio?.materialized()
         do {
             return try await model.generate(
                 text: text,
@@ -2168,6 +2169,7 @@ private extension TTSSpeechSynthesizer {
         parameters: GenerateParameters,
         streamingInterval: Double
     ) async throws -> AsyncThrowingStream<AVAudioPCMBuffer, Error> {
+        let referenceAudio = referenceAudio?.materialized()
         if let voice {
             return model.generatePCMBufferStream(
                 text: text,

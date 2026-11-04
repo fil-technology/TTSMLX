@@ -58,13 +58,15 @@ for dir in "${candidates[@]}"; do
 
     # The submodule may not be checked out (SwiftPM does not need it to build
     # from the prebuilt sources), so treat a missing file as inconclusive
-    # rather than a failure.
-    eval_cpp="$dir/Source/Cmlx/mlx/mlx/backend/metal/eval.cpp"
-    if [ -f "$eval_cpp" ]; then
-        if grep -q "$PATCH_MARKER" "$eval_cpp"; then
-            echo "  ok: check_error patch present"
+    # rather than a failure. The patch lives in device.cpp from the 0.33 fork
+    # on (Metal's completion handler moved there); eval.cpp held it in 0.31.
+    patched_cpp="$dir/Source/Cmlx/mlx/mlx/backend/metal/device.cpp"
+    [ -f "$patched_cpp" ] || patched_cpp="$dir/Source/Cmlx/mlx/mlx/backend/metal/eval.cpp"
+    if [ -f "$patched_cpp" ]; then
+        if grep -q "$PATCH_MARKER" "$patched_cpp"; then
+            echo "  ok: background-safe patch present in $(basename "$patched_cpp")"
         else
-            echo "  FAIL: $eval_cpp lacks the background-safe patch"
+            echo "  FAIL: $patched_cpp lacks the background-safe patch"
             failed=1
         fi
     fi

@@ -1,7 +1,6 @@
 import Foundation
 import Testing
 @preconcurrency import MLX
-@preconcurrency import MLXLMCommon
 import MLXAudioCore
 import MLXAudioTTS
 @testable import TTSMLX
@@ -92,17 +91,17 @@ final class StubSpeechModel: SpeechGenerationModel, @unchecked Sendable {
     var defaultGenerationParameters: GenerateParameters { fatalError("unused in cache tests") }
 
     func generate(
-        text: String, voice: String?, refAudio: MLXArray?, refText: String?,
+        text: String, voice: String?, refAudio: MaterializedArray?, refText: String?,
         language: String?, generationParameters: GenerateParameters
-    ) async throws -> MLXArray { fatalError("unused in cache tests") }
+    ) async throws -> MaterializedArray { fatalError("unused in cache tests") }
 
     func generateStream(
-        text: String, voice: String?, refAudio: MLXArray?, refText: String?,
+        text: String, voice: String?, refAudio: MaterializedArray?, refText: String?,
         language: String?, generationParameters: GenerateParameters
     ) -> AsyncThrowingStream<AudioGeneration, Error> { fatalError("unused in cache tests") }
 
     func generateStream(
-        text: String, voice: String?, refAudio: MLXArray?, refText: String?,
+        text: String, voice: String?, refAudio: MaterializedArray?, refText: String?,
         language: String?, generationParameters: GenerateParameters, streamingInterval: Double
     ) -> AsyncThrowingStream<AudioGeneration, Error> { fatalError("unused in cache tests") }
 }
