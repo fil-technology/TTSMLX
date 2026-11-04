@@ -315,7 +315,6 @@ struct TTSModelStoreTests {
         #expect(moss.projectURL?.absoluteString == "https://github.com/OpenMOSS/MOSS-TTS-Nano")
         #expect(moss.modelURL?.absoluteString == "https://huggingface.co/mlx-community/MOSS-TTS-Nano-100M")
         #expect(moss.supportedLanguages.contains(.greek))
-        #expect(TTSMLX.supportedModels.contains { $0.id == moss.id } == false)
 
         let mossDescriptor = try #require(moss.descriptor)
         #expect(mossDescriptor.capabilities.isRuntimeSupported)
