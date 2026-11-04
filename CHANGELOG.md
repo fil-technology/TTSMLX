@@ -6,6 +6,37 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-11-04
+
+### Added
+- Catalog: `mlx-community/chatterbox-turbo-4bit` (Resemble AI Chatterbox
+  Turbo, #3 on the tts-bench board) as an `.implemented` entry with a
+  descriptor. Validated end to end on macOS on the 0.1.8-tts.3 runtime with
+  the bundled default voice (`conds.safetensors`, voice `default`) and with a
+  48 kHz reference clip through `TTSSynthesisOptions.referenceAudio`; inline
+  event tags (`[laugh]`, `[chuckle]`, `[sigh]`, ...) render. The background
+  downloader plans the 417 MB checkpoint plus the 495 MB
+  `mlx-community/S3TokenizerV2` companion. Replaces the discovery-only
+  `chatterbox-turbo-fp16` row (3 GB; never run here).
+- `TTSModelStore.searchModels` now keeps `chatterbox` repos among the
+  runtime-supported results.
+
+### Notes
+- Chatterbox Turbo is slow in a debug build: the T3 stage runs about
+  12 tokens/s (25 tokens per second of audio) and upstream generates each
+  chunk whole, so the first audio of a chunk arrives after roughly twice the
+  chunk's duration (22 s for a 10 s sentence pair). The catalog entry says so;
+  measure a release build before using it for live narration.
+- Memory: MLX peak active memory was 2.5 GB on macOS for a two-sentence
+  chunk (descriptor `peakMemoryMB: 2_500`, `minimumDeviceClass: .iPhone`, in
+  line with the Qwen3-TTS 0.6B entry). The MLX buffer cache grew to 7 GB
+  (8.5 GB process footprint) with no cap; a 512 MB cap held the footprint at
+  3.2 GB. Pocket-TTS and Soprano under the same runner stay near 1 GB. Apps
+  should cap the MLX cache or call `releaseRuntimeBuffers()` between
+  utterances with this model. On-device measurement is still pending, as for
+  every other `.implemented` entry.
+- Chatterbox (regular, `chatterbox-fp16`, 2.6 GB) stays discovery-only.
+
 ## [0.10.0] - 2026-11-04
 
 Runtime migration: TTSMLX now runs on upstream `Blaizzy/mlx-audio-swift` v0.1.8

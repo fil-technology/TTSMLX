@@ -33,8 +33,8 @@ Legend for the **Status** column:
 | # | Model | Elo | Status | Licence (commercial?) | Architecture · codec · size · SR | Features we can expose | Why not today / what is missing |
 |---|---|---|---|---|---|---|---|
 | 1 | Kokoro 82M | 1341 | ✅ (0.10.0) | Apache-2.0 (yes) | StyleTTS2-derived, non-autoregressive, ISTFTNet · 82M · 24 kHz | 54 preset voices, 8 languages, fast | Catalog entry `mlx-community/Kokoro-82M-bf16` (`.implemented`, all 54 voices listed); synthesizes end to end on macOS, 1.5 s to first audio. English G2P weights come from `beshkenadze/kitten-tts-g2p` (9 MB, prefetched as a companion repo); other languages fetch an IPA lexicon on first use. |
-| 2 | Chatterbox | 1317 | **D** | MIT (yes) | T3 Llama ~0.5B over S3 tokens → S3Gen flow matching + HiFT-GAN · 24 kHz | Cloning from a wav, exaggeration/CFG knobs, 23 languages (v3) | Runtime 0.1.8-tts.3 routes to it (`chatterbox` loader + `mlx-community/S3TokenizerV2`). Discovery-only entry `mlx-community/chatterbox-fp16`; not validated here because the 3 GB download did not fit this machine's disk during the 0.10.0 cycle. |
-| 3 | Chatterbox Turbo | 1257 | **D** | MIT (yes) | GPT-2-medium T3 ~350M + one-step distilled S3Gen · 24 kHz · English | Cloning, bundled default voice, `[laugh]` `[cough]` tags | Same stack; discovery-only entry `mlx-community/chatterbox-turbo-fp16`. Validate the 4-bit build first (`chatterbox-turbo-4bit`, the most downloaded). |
+| 2 | Chatterbox | 1317 | **D** | MIT (yes) | T3 Llama ~0.5B over S3 tokens → S3Gen flow matching + HiFT-GAN · 24 kHz | Cloning from a wav, exaggeration/CFG knobs, 23 languages (v3) | Runtime 0.1.8-tts.3 routes to it (`chatterbox` loader + `mlx-community/S3TokenizerV2`). Discovery-only entry `mlx-community/chatterbox-fp16`; same stack as Chatterbox Turbo 4-bit (validated in 0.10.1) plus exaggeration/CFG knobs and a 10-step S3Gen; not run here yet (2.6 GB download). |
+| 3 | Chatterbox Turbo | 1257 | ✅ (0.10.1) | MIT (yes) | GPT-2-medium T3 ~350M + one-step distilled S3Gen · 24 kHz · English | Cloning, bundled default voice, `[laugh]` `[chuckle]` `[sigh]` `[cough]` `[gasp]` tags | Catalog entry `mlx-community/chatterbox-turbo-4bit` (`.implemented`; 417 MB + 495 MB `S3TokenizerV2` companion). Synthesizes end to end on macOS with the bundled voice and with a 48 kHz reference clip; tags render. Slow in a debug build: T3 runs ~12 tokens/s (25 tokens per second of audio) and the runtime generates each chunk whole, so first audio arrives after about 2x the chunk duration. Memory: MLX peak active 2.5 GB; the buffer cache grows to 7 GB per run unless capped (512 MB cap → 3.2 GB process footprint). fp16 (3 GB) and 8-bit (0.7 GB) builds not run. |
 | 4 | Higgs Audio v3 TTS | 1196 | **D** ⚠️ | Boson research / **non-commercial** | ~4B Qwen3-style AR over Higgs tokenizer (8 codebooks @ 25 fps) · 24 kHz | 100+ languages, cloning, 21 emotion + style/SFX tags, streaming | Runtime routes to it; discovery-only entry `bosonai/higgs-tts-3-4b` flagged research-only. Licence forbids commercial use; ~8 GB bf16, no mlx-community quant yet. |
 | 5 | Supertonic 3 | 1192 | ⛔ | OpenRAIL-M weights, MIT code (use-restricted) | ONNX-only: text encoder + duration predictor + flow-matching estimator + vocoder · ~99M · 44.1 kHz | 31 languages, preset voices, 10 tags | No MLX implementation anywhere (Python or Swift). Weights exist only as ONNX graphs plus a third-party JSON/NPZ dump; the latent-flow + speech-autoencoder pipeline would be a from-scratch port with a weight conversion. Candidate for a later dedicated effort, not this cycle. |
 | 6 | Pocket-TTS v4 | 1172 | ✅ | CC-BY-4.0 weights (yes) | ~100M transformer → Mimi · 24 kHz | 7 languages, 26 voices, cloning, ~200 ms streaming | Catalog entry `mlx-community/pocket-tts`; re-validated on the 0.1.8 runtime (0.8 s to first audio), which includes upstream's Mimi context-window and `resetState` fixes (#357, #368). |
@@ -136,12 +136,12 @@ catalog capability flag:
    discovery-only rows for the rest of the routable leaderboard. Validation
    on this machine was gated by disk (about 3 GB free at the end of the
    cycle), which is why Chatterbox, Ming, LongCat and the 3 GB-class models
-   are still **D**.
+   were still **D**. 0.10.1 validated Chatterbox Turbo 4-bit (1 GB-class).
 
 ## Next, in leaderboard order
 
 Each needs an end-to-end run plus a descriptor; none needs model code:
-Chatterbox Turbo 4-bit (#3, 1 GB-class), Chatterbox (#2), Ming-3.0-TTS 0.5B
+Chatterbox (#2, 2.6 GB), Ming-3.0-TTS 0.5B
 (#14, 3 GB), LongCat-AudioDiT 1B 4-bit (#21), CSM-1B 8-bit (#17), Maya1 4-bit
 (#16, needs the description prompt), VibeVoice Realtime (#27), VoxCPM2 (#36),
 Dia (#40, needs dialogue-script formatting), Audio8 (#31). Research-only
