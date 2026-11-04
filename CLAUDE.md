@@ -2,9 +2,11 @@
 
 ## Before doing anything else
 
-**Read [URGENT.md](URGENT.md) and surface its contents to the user at the start of every session, before acting on whatever they asked for.** That file tracks pre-release blockers that affect what's safe to ship from this repo. Treat it as a hard precondition until it's deleted (which happens when its items are all resolved).
-
-If `URGENT.md` does not exist, this instruction is satisfied — proceed normally.
+`URGENT.md` used to track pre-release blockers and was deleted on 2026-11-04 once
+all five items were resolved (runtime release, mlx-swift pin, MOSS validation,
+durable iOS model cache, consumer mirror). If a new blocker appears, recreate the
+file and this rule applies again: read it and surface its contents to the user at
+the start of every session, before acting on whatever they asked for.
 
 ## Build and test
 
