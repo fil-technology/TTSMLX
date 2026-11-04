@@ -6,6 +6,23 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-04
+
+### Changed
+- `mlx-community/MOSS-TTS-Nano-100M` is `.validated` (so it joins
+  `TTSMLX.supportedModels`) after an on-device run: iPhone 17, five passages
+  through the Reader path, first audio 2.4-3.1 s warm, 1.3x realtime, MLX peak
+  1.0-1.2 GB, no end-of-audio miss in 42 chunks. `peakMemoryMB` is now 1300.
+  Closes URGENT item 3.
+
+### Added
+- `TTSRuntimeMemory` (peak, active and cache bytes of the MLX runtime, with
+  `resetPeak()`), so apps can show or log runtime memory without importing MLX.
+- Validation harness: `Tests/MossDeviceValidationTests.swift` (enable with
+  `MOSS_DEVICE=1`, runs on the host under `xcodebuild`) and the demo app's
+  `--moss-validation` launch argument, which runs the same measurement on a
+  device and prints `[moss-device]` lines to the console.
+
 ## [0.11.1] - 2026-11-04
 
 ### Fixed

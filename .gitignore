@@ -20,3 +20,4 @@ DerivedData/
 # SwiftPM local-edit checkouts (per-machine state, not part of source tree)
 Packages/
 Tests/.moss-integration
+Tests/.moss-device
