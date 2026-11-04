@@ -12,7 +12,7 @@ shipped in TTSMLX 0.10.0.
 TTSMLX runs models through `fil-technology/mlx-audio-swift`. Until 0.9.1 that
 fork was cut from upstream **v0.1.3** plus 11 commits, 421 commits behind an
 upstream that had meanwhile added about 25 TTS families, 9 codecs and a G2P
-target. **Since 0.10.0 the fork is cut from upstream v0.1.8** (`0.1.8-tts.3`)
+target. **Since 0.10.0 the fork is cut from upstream v0.1.8** (`0.1.8-tts.4`)
 and adds only `TTSModelRegistry`, one model-type alias and the MOSS-TTS-Nano
 voice pack, so every family upstream implements loads through the same
 `TTSSpeechSynthesizer` API. What remains per model is validation (an
@@ -33,7 +33,7 @@ Legend for the **Status** column:
 | # | Model | Elo | Status | Licence (commercial?) | Architecture · codec · size · SR | Features we can expose | Why not today / what is missing |
 |---|---|---|---|---|---|---|---|
 | 1 | Kokoro 82M | 1341 | ✅ (0.10.0) | Apache-2.0 (yes) | StyleTTS2-derived, non-autoregressive, ISTFTNet · 82M · 24 kHz | 54 preset voices, 8 languages, fast | Catalog entry `mlx-community/Kokoro-82M-bf16` (`.implemented`, all 54 voices listed); synthesizes end to end on macOS, 1.5 s to first audio. English G2P weights come from `beshkenadze/kitten-tts-g2p` (9 MB, prefetched as a companion repo); other languages fetch an IPA lexicon on first use. |
-| 2 | Chatterbox | 1317 | **D** | MIT (yes) | T3 Llama ~0.5B over S3 tokens → S3Gen flow matching + HiFT-GAN · 24 kHz | Cloning from a wav, exaggeration/CFG knobs, 23 languages (v3) | Runtime 0.1.8-tts.3 routes to it (`chatterbox` loader + `mlx-community/S3TokenizerV2`). Discovery-only entry `mlx-community/chatterbox-fp16`; same stack as Chatterbox Turbo 4-bit (validated in 0.10.1) plus exaggeration/CFG knobs and a 10-step S3Gen; not run here yet (2.6 GB download). |
+| 2 | Chatterbox | 1317 | ✅ (0.10.2) | MIT (yes) | T3 Llama ~0.5B over S3 tokens → S3Gen flow matching (10 steps) + HiFT-GAN · 24 kHz | Cloning from a wav, exaggeration/CFG knobs, 23 languages, `[laughter]` `[sigh]` tags | Catalog entry `mlx-community/chatterbox-4bit` (`.implemented`; multilingual weights, 612 MB + 495 MB `S3TokenizerV2`). Needs runtime `0.1.8-tts.4`: upstream decoded this checkpoint (no `t3` block) as English-only and tokenized text without the reference's `punc_norm`, lowercase/NFKD, `[SPACE]` word boundaries and `[xx]` language tag; the fork adds all of that and reads the tag from `TTSSynthesisOptions.language`. Synthesizes end to end on macOS in English, French and German (default voice) and English with a 48 kHz reference clip. zh/ja/he/ko/ru lack the reference's script rewrites. Memory: MLX peak active 2.5 GB (3.0 GB with a clip); cache grows to 14 GB per run unless capped (512 MB cap → 3.3 GB footprint). T3 ~40 tok/s warm in debug with the cap; S3Gen adds ~2.5 s per chunk. |
 | 3 | Chatterbox Turbo | 1257 | ✅ (0.10.1) | MIT (yes) | GPT-2-medium T3 ~350M + one-step distilled S3Gen · 24 kHz · English | Cloning, bundled default voice, `[laugh]` `[chuckle]` `[sigh]` `[cough]` `[gasp]` tags | Catalog entry `mlx-community/chatterbox-turbo-4bit` (`.implemented`; 417 MB + 495 MB `S3TokenizerV2` companion). Synthesizes end to end on macOS with the bundled voice and with a 48 kHz reference clip; tags render. Slow in a debug build: T3 runs ~12 tokens/s (25 tokens per second of audio) and the runtime generates each chunk whole, so first audio arrives after about 2x the chunk duration. Memory: MLX peak active 2.5 GB; the buffer cache grows to 7 GB per run unless capped (512 MB cap → 3.2 GB process footprint). fp16 (3 GB) and 8-bit (0.7 GB) builds not run. |
 | 4 | Higgs Audio v3 TTS | 1196 | **D** ⚠️ | Boson research / **non-commercial** | ~4B Qwen3-style AR over Higgs tokenizer (8 codebooks @ 25 fps) · 24 kHz | 100+ languages, cloning, 21 emotion + style/SFX tags, streaming | Runtime routes to it; discovery-only entry `bosonai/higgs-tts-3-4b` flagged research-only. Licence forbids commercial use; ~8 GB bf16, no mlx-community quant yet. |
 | 5 | Supertonic 3 | 1192 | ⛔ | OpenRAIL-M weights, MIT code (use-restricted) | ONNX-only: text encoder + duration predictor + flow-matching estimator + vocoder · ~99M · 44.1 kHz | 31 languages, preset voices, 10 tags | No MLX implementation anywhere (Python or Swift). Weights exist only as ONNX graphs plus a third-party JSON/NPZ dump; the latent-flow + speech-autoencoder pipeline would be a from-scratch port with a weight conversion. Candidate for a later dedicated effort, not this cycle. |
@@ -120,7 +120,7 @@ catalog capability flag:
    ranges) with a reserved patch number, which closes the URGENT.md re-tag
    follow-up. Details: `Docs/mlx-swift-bg-safe-fork.md`.
 2. **mlx-audio-swift fork restarted from v0.1.8** — branch `tts/0.1.8`, tag
-   `0.1.8-tts.3`. Kept from the old fork: `TTSModelRegistry` (now a thin view
+   `0.1.8-tts.4`. Kept from the old fork: `TTSModelRegistry` (now a thin view
    over upstream's loader switch, with a companion-repository table covering
    SNAC, the MOSS codec, S3TokenizerV2, the Kokoro/Kitten G2P weights, DAC
    and others) and the MOSS-TTS-Nano voice pack, codebook dial and per-chunk
@@ -136,12 +136,14 @@ catalog capability flag:
    discovery-only rows for the rest of the routable leaderboard. Validation
    on this machine was gated by disk (about 3 GB free at the end of the
    cycle), which is why Chatterbox, Ming, LongCat and the 3 GB-class models
-   were still **D**. 0.10.1 validated Chatterbox Turbo 4-bit (1 GB-class).
+   were still **D**. 0.10.1 validated Chatterbox Turbo 4-bit (1 GB-class);
+   0.10.2 validated regular Chatterbox 4-bit (multilingual) after fixing its
+   text pipeline in the fork.
 
 ## Next, in leaderboard order
 
 Each needs an end-to-end run plus a descriptor; none needs model code:
-Chatterbox (#2, 2.6 GB), Ming-3.0-TTS 0.5B
+Ming-3.0-TTS 0.5B
 (#14, 3 GB), LongCat-AudioDiT 1B 4-bit (#21), CSM-1B 8-bit (#17), Maya1 4-bit
 (#16, needs the description prompt), VibeVoice Realtime (#27), VoxCPM2 (#36),
 Dia (#40, needs dialogue-script formatting), Audio8 (#31). Research-only

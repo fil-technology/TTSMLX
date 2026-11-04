@@ -31,7 +31,7 @@ let package = Package(
         //   Upstream mlx-audio-swift names ml-explore/mlx-swift, so the mirror
         //   in .swiftpm/configuration/mirrors.json (tracked) redirects it; CI
         //   runs Tools/verify-mlx-fork.sh. See Docs/mlx-swift-bg-safe-fork.md.
-        .package(url: "https://github.com/fil-technology/mlx-audio-swift.git", exact: "0.1.8-tts.3"),
+        .package(url: "https://github.com/fil-technology/mlx-audio-swift.git", exact: "0.1.8-tts.4"),
         .package(url: "https://github.com/fil-technology/mlx-swift.git", exact: "0.33.100"),
         .package(url: "https://github.com/huggingface/swift-huggingface.git", exact: "0.12.0")
     ],

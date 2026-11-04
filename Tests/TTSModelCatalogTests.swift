@@ -51,9 +51,26 @@ struct TTSModelCatalogTests {
         // The S3TokenizerV2 companion is planned by the registry, not the file list.
         #expect(TTSBackgroundModelDownloader.companionRepositories(for: descriptor)
             == ["mlx-community/S3TokenizerV2"])
-        // The fp16 build stays discovery-only (3 GB; never run here).
+        // The fp16 builds are not catalogued (3 GB; never run here).
         #expect(entry("mlx-community/chatterbox-turbo-fp16") == nil)
-        #expect(entry("mlx-community/chatterbox-fp16")?.descriptor == nil)
+        #expect(entry("mlx-community/chatterbox-fp16") == nil)
+    }
+
+    @Test("Chatterbox 4-bit (regular, multilingual) is implemented with 23 languages and cloning")
+    func chatterboxRegularEntry() throws {
+        let e = try #require(entry("mlx-community/chatterbox-4bit"))
+        let descriptor = try #require(e.descriptor)
+        #expect(e.supportStage == .implemented)
+        #expect(descriptor.capabilities.supportsReferenceAudio)
+        #expect(descriptor.suggestedVoices.first == "default")
+        #expect(descriptor.supportedLanguages.count == 23)
+        #expect(descriptor.supportedLanguages.contains(.french))
+        #expect(descriptor.supportedLanguages.contains("Swahili"))
+        let files = try #require(descriptor.files)
+        #expect(files.contains("conds.safetensors"))
+        #expect(files.contains("tokenizer.json"))
+        #expect(TTSBackgroundModelDownloader.companionRepositories(for: descriptor)
+            == ["mlx-community/S3TokenizerV2"])
     }
 
     @Test("Soprano-80M-4bit is a tiny, fast English entry")

@@ -6,6 +6,42 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-11-04
+
+### Changed
+- `mlx-audio-swift` pin: `fil-technology/mlx-audio-swift` **`0.1.8-tts.4`**.
+  Two Chatterbox fixes for the regular (Llama) model, both absent upstream:
+  - `ChatterboxConfiguration` now decodes the mlx-community multilingual
+    checkpoints (`chatterbox-{fp16,8bit,4bit}`: `"multilingual": true` /
+    `"vocab_size": 2454`, no `t3` block) with the multilingual T3 preset
+    instead of the English-only one.
+  - `tokenizeText` mirrors the reference `EnTokenizer`/`MTLTokenizer`
+    pipeline: `punc_norm`, lowercase + NFKD for the multilingual vocabulary,
+    `[SPACE]` word boundaries, and a leading `[xx]` tag derived from the
+    `language` argument (ISO code or TTSMLX language name). Upstream dropped
+    every space (the `Whitespace` pre-tokenizer discards them) and ignored the
+    language. Turbo is untouched.
+
+### Added
+- Catalog: `mlx-community/chatterbox-4bit` (Resemble AI Chatterbox, #2 on the
+  tts-bench board; multilingual weights, 23 languages) as an `.implemented`
+  entry with a descriptor: voice `default` from `conds.safetensors`,
+  reference-audio cloning, `TTSSynthesisOptions.language` selects the language
+  tag. Validated end to end on macOS in English, French and German with the
+  default voice and in English with a 48 kHz reference clip. Replaces the
+  discovery-only `chatterbox-fp16` row.
+
+### Notes
+- Chinese, Japanese, Hebrew, Korean and Russian do not get the reference's
+  script-specific rewrites (Cangjie, kana normalisation, niqqud, Korean
+  normalisation, stress marks); expect lower quality in those five.
+- Memory on macOS: MLX peak active 2.5 GB (3.0 GB with a reference clip);
+  the MLX buffer cache grew to 14 GB over one run without a cap, 3.3 GB
+  process footprint with `MLX.Memory.cacheLimit` at 512 MB. Same advice as
+  for Chatterbox Turbo: cap the cache or call `releaseRuntimeBuffers()`.
+- Speed in a debug build with the cap: T3 about 40 tokens/s (25 tokens per
+  second of audio), S3Gen about 2.5 s per chunk, whole-chunk generation.
+
 ## [0.10.1] - 2026-11-04
 
 ### Added
