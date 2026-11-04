@@ -149,3 +149,22 @@ extension TTSSpeechSynthesizer {
         }
     }
 }
+
+extension TTSSpeechSynthesizer {
+    /// Installs a prepared Chatterbox conditioning on the loaded model (or
+    /// clears a stale one, since the instance is shared) and says which clip,
+    /// if any, must still be loaded as `referenceAudio`: the explicit clip
+    /// wins, a prepared voice without runtime support falls back to its clip.
+    nonisolated static func referenceURL(
+        for options: TTSSynthesisOptions,
+        model: any SpeechGenerationModel,
+        prepared: ChatterboxModel.RefAudioConditioning?
+    ) -> URL? {
+        if let chatterbox = model as? ChatterboxModel {
+            chatterbox.preparedConditioning = options.referenceAudio == nil ? prepared : nil
+        }
+        if let explicit = options.referenceAudio { return explicit }
+        guard let voice = options.preparedVoice else { return nil }
+        return prepared == nil ? voice.referenceURL : nil
+    }
+}

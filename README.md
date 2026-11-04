@@ -71,7 +71,7 @@ Quick picking guide:
 - Try `VyvoTTS` if you want a smaller English Qwen3-style model.
 Current upstream note:
 
-- As of `0.10.0`, `TTSMLX` runs on upstream `Blaizzy/mlx-audio-swift` v0.1.8 through the thin fork `fil-technology/mlx-audio-swift @ 0.1.8-tts.4` (38 TTS families; the fork only adds `TTSModelRegistry`, MOSS-TTS-Nano bundled voices and the regular-Chatterbox text-pipeline fixes), and on `fil-technology/mlx-swift @ 0.33.100` (upstream 0.33.0 whose `mlx` C++ submodule points at `mlx @ v0.33.0-tts-bg-safe.1`, the iOS background-safe Metal patch). `mlx-swift-lm` is no longer a dependency. See `Docs/mlx-swift-bg-safe-fork.md` and `Docs/model-support.md`.
+- As of `0.10.0`, `TTSMLX` runs on upstream `Blaizzy/mlx-audio-swift` v0.1.8 through the thin fork `fil-technology/mlx-audio-swift @ 0.1.8-tts.5` (38 TTS families; the fork only adds `TTSModelRegistry`, MOSS-TTS-Nano bundled voices and the regular-Chatterbox text-pipeline fixes), and on `fil-technology/mlx-swift @ 0.33.100` (upstream 0.33.0 whose `mlx` C++ submodule points at `mlx @ v0.33.0-tts-bg-safe.1`, the iOS background-safe Metal patch). `mlx-swift-lm` is no longer a dependency. See `Docs/mlx-swift-bg-safe-fork.md` and `Docs/model-support.md`.
 - The catalog lists a model with a descriptor (selectable by apps) only once TTSMLX has synthesized with it end to end; the 0.1.8 runtime routes to 38 families, and the ones not yet validated here (Higgs v3, OmniVoice, Voxtral, LongCat, Dia, ...) are listed discovery-only with the reason in their `runtimeNotes`. `Docs/model-support.md` has the full tts-bench leaderboard matrix.
 - `Kitten TTS` stays discovery-only: the runtime's loader needs `voices.safetensors`, and the mlx-community checkpoint ships `voices.npz`.
 - `MOSS-TTS-Nano` runs on upstream's port plus the fork's bundled voices; reference-audio cloning now works through upstream's codec encoder.
@@ -137,30 +137,10 @@ these — don't pin older versions of them yourself.
 
 | Dependency | Required | Why the fork |
 | --- | --- | --- |
-| `mlx-audio-swift` | `fil-technology/mlx-audio-swift` **0.1.8-tts.4** | Upstream v0.1.8 plus `TTSModelRegistry` (queryable loader table and companion repositories, which TTSMLX calls directly) and MOSS-TTS-Nano bundled voices / codebook dial / per-chunk decoding; since `0.1.8-tts.4` also the regular-Chatterbox fixes (multilingual config detection, reference-faithful text pipeline with `[SPACE]` and language tags). |
+| `mlx-audio-swift` | `fil-technology/mlx-audio-swift` **0.1.8-tts.5** | Upstream v0.1.8 plus `TTSModelRegistry` (queryable loader table and companion repositories, which TTSMLX calls directly) and MOSS-TTS-Nano bundled voices / codebook dial / per-chunk decoding; since `0.1.8-tts.4` the regular-Chatterbox fixes (multilingual config detection, reference-faithful text pipeline with `[SPACE]` and language tags); since `0.1.8-tts.5` it names `fil-technology/mlx-swift` directly (no consumer mirror) and exposes Chatterbox prepared conditioning. |
 | `mlx-swift` | `fil-technology/mlx-swift` **0.33.100** | Upstream 0.33.0 with the MLX C++ submodule repointed at `fil-technology/mlx`, which ignores the iOS background-clamp error on in-flight Metal command buffers (Metal-in-background crash fix). The `.100` patch number is reserved so the tag can never collide with an upstream release. |
 
-**`mlx-swift` identity conflict.** Upstream `mlx-audio-swift` names
-`ml-explore/mlx-swift`, so SwiftPM can resolve the shared `mlx-swift`
-identity to upstream — an app **without** the Metal background patch, and the
-build still succeeds. Add this to your app's `.swiftpm/configuration/mirrors.json`
-(both spellings are required; some packages omit the `.git`):
-
-```json
-{
-  "object": [
-    { "original": "https://github.com/ml-explore/mlx-swift.git",
-      "mirror": "https://github.com/fil-technology/mlx-swift.git" },
-    { "original": "https://github.com/ml-explore/mlx-swift",
-      "mirror": "https://github.com/fil-technology/mlx-swift.git" }
-  ],
-  "version": 1
-}
-```
-
-`Tools/install-mirrors.sh` installs it and `Tools/verify-mlx-fork.sh` checks the
-resolved submodule URL and greps the patch marker out of `device.cpp` — wire the
-verify step into CI.
+Since `0.15.0` no SwiftPM mirror is needed: the `mlx-audio-swift` fork names the background-safe `fil-technology/mlx-swift` itself, so a consumer's graph never mentions `ml-explore/mlx-swift`. CI resolves a mirror-less throwaway consumer (`Tools/verify-consumer-resolution.sh`) to prove it on every push. If you added `.swiftpm/configuration/mirrors.json` for an earlier version you can keep it; `Tools/verify-mlx-fork.sh` still checks a resolved checkout.
 
 **Common failure: `TTSModelRegistry` is undefined.** `TTSModelRegistry` lives in
 `mlx-audio-swift` (module `MLXAudioTTS`), **not** in TTSMLX's own source. A build
@@ -175,7 +155,7 @@ swift package update mlx-audio-swift     # or: rm Package.resolved && swift pack
 
 In Xcode: **File ▸ Packages ▸ Reset Package Caches**, then **Update to Latest
 Package Versions**. Confirm your `Package.resolved` then shows
-`fil-technology/mlx-audio-swift` at `0.1.8-tts.4` and `mlx-swift` at
+`fil-technology/mlx-audio-swift` at `0.1.8-tts.5` and `mlx-swift` at
 `0.33.100` from `fil-technology/mlx-swift`.
 
 ## Licences
@@ -248,7 +228,7 @@ let cue = try await synthesizer.synthesizeAudio("And release.", using: model, op
 for try await piece in synthesizer.synthesizeSegmentsStream(lines, using: model) { place(piece.audio, at: piece.segment.start) }
 ```
 
-`[pause 0.8s]` markers work with every model. `rate` and `targetDuration` are native on Kokoro and a pitch-preserving time-stretch elsewhere. `expressiveness` and `voiceGuidance` drive Chatterbox's exaggeration and CFG weight. `seed` is forwarded to the runtime (Ming and Voxtral honour it; Soprano does not). Word timings remain estimates (`TTSChunkInfo.wordTimings`): no runtime model exposes an alignment, which is why segment boundaries, which are exact, are the unit to build on.
+Reuse a reference voice across lines with `let voice = try await synthesizer.prepareVoice(from: clipURL, using: model)` and `options.preparedVoice = voice`: Chatterbox computes its speaker conditioning once and skips it on every later call. `[pause 0.8s]` markers work with every model. `rate` and `targetDuration` are native on Kokoro and a pitch-preserving time-stretch elsewhere. `expressiveness` and `voiceGuidance` drive Chatterbox's exaggeration and CFG weight. `seed` seeds MLX's random state before each take, so the same options reproduce the same audio on every model. Word timings remain estimates (`TTSChunkInfo.wordTimings`): no runtime model exposes an alignment, which is why segment boundaries, which are exact, are the unit to build on.
 
 ## Streaming
 

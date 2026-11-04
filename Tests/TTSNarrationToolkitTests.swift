@@ -77,4 +77,15 @@ struct TTSNarrationToolkitTests {
         #expect(audio.pcmBuffer?.frameLength == 2400)
         #expect(abs(audio.duration - 0.1) < 0.001 && audio.segments[0].end == 0.1)
     }
+
+    @Test("a prepared voice is a stable handle that keys the cache")
+    func preparedVoice() throws {
+        let url = URL(fileURLWithPath: "/tmp/ref.wav")
+        let voice = TTSPreparedVoice(modelID: "x/y", referenceURL: url, referenceText: "hello")
+        let back = try JSONDecoder().decode(TTSPreparedVoice.self, from: try JSONEncoder().encode(voice))
+        #expect(back == voice && back.referenceText == "hello")
+        let options = TTSSynthesisOptions(preparedVoice: voice)
+        #expect(options.hasControls && options.controlsCacheSuffix.contains("prepared=/tmp/ref.wav"))
+        #expect(TTSSynthesisOptions(preparedVoice: voice) != TTSSynthesisOptions(preparedVoice: TTSPreparedVoice(modelID: "x/y", referenceURL: url)))
+    }
 }

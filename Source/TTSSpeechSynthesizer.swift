@@ -1,6 +1,7 @@
 import Foundation
 import OSLog
 @preconcurrency import MLX
+import MLXRandom
 import MLXAudioCore
 import MLXAudioTTS
 #if canImport(AVFoundation)
@@ -226,6 +227,8 @@ public actor TTSSpeechSynthesizer {
     /// Ming let it reach several GB otherwise). Set together with
     /// `runtimeCacheLimitMB`, which bounds it during a request.
     let releasesRuntimeBuffersAfterEachRequest: Bool
+    /// Chatterbox conditionings computed by `prepareVoice`, keyed by handle.
+    private var preparedConditionings: [UUID: ChatterboxModel.RefAudioConditioning] = [:]
     /// LRU order of resident model ids (front = least-recently-used). Only
     /// tracks ids actually present in `loadedModels`; the test-only warmed
     /// marker (`_markWarmedInternal`) does not populate it.
@@ -550,6 +553,36 @@ public actor TTSSpeechSynthesizer {
     /// initialises the Metal backend, which aborts the process where no
     /// metallib is present (plain `swift test`), so this must stay inert until
     /// something has already brought MLX up.
+    /// Prepares a reference voice once so later calls reuse it. On Chatterbox
+    /// the speaker conditioning (tokenizer and speaker-encoder passes over the
+    /// clip) is computed here and skipped on every later call; on other
+    /// models the clip is simply reused. Pass the result as
+    /// `TTSSynthesisOptions.preparedVoice`.
+    public func prepareVoice(
+        from referenceURL: URL,
+        referenceText: String? = nil,
+        using model: TTSModelDescriptor = TTSMLX.defaultModels[0],
+        progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)? = nil
+    ) async throws -> TTSPreparedVoice {
+        let voice = TTSPreparedVoice(modelID: model.id, referenceURL: referenceURL, referenceText: referenceText)
+        let loadedBox = try await prepareModel(model, options: .init(referenceAudio: referenceURL), progressHandler: progressHandler)
+        if let chatterbox = loadedBox.model as? ChatterboxModel {
+            let clip = try Self.loadReferenceAudio(from: referenceURL, sampleRate: chatterbox.sampleRate)
+            let conditioning = try MLX.withError { try chatterbox.prepareReferenceConditioning(clip.materialized()) }
+            preparedConditionings[voice.id] = conditioning
+        }
+        return voice
+    }
+
+    /// Drops the conditioning kept for a prepared voice.
+    public func discardPreparedVoice(_ voice: TTSPreparedVoice) {
+        preparedConditionings[voice.id] = nil
+    }
+
+    func preparedConditioning(for options: TTSSynthesisOptions) -> ChatterboxModel.RefAudioConditioning? {
+        options.preparedVoice.flatMap { preparedConditionings[$0.id] }
+    }
+
     public func releaseRuntimeBuffers() {
         guard hasInitializedMLX else { return }
         let before = MLX.GPU.cacheMemory
@@ -710,7 +743,9 @@ public actor TTSSpeechSynthesizer {
             parameters.seed = seed
         }
 
-        let referenceAudio = try options.referenceAudio.map {
+        let referenceURL = Self.referenceURL(
+            for: options, model: loadedModel, prepared: options.preparedVoice.flatMap { preparedConditionings[$0.id] })
+        let referenceAudio = try referenceURL.map {
             try Self.loadReferenceAudio(from: $0, sampleRate: loadedModel.sampleRate)
         }
         let resolved = Self.applyControls(
@@ -740,6 +775,9 @@ public actor TTSSpeechSynthesizer {
             // existing handler chain.
             try await generationGate.acquire()
             defer { generationGate.release() }
+            // Most runtime models ignore `GenerateParameters.seed` and sample
+            // from MLX's global random state, so seed that too.
+            if let seed = options.seed { MLXRandom.seed(seed) }
             samples = try await MLX.withError {
                 try await Self.generateSamples(
                     model: loadedModel,
@@ -850,7 +888,9 @@ public actor TTSSpeechSynthesizer {
                 if lifecycle.isShuttingDown { throw CancellationError() }
                 let loadedModel = loadedBox.model
                 let parameters = Self.makeParameters(for: loadedModel, options: capturedOptions)
-                let referenceAudio = try capturedOptions.referenceAudio.map {
+                let prepared = await synthesizer.preparedConditioning(for: capturedOptions)
+                let referenceURL = Self.referenceURL(for: capturedOptions, model: loadedModel, prepared: prepared)
+                let referenceAudio = try referenceURL.map {
                     try Self.loadReferenceAudio(from: $0, sampleRate: loadedModel.sampleRate)
                 }
                 let resolved = Self.applyControls(
@@ -876,6 +916,7 @@ public actor TTSSpeechSynthesizer {
                 // from stale KV cache) until either upstream MLX adds a
                 // MainActor-aware withError or the upstream
                 // generatePCMBufferStream drops its @MainActor isolation.
+                if let seed = capturedOptions.seed { MLXRandom.seed(seed) }
                 let upstream = try await Self.makePCMBufferStream(
                     model: loadedModel,
                     text: resolved.text,
