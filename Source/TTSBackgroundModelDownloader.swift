@@ -380,11 +380,17 @@ public final class TTSBackgroundModelDownloader: NSObject, @unchecked Sendable {
     // MARK: - Planning
 
     static func companionRepositories(for descriptor: TTSModelDescriptor) -> [String] {
-        TTSModelRegistry.companionRepositories(
+        let companions = TTSModelRegistry.companionRepositories(
             modelType: descriptor.metadata?.modelType,
             architectures: descriptor.metadata?.architectures ?? [],
             repo: descriptor.id
         )
+        // The runtime lists Step-Audio-2 as the Ming companion only for its
+        // 27 MB CAM++ speaker encoder, and skips that fetch when the checkpoint
+        // bundles `campplus.safetensors` (the mlx-community Ming-3.0 repos do).
+        // Pre-fetching the whole 780 MB companion repo would be wasted.
+        let bundlesSpeakerEncoder = descriptor.files?.contains("campplus.safetensors") == true
+        return companions.filter { !(bundlesSpeakerEncoder && $0 == "mlx-community/Step-Audio-2-token2wav") }
     }
 
     /// Destination directory a repository's files must land in for the runtime

@@ -70,6 +70,10 @@ public enum TTSDiagnostic: Sendable {
     /// Use these to drive word-by-word highlight UIs without per-token
     /// callbacks from the model. See ``TTSChunkInfo/wordTimings(forDuration:)``.
     case chunkTimings(modelID: String, chunkIndex: Int, timings: [TTSWordTiming])
+
+    /// Options the loaded model cannot honour (for example `emotion` on a model
+    /// without `TTSModelFeature.emotion`). Generation continues without them.
+    case controlsIgnored(modelID: String, controls: [String])
 }
 
 public typealias TTSDiagnosticHandler = @Sendable (TTSDiagnostic) -> Void

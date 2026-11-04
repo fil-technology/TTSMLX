@@ -55,6 +55,11 @@ let specs: [String: [ClipSpec]] = [
         .init(label: "en_news", voice: "en_news", language: nil, text: english),
         .init(label: "en_2", voice: "en_2", language: nil, text: english),
     ],
+    "mlx-community/Ming-3.0-tts-0.5B-bf16": [
+        .init(label: "UK_George-en", voice: "UK_George", language: "English", text: english),
+        .init(label: "US_Emma-en", voice: "US_Emma", language: "English", text: english),
+        .init(label: "UK_George-fr", voice: "UK_George", language: "French", text: french),
+    ],
     "mlx-community/chatterbox-turbo-4bit": [
         .init(label: "default-en", voice: nil, language: nil, text: english),
         .init(label: "default-tags", voice: nil, language: nil, text: tagged),
@@ -105,6 +110,13 @@ for entry in TTSMLX.modelCatalog {
         record["minimumDeviceClass"] = d.capabilities.minimumDeviceClass.map { "\($0)" } ?? ""
         record["defaultGenerationProfile"] = "\(d.capabilities.defaultGenerationProfile)"
         record["files"] = d.files ?? []
+        record["features"] = d.sortedFeatures.map(\.displayName)
+        record["eventTags"] = d.supportedEventTags.map { "\($0.marker) → \(d.capabilities.eventTags[$0]!)" }
+        record["sampleRate"] = d.capabilities.sampleRate ?? 0
+        record["voiceDetails"] = d.suggestedVoices.map {
+            ["id": $0.identifier, "name": $0.name, "language": $0.language?.identifier ?? "",
+             "gender": $0.gender?.rawValue ?? "", "summary": $0.summary ?? ""]
+        }
     }
     var clips: [[String: Any]] = []
     if let d = entry.descriptor, let list = specs[entry.id] {

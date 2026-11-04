@@ -6,6 +6,51 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-04
+
+### Added
+- `mlx-community/Ming-3.0-tts-0.5B-bf16` (Ant Group Ming-3.0-TTS, #14 on the
+  tts-bench board) is a catalog entry with a descriptor: 7 languages, built-in
+  English voices (`UK_George`, `US_Emma`, `UK_Charlotte`) and Chinese voices,
+  reference-clip cloning, 44.1 kHz output. Validated end to end on macOS.
+  Numbers (macOS, debug build): 8-10 s of audio in 25-50 s warm, generation
+  is per ~24-word fragment with no audio before a fragment completes, MLX
+  peak 4.2 GB (active 2.85 GB), buffer cache up to 2 GB unless capped.
+  The mlx-community checkpoint bundles its CAM++ speaker encoder, so the
+  background downloader no longer pre-fetches the 780 MB
+  `mlx-community/Step-Audio-2-token2wav` companion the runtime lists for the
+  Ming loader.
+- Three Ming preview clips on the previews page and table.
+- One control surface for every model. `TTSSynthesisOptions` gains
+  `instruction` (free-form delivery), `emotion` (`TTSEmotion`) and `speed`
+  (`TTSSpeed`); the synthesizer translates them per loader (Ming's structured
+  instruction, Qwen3 CustomVoice's "speaker, instruction" voice string,
+  Chatterbox's exaggeration scalar, Kokoro's rate factor) and reports the ones
+  a model cannot honour through `TTSDiagnostic.controlsIgnored` instead of
+  failing. `TTSEventTag` gives non-verbal sounds one canonical spelling
+  (`[laugh]`, `[sigh]`, ...) that is rewritten into each model's own
+  (`<laugh>` for Orpheus, `[Laughter]` for Ming, `[laugh]` for Chatterbox
+  Turbo) and dropped for models without tags, so the same text can be sent
+  anywhere without a tag being read aloud.
+- `TTSModelCapabilities.features` (`TTSModelFeature`: streaming, built-in
+  voices, voice cloning, multilingual, event tags, instruction, emotion, speed,
+  voice design), `.eventTags` (the model's spellings) and `.sampleRate`, plus
+  `TTSModelDescriptor.features` / `sortedFeatures` / `supportedEventTags`, so
+  an app can show what a model does without reading `runtimeNotes`.
+- `TTSVoice` carries `displayName`, `language`, `gender` and `summary`
+  (equality and cache keys still use the identifier). Catalog voices are
+  annotated: Kokoro's 54 decoded from the `<lang><gender>_` prefix, the Qwen3
+  CustomVoice speakers, Orpheus, MeloTTS accents, MOSS and Ming.
+- The audio cache key includes the controls, so the same text with another
+  emotion is not served from cache.
+
+### Fixed
+- Reference clips are now resampled to the loaded model's sample rate before
+  they reach the runtime. Runtime models take a bare sample array and assume
+  their own rate (Chatterbox 24 kHz, Ming 44.1 kHz, MOSS 48 kHz), so a clip at
+  any other rate was cloned with shifted pitch and tempo. The 48 kHz clip used
+  for the 0.10.1/0.10.2 Chatterbox runs was affected.
+
 ### Changed
 - The model previews page is now published with GitHub Pages at
   https://fil-technology.github.io/TTSMLX/ (`.github/workflows/pages.yml`

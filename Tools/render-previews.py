@@ -45,6 +45,14 @@ def encode(wav: pathlib.Path) -> str:
 
 
 def features(e):
+    if "features" in e:  # manifest from TTSMLX 0.11+: the catalog's own feature list
+        f = list(e["features"])
+        if e.get("eventTags") and "event tags" in f:
+            spellings = ", ".join(t.split(" → ")[1] for t in e["eventTags"])
+            f[f.index("event tags")] = f"event tags ({spellings})"
+        if e.get("sampleRate"):
+            f.append(f'{e["sampleRate"] / 1000:g} kHz')
+        return f
     f = []
     if e.get("supportsReferenceAudio"):
         f.append("reference-audio cloning")
@@ -66,6 +74,12 @@ for e in manifest:
     stage = STAGE.get(e["supportStage"], e["supportStage"])
     langs = ", ".join(e.get("languages", [])) or "—"
     voices = e.get("voices")
+    details = e.get("voiceDetails") or []
+    if details:
+        def label(v):
+            g = v.get("gender")
+            return v["name"] + (f" ({g[0]})" if g else "")
+        voices = [label(v) for v in details]
     voices_s = (", ".join(voices[:8]) + (f", … ({len(voices)} total)" if len(voices) > 8 else "")) if voices else ("— (discovery-only)" if voices is None else "default")
     feats = ", ".join(features(e)) or "—"
     mem = f'{e["peakMemoryMB"]} MB' if e.get("peakMemoryMB") else "—"
