@@ -20,16 +20,10 @@ jobs:
         with:
           xcode-version: latest-stable
 
-      # mlx-audio-swift names upstream ml-explore/mlx-swift, so without the
-      # mirror SwiftPM resolves the shared identity to upstream — an app
-      # without the Metal-in-background crash fix. The mirror in
-      # .swiftpm/configuration/mirrors.json is tracked; installing it here is
-      # idempotent insurance against it going missing, and the verify step
-      # turns silent drift into a hard failure. (macos-26: mlx-swift 0.33
+      # Nothing in the graph names ml-explore/mlx-swift since mlx-audio-swift
+      # 0.1.8-tts.5, so no mirror is installed; the two verify steps below
+      # turn any regression into a hard failure. (macos-26: mlx-swift 0.33
       # needs the Swift 6.3 toolchain, which the macos-15 image lacks.)
-      - name: Install mlx-swift mirror
-        run: Tools/install-mirrors.sh
-
       - name: Resolve package
         run: swift package resolve
 

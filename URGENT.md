@@ -82,11 +82,14 @@ every consumer needed a `.swiftpm/configuration/mirrors.json`.
 `fil-technology/mlx-swift.git` at `exact: "0.33.100"` itself. Nothing in a
 consumer's graph names upstream any more, so no mirror is needed.
 `Tools/verify-consumer-resolution.sh` resolves a throwaway mirror-less
-consumer package in CI and fails if it gets anything but the fork. The mirror
-files and `Tools/verify-mlx-fork.sh` stay as belt and braces, and the
-one-line URL change has to be carried over whenever the fork is rebased on a
-new upstream release (the fork's tag naming makes a miss visible: the
-consumer check fails).
+consumer package in CI and fails if it gets anything but the fork. The repo
+no longer ships `.swiftpm/configuration/mirrors.json` (with a mirror in
+effect SwiftPM records the *original* upstream URL in `Package.resolved`,
+which is what kept the drift noise alive); `Tools/install-mirrors.sh` stays
+for consumers on older versions and `Tools/verify-mlx-fork.sh` still checks
+a resolved checkout. The one-line URL change has to be carried over whenever
+the fork is rebased on a new upstream release; the consumer check makes a
+miss visible.
 
 All five items are resolved; this file can be deleted once the 0.15.0
 release is confirmed on a consuming app.
