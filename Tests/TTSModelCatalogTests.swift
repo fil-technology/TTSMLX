@@ -123,4 +123,18 @@ struct TTSDeviceProfileLookAheadTests {
             }
         }
     }
+
+    @Test("Kokoro gets ISO language codes, other loaders keep the TTSLanguage name")
+    func kokoroLanguageMapping() {
+        #expect(TTSSpeechSynthesizer.kokoroLanguageCodes["french"] == "fr")
+        #expect(TTSSpeechSynthesizer.kokoroLanguageCodes["english"] == "en-us")
+        #expect(TTSSpeechSynthesizer.kokoroLanguageCodes["chinese"] == "cmn")
+        #expect(TTSSpeechSynthesizer.kokoroLanguageCodes[TTSLanguage.japanese.identifier.lowercased()] == "ja")
+        // Every language the Kokoro catalog entry advertises must map to a code.
+        let kokoro = TTSMLX.modelCatalog.first { $0.id == "mlx-community/Kokoro-82M-bf16" }
+        for language in kokoro?.supportedLanguages ?? [] {
+            #expect(TTSSpeechSynthesizer.kokoroLanguageCodes[language.identifier.lowercased()] != nil, "\(language.identifier)")
+        }
+    }
 }
+

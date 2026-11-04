@@ -2114,6 +2114,7 @@ private extension TTSSpeechSynthesizer {
     ) async throws -> [Float] {
         // The runtime takes fully evaluated snapshots at its boundary.
         let referenceAudio = referenceAudio?.materialized()
+        let language = runtimeLanguage(for: model, language: language)
         do {
             return try await model.generate(
                 text: text,
@@ -2170,6 +2171,7 @@ private extension TTSSpeechSynthesizer {
         streamingInterval: Double
     ) async throws -> AsyncThrowingStream<AVAudioPCMBuffer, Error> {
         let referenceAudio = referenceAudio?.materialized()
+        let language = runtimeLanguage(for: model, language: language)
         if let voice {
             return model.generatePCMBufferStream(
                 text: text,
@@ -2207,5 +2209,29 @@ private extension TTSSpeechSynthesizer {
         try fileManager.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
         let filename = "speech-\(UUID().uuidString).wav"
         return outputDirectory.appendingPathComponent(filename)
+    }
+}
+
+// MARK: - Per-loader language identifiers
+
+extension TTSSpeechSynthesizer {
+    /// Kokoro's text processor keys its lexicons by ISO code (`fr`, `ja`,
+    /// `cmn`, `en-us`), while `TTSLanguage` identifiers are English names
+    /// (`"French"`) that other loaders (Qwen3-TTS) take verbatim. Map names to
+    /// Kokoro's codes; an unknown name becomes nil so Kokoro infers the
+    /// language from the voice prefix instead of throwing.
+    static let kokoroLanguageCodes: [String: String] = [
+        "english": "en-us", "british english": "en-gb", "spanish": "es",
+        "french": "fr", "hindi": "hi", "italian": "it", "japanese": "ja",
+        "portuguese": "pt", "brazilian portuguese": "pt", "chinese": "cmn",
+        "mandarin": "cmn",
+    ]
+
+    static func runtimeLanguage(for model: any SpeechGenerationModel, language: String?) -> String? {
+        guard model is KokoroModel, let language else { return language }
+        let key = language.trimmingCharacters(in: .whitespaces).lowercased()
+        if let code = kokoroLanguageCodes[key] { return code }
+        let known = Set(kokoroLanguageCodes.values).union(["en", "zh"])
+        return known.contains(key) ? key : nil
     }
 }
