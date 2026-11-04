@@ -92,7 +92,7 @@ Nothing in this catalog is downloaded automatically.
 Models are downloaded only when you explicitly call `ensureDownloaded(...)`, or when you synthesize using a specific selected model.
 
 <!-- PREVIEWS:START -->
-Hear every catalogued model before you pick one: [Docs/model-previews.md](Docs/model-previews.md) lists languages, voices, features and a short clip per voice (same sentence for all), and the [playable page](https://htmlpreview.github.io/?https://github.com/fil-technology/TTSMLX/blob/main/Docs/previews/index.html) has inline players.
+Hear every catalogued model before you pick one: [Docs/model-previews.md](Docs/model-previews.md) lists languages, voices, features and a short clip per voice (same sentence for all), and the [playable page](https://fil-technology.github.io/TTSMLX/) has inline players.
 <!-- PREVIEWS:END -->
 
 ## Usage

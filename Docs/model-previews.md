@@ -1,6 +1,6 @@
 # Model previews
 
-Playable page (same clips, inline players): [https://htmlpreview.github.io/?https://github.com/fil-technology/TTSMLX/blob/main/Docs/previews/index.html](https://htmlpreview.github.io/?https://github.com/fil-technology/TTSMLX/blob/main/Docs/previews/index.html)
+Playable page (same clips, inline players): [https://fil-technology.github.io/TTSMLX/](https://fil-technology.github.io/TTSMLX/)
 
 Clips are mono MP3 files under `Docs/previews/audio`, generated with `Tools/previews` + `Tools/render-previews.py` on an Apple-silicon Mac at each model's default generation profile. Each link opens in the browser's native player. Languages, voices and features come straight from the catalog in `Source/TTSMLX.swift`.
 

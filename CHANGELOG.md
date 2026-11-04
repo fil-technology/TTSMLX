@@ -6,6 +6,12 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+- The model previews page is now published with GitHub Pages at
+  https://fil-technology.github.io/TTSMLX/ (`.github/workflows/pages.yml`
+  deploys `Docs/previews` on every push to `main` that touches that folder).
+  README and `Docs/model-previews.md` link there instead of htmlpreview.
+
 ## [0.10.3] - 2026-11-04
 
 ### Fixed
