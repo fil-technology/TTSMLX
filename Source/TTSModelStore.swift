@@ -250,7 +250,7 @@ extension TTSModelStore {
 
         if let supportedType {
             switch supportedType {
-            case "soprano", "llama_tts", "csm", "pocket_tts":
+            case "soprano", "llama_tts", "csm", "pocket_tts", "kokoro", "melotts":
                 return true
             case "qwen3_tts":
                 return true

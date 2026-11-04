@@ -1,7 +1,7 @@
 import Foundation
 import HuggingFace
+import MLXAudioCore
 import MLXAudioTTS
-@preconcurrency import MLXLMCommon
 #if canImport(AVFoundation)
 @preconcurrency import AVFoundation
 #endif

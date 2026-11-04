@@ -6,6 +6,63 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-04
+
+Runtime migration: TTSMLX now runs on upstream `Blaizzy/mlx-audio-swift` v0.1.8
+(38 TTS families) through a thin fork, on `mlx-swift` 0.33. Public TTSMLX API
+is unchanged; the dependency stack consumers resolve is not.
+
+### Changed
+- `mlx-audio-swift` pin: `fil-technology/mlx-audio-swift` **`0.1.8-tts.3`**, a
+  new branch cut from upstream v0.1.8. The old v0.1.3-based lineage ends at
+  `0.1.7-tts.2`. The fork now only adds `TTSModelRegistry` (queryable loader
+  table + companion repositories), the `gradium_phonon_tts` model-type alias,
+  and MOSS-TTS-Nano bundled voices / codebook dial / per-chunk decoding.
+- `mlx-swift` pin: `fil-technology/mlx-swift` **`0.33.100`** = upstream 0.33.0
+  with the `mlx` submodule at `fil-technology/mlx` `v0.33.0-tts-bg-safe.1`.
+  The background-safe Metal patch is re-targeted at the command-buffer
+  completion handler in `device.cpp` (where upstream now records errors). The
+  tag is a normal version with a reserved patch number, so it satisfies every
+  `>= 0.33.0` range and can never collide with an upstream release (closes the
+  URGENT.md re-tag follow-up). `Tools/verify-mlx-fork.sh` checks `device.cpp`.
+- `mlx-swift-lm` is no longer a dependency: `GenerateParameters` comes from
+  `MLXAudioCore`. `swift-huggingface` moves to 0.12.0. Consumers that pinned
+  `mlx-swift-lm` for TTSMLX's sake can drop it; apps that use it for their own
+  LLMs need a 3.x release built on `mlx-swift` 0.33.
+- Requires the Swift 6.3 toolchain (Xcode 26.3+) because `mlx-swift` 0.33 does;
+  CI moved to the `macos-26` runner.
+- MOSS-TTS-Nano runs on upstream's port: `referenceAudio` cloning now works
+  (upstream ships the codec encoder) and `supportsReferenceAudio` is `true`;
+  the bundled voices gain `en_news` as the default. See URGENT.md item 3 for
+  what still keeps it `.implemented`.
+- Model search surfaces Kokoro and MeloTTS results alongside the existing
+  families.
+
+### Added
+- Catalog entries with descriptors (`.implemented`, synthesized end to end on
+  macOS): **Kokoro 82M** (`mlx-community/Kokoro-82M-bf16`, 54 voices, 8
+  languages, #1 on the tts-bench board), **Phonon 31M** (`gradium/phonon-31m-en`)
+  and **MeloTTS English** (`mlx-community/MeloTTS-English-MLX`, 5 accents).
+- Discovery-only catalog entries (routable by the runtime, not yet validated
+  here, reasons in `runtimeNotes`): Chatterbox, Chatterbox Turbo, Higgs Audio
+  v3, OmniVoice, Voxtral 4B, LongCat-AudioDiT 1B, Ming-3.0-TTS 0.5B, Maya1,
+  Sesame CSM-1B, OuteTTS 1.0 1B, VibeVoice Realtime, Audio8, VoxCPM2, Dia.
+- `Patches/mlx-c-0.33.0-background-safe-command-buffer.patch`;
+  `Docs/mlx-swift-bg-safe-fork.md` rewritten for the 0.33 forks.
+
+### Notes
+- Kitten TTS stays discovery-only: the runtime's loader needs
+  `voices.safetensors`, and the mlx-community checkpoint ships `voices.npz`.
+- Upstream's Qwen3-TTS 72-frame speech-decoder sliding window and the Voxtral
+  streaming fix landed on upstream `main` after v0.1.8; they come with the
+  next fork bump.
+
+### Validation
+Re-validated end to end on the new runtime on macOS: Pocket-TTS, Soprano 80M,
+Marvis 250M, MOSS-TTS-Nano (bundled voice and reference audio), plus the three
+new entries. Unit suite: 227 tests, 33 suites.
+
+
 ## [0.9.1] - 2026-11-03
 
 ### Added

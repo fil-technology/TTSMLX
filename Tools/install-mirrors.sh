@@ -3,7 +3,7 @@
 # Installs the mlx-swift SwiftPM mirror into a package or Xcode project.
 #
 # TTSMLX depends on the background-safe fil-technology/mlx-swift fork, while
-# mlx-audio-swift and ml-explore's mlx-swift-lm both declare upstream. Upstream
+# upstream mlx-audio-swift declares ml-explore/mlx-swift. Upstream
 # publishes the same version tags, so SwiftPM resolves the shared `mlx-swift`
 # identity to whichever URL it meets first — and the build succeeds either way,
 # silently missing the Metal patch that keeps the app alive when iOS revokes

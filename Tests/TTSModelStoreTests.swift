@@ -251,7 +251,7 @@ struct TTSModelStoreTests {
         let duplicateLegacyModel = legacyRoot
             .appendingPathComponent("mlx-community_pocket-tts", isDirectory: true)
         let legacyOnlyModel = legacyRoot
-            .appendingPathComponent("custom_echo-tts-demo", isDirectory: true)
+            .appendingPathComponent("custom_wavenet-demo", isDirectory: true)
         let unsupportedLegacyModel = legacyRoot
             .appendingPathComponent("mlx-community_kitten-tts-mini-0.8", isDirectory: true)
 
@@ -263,9 +263,13 @@ struct TTSModelStoreTests {
         try Data(repeating: 1, count: 12).write(to: hubModel.appendingPathComponent("weights.safetensors"))
         try Data(repeating: 2, count: 8).write(to: duplicateLegacyModel.appendingPathComponent("weights.safetensors"))
         try Data(repeating: 3, count: 20).write(to: legacyOnlyModel.appendingPathComponent("weights.safetensors"))
+        // Looks like TTS (model_type says so) but no runtime loader routes to
+        // it, by model_type or by repo name. `echo_tts` used to be such a
+        // family, until the upstream 0.1.8 runtime gained Echo TTS and its
+        // loader started matching "echo" in repo names as well.
         try Data("""
         {
-          "model_type": "echo_tts",
+          "model_type": "wavenet_tts",
           "languages": ["en"]
         }
         """.utf8).write(to: legacyOnlyModel.appendingPathComponent("config.json"))
@@ -278,7 +282,7 @@ struct TTSModelStoreTests {
         let store = TTSModelStore(cacheRoots: [temporaryRoot])
         let installed = try await store.installedModels()
 
-        #expect(installed.map(\.id) == ["custom/echo-tts-demo", "mlx-community/kitten-tts-mini-0.8", "mlx-community/pocket-tts"])
+        #expect(installed.map(\.id) == ["custom/wavenet-demo", "mlx-community/kitten-tts-mini-0.8", "mlx-community/pocket-tts"])
 
         let custom = try #require(installed.first)
         #expect(custom.sizeBytes > 20)
@@ -315,9 +319,11 @@ struct TTSModelStoreTests {
         let mossDescriptor = try #require(moss.descriptor)
         #expect(mossDescriptor.capabilities.isRuntimeSupported)
         // No speaker embeddings: voices are bundled pre-encoded reference clips,
-        // and user-supplied reference audio needs the codec encoder (not ported).
-        #expect(mossDescriptor.capabilities.supportsReferenceAudio == false)
+        // and since the 0.1.8 runtime (which ships the codec encoder) a caller's
+        // own clip is accepted too.
+        #expect(mossDescriptor.capabilities.supportsReferenceAudio == true)
         #expect(mossDescriptor.suggestedVoices.contains("en_3"))
+        #expect(mossDescriptor.suggestedVoices.first == "en_news")
     }
 
     @Test("direct model download via static host works")

@@ -1,0 +1,49 @@
+diff --git a/mlx/backend/metal/device.cpp b/mlx/backend/metal/device.cpp
+index 493e8e31..8a94f041 100644
+--- a/mlx/backend/metal/device.cpp
++++ b/mlx/backend/metal/device.cpp
+@@ -1,6 +1,8 @@
+ // Copyright © 2023-2024 Apple Inc.
+ 
++#include <cstdio>
+ #include <cstdlib>
++#include <cstring>
+ #include <sstream>
+ 
+ #include <fmt/format.h>
+@@ -561,11 +563,30 @@ void CommandEncoder::commit(std::function<void()> completion) {
+         // earliest error.
+         bool has_error = error_.valid();
+         if (!has_error && cbuf->status() == MTL::CommandBufferStatusError) {
+-          error_.set_message(
+-              std::make_shared<std::string>(fmt::format(
+-                  "[METAL] Command buffer execution failed: {}.",
+-                  cbuf->error()->localizedDescription()->utf8String())));
+-          has_error = true;
++          auto* err = cbuf->error();
++          const char* desc = (err && err->localizedDescription())
++              ? err->localizedDescription()->utf8String()
++              : "(no description)";
++          // iOS revokes GPU access whenever the host app transitions to the
++          // background. Metal still completes, with an error, the buffers
++          // that were already committed when the clamp landed. Recording
++          // that as a stream error would poison the encoder and every event
++          // it signals, so the next eval()/synchronize() on the calling
++          // thread throws, which mlx-swift's default error handler turns
++          // into a fatal error. The Swift framework layer is responsible
++          // for stopping NEW submissions on backgrounding; this swallow only
++          // covers buffers that were in flight before the lifecycle signal
++          // arrived. Every other Metal error is recorded as before.
++          if (std::strstr(desc, "submit GPU work from background") != nullptr) {
++            std::fprintf(
++                stderr,
++                "[mlx] Metal command buffer aborted by iOS background clamp; "
++                "ignoring (host app backgrounded mid-flight).\n");
++          } else {
++            error_.set_message(std::make_shared<std::string>(fmt::format(
++                "[METAL] Command buffer execution failed: {}.", desc)));
++            has_error = true;
++          }
+         }
+         // Poison all the signaled events when error happened.
+         if (has_error) {

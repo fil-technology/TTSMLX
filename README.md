@@ -69,11 +69,10 @@ Quick picking guide:
 - Try `VyvoTTS` if you want a smaller English Qwen3-style model.
 Current upstream note:
 
-- As of `0.6.1`, `TTSMLX` pins all MLX dependencies to public tagged forks under `github.com/fil-technology` (`mlx-audio-swift @ 0.1.3-tts.1`, `mlx-swift @ 0.31.5`, whose `mlx` C++ submodule points at `mlx @ v0.31.3-tts-bg-safe.1`). These forks carry the KV-cache reset and iOS background-safe Metal patches that are not yet in any upstream tagged release. The package is now consumable end to end from GitHub with no local-path checkout. See `Docs/mlx-swift-bg-safe-fork.md`.
-- The wrapper catalog only lists model families that the current local `mlx-audio-swift` runtime can synthesize with end to end.
-- New upstream `mlx-audio v0.4.2` TTS families such as `Irodori-TTS`, `HumeAI TADA`, `KugelAudio TTS`, and `Voxtral-4B-TTS-2603` may still appear in model search as discovery-only results, but they are intentionally marked unsupported until the local Swift backend gains loaders for them.
-- `Kitten TTS` may also appear in search as discovery-only for now. The local backend can parse its model assets, but audio generation and streaming are still not wired through yet, so `TTSMLX` does not advertise it as runnable.
-- `MOSS-TTS-Nano` is tracked as planned support. As of April 13, 2026, it still requires the upstream OpenMOSS runtime rather than the local `mlx-audio-swift` backend used by `TTSMLX`.
+- As of `0.10.0`, `TTSMLX` runs on upstream `Blaizzy/mlx-audio-swift` v0.1.8 through the thin fork `fil-technology/mlx-audio-swift @ 0.1.8-tts.3` (38 TTS families; the fork only adds `TTSModelRegistry` and MOSS-TTS-Nano bundled voices), and on `fil-technology/mlx-swift @ 0.33.100` (upstream 0.33.0 whose `mlx` C++ submodule points at `mlx @ v0.33.0-tts-bg-safe.1`, the iOS background-safe Metal patch). `mlx-swift-lm` is no longer a dependency. See `Docs/mlx-swift-bg-safe-fork.md` and `Docs/model-support.md`.
+- The catalog lists a model with a descriptor (selectable by apps) only once TTSMLX has synthesized with it end to end; the 0.1.8 runtime routes to 38 families, and the ones not yet validated here (Chatterbox, Higgs v3, OmniVoice, Voxtral, LongCat, Ming, Dia, ...) are listed discovery-only with the reason in their `runtimeNotes`. `Docs/model-support.md` has the full tts-bench leaderboard matrix.
+- `Kitten TTS` stays discovery-only: the runtime's loader needs `voices.safetensors`, and the mlx-community checkpoint ships `voices.npz`.
+- `MOSS-TTS-Nano` runs on upstream's port plus the fork's bundled voices; reference-audio cloning now works through upstream's codec encoder.
 - Upstream additions outside the TTS wrapper scope, such as `Cohere Transcribe ASR`, `Qwen2-Audio-7B-Instruct`, `Moshi STS`, and Distil-Whisper documentation updates, are not exposed through `TTSMLX` yet.
 
 ## Model Catalog
@@ -130,14 +129,14 @@ these — don't pin older versions of them yourself.
 
 | Dependency | Required | Why the fork |
 | --- | --- | --- |
-| `mlx-audio-swift` | `fil-technology/mlx-audio-swift` **≥ 0.1.7-tts.2** | KV-cache reset (`broadcast_shapes` crash on model reuse) **and** companion-repository support (`TTSModelRegistry`, added in `0.1.6-tts.1`), which TTSMLX calls directly. |
-| `mlx-swift` | `fil-technology/mlx-swift` **0.31.5** | Repoints the MLX C++ submodule at `fil-technology/mlx` so iOS background-permission Metal errors are swallowed in `check_error()` (Metal-in-background crash fix). Functionally upstream 0.31.3 + that patch. |
+| `mlx-audio-swift` | `fil-technology/mlx-audio-swift` **0.1.8-tts.3** | Upstream v0.1.8 plus `TTSModelRegistry` (queryable loader table and companion repositories, which TTSMLX calls directly) and MOSS-TTS-Nano bundled voices / codebook dial / per-chunk decoding. |
+| `mlx-swift` | `fil-technology/mlx-swift` **0.33.100** | Upstream 0.33.0 with the MLX C++ submodule repointed at `fil-technology/mlx`, which ignores the iOS background-clamp error on in-flight Metal command buffers (Metal-in-background crash fix). The `.100` patch number is reserved so the tag can never collide with an upstream release. |
 
-**`mlx-swift` identity conflict.** `mlx-swift-lm` (and upstream `mlx-audio-swift`)
-name `ml-explore/mlx-swift`, so SwiftPM can resolve the shared `mlx-swift`
+**`mlx-swift` identity conflict.** Upstream `mlx-audio-swift` names
+`ml-explore/mlx-swift`, so SwiftPM can resolve the shared `mlx-swift`
 identity to upstream — an app **without** the Metal background patch, and the
 build still succeeds. Add this to your app's `.swiftpm/configuration/mirrors.json`
-(both spellings are required; `mlx-swift-lm` omits the `.git`):
+(both spellings are required; some packages omit the `.git`):
 
 ```json
 {
@@ -152,14 +151,15 @@ build still succeeds. Add this to your app's `.swiftpm/configuration/mirrors.jso
 ```
 
 `Tools/install-mirrors.sh` installs it and `Tools/verify-mlx-fork.sh` checks the
-resolved submodule URL and greps the patch marker out of `eval.cpp` — wire the
+resolved submodule URL and greps the patch marker out of `device.cpp` — wire the
 verify step into CI.
 
 **Common failure: `TTSModelRegistry` is undefined.** `TTSModelRegistry` lives in
 `mlx-audio-swift` (module `MLXAudioTTS`), **not** in TTSMLX's own source. A build
-error that it's undefined means your resolution is compiling TTSMLX against an
-**old `mlx-audio-swift`** (< `0.1.6-tts.1`) — usually a stale `Package.resolved`
-that wasn't re-resolved after bumping TTSMLX. Fix it by moving the fork up:
+error that it's undefined means your resolution is compiling TTSMLX against
+upstream `Blaizzy/mlx-audio-swift` or an **old fork tag** — usually a stale
+`Package.resolved` that wasn't re-resolved after bumping TTSMLX. Fix it by
+moving the fork up:
 
 ```bash
 swift package update mlx-audio-swift     # or: rm Package.resolved && swift package resolve
@@ -167,8 +167,8 @@ swift package update mlx-audio-swift     # or: rm Package.resolved && swift pack
 
 In Xcode: **File ▸ Packages ▸ Reset Package Caches**, then **Update to Latest
 Package Versions**. Confirm your `Package.resolved` then shows
-`fil-technology/mlx-audio-swift` at `0.1.7-tts.2`
-(revision `bb5cda2a2c85bc0d369b102552527643b2463fb9`).
+`fil-technology/mlx-audio-swift` at `0.1.8-tts.3` and `mlx-swift` at
+`0.33.100` from `fil-technology/mlx-swift`.
 
 ## Streaming
 
