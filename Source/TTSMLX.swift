@@ -580,28 +580,75 @@ public enum TTSMLX {
             )
         ),
 
+        .init(
+            id: "mlx-community/chatterbox-turbo-4bit",
+            displayName: "Chatterbox Turbo 4-bit",
+            summary: "Resemble AI Chatterbox Turbo (~350M GPT-2 T3 over S3 tokens, one-step distilled S3Gen): #3 on the tts-bench board. English, 24 kHz, bundled default voice, cloning from a clip, `[laugh]`/`[chuckle]`/`[sigh]`-style event tags. MIT upstream.",
+            supportStage: .implemented,
+            supportedLanguages: [.english],
+            runtimeNotes: """
+                Routes to the chatterbox loader (runtime 0.1.8-tts.3+). The loader fetches the \
+                companion `mlx-community/S3TokenizerV2` repo (495 MB) at first load on top of \
+                the 417 MB checkpoint; `TTSBackgroundModelDownloader` plans both. Voice is \
+                either the bundled `conds.safetensors` default (`default`) or a reference clip \
+                through `TTSSynthesisOptions.referenceAudio` (any sample rate; resampled to \
+                16 kHz, first 10-15 s used). Event tags such as `[laugh]`, `[chuckle]`, \
+                `[sigh]`, `[cough]`, `[gasp]` go inline in the text. Loads and synthesizes end \
+                to end on macOS with both the default voice and a 48 kHz reference clip. \
+                Latency: the runtime generates a chunk whole (no token-level streaming), and the \
+                T3 stage runs about 12 tokens/s in a debug build (25 tokens = 1 s of audio), so \
+                the first audio of a chunk arrives after roughly twice the chunk's duration; \
+                S3Gen and the vocoder add about 1 s warm. Memory on macOS: MLX peak active \
+                2.5 GB for a two-sentence chunk, but the MLX buffer cache grows to 7 GB over a \
+                run unless the app caps it (`MLX.Memory.cacheLimit`; 512 MB held the \
+                process footprint at 3.2 GB) or calls `releaseRuntimeBuffers()` between \
+                utterances. Pending on-device validation. fp16 (3 GB) and 8-bit (0.7 GB) \
+                checkpoints exist but have not been run here.
+                """,
+            modelURL: URL(string: "https://huggingface.co/mlx-community/chatterbox-turbo-4bit"),
+            projectURL: URL(string: "https://github.com/resemble-ai/chatterbox"),
+            descriptor: .init(
+                id: "mlx-community/chatterbox-turbo-4bit",
+                displayName: "Chatterbox Turbo 4-bit",
+                summary: "English model with a bundled default voice, reference-clip cloning and inline event tags.",
+                supportedLanguages: [.english],
+                suggestedVoices: ["default"],
+                capabilities: .init(
+                    isRuntimeSupported: true,
+                    supportsReferenceAudio: true,
+                    supportsLanguageList: true,
+                    supportedLanguages: [.english],
+                    defaultGenerationProfile: .balanced,
+                    peakMemoryMB: 2_500,
+                    minimumDeviceClass: .iPhone
+                ),
+                modelURL: URL(string: "https://huggingface.co/mlx-community/chatterbox-turbo-4bit"),
+                files: [
+                    "config.json",
+                    "conds.safetensors",
+                    "model.safetensors",
+                    "model.safetensors.index.json",
+                    "added_tokens.json",
+                    "merges.txt",
+                    "special_tokens_map.json",
+                    "tokenizer_config.json",
+                    "vocab.json"
+                ]
+            )
+        ),
+
         // MARK: Discovery-only entries. The 0.1.8-tts.3 runtime routes to every
         // family below, but none has been synthesized end to end through TTSMLX
         // yet, so they carry no descriptor: apps can list them, not select them.
         // Reasons are in runtimeNotes; see Docs/model-support.md for the full
         // leaderboard matrix.
         .init(
-            id: "mlx-community/chatterbox-turbo-fp16",
-            displayName: "Chatterbox Turbo",
-            summary: "Resemble AI Chatterbox Turbo (~350M T3 over S3 tokens, one-step S3Gen): #3 on the tts-bench board. English, voice cloning, bundled default voice, `[laugh]`/`[cough]` tags. MIT.",
-            supportStage: .implemented,
-            supportedLanguages: [.english],
-            runtimeNotes: "Routes to the chatterbox loader (companion repo mlx-community/S3TokenizerV2). Not validated here: the fp16 checkpoint is 3 GB and this machine's disk could not hold it during the 0.10.0 cycle; the 4-bit build (chatterbox-turbo-4bit) is the one to validate first.",
-            modelURL: URL(string: "https://huggingface.co/mlx-community/chatterbox-turbo-fp16"),
-            projectURL: URL(string: "https://github.com/resemble-ai/chatterbox")
-        ),
-        .init(
             id: "mlx-community/chatterbox-fp16",
             displayName: "Chatterbox",
             summary: "Resemble AI Chatterbox (~0.5B T3 Llama over S3 tokens, flow-matching S3Gen): #2 on the tts-bench board. Cloning from a clip, exaggeration and CFG knobs. MIT.",
             supportStage: .implemented,
             supportedLanguages: [.english],
-            runtimeNotes: "Routes to the chatterbox loader. Not validated here for the same disk reason as Chatterbox Turbo; the multilingual v3 weights are a separate repo.",
+            runtimeNotes: "Routes to the chatterbox loader (same stack as Chatterbox Turbo 4-bit, which is validated here), adding exaggeration and CFG knobs and a 10-step flow-matching S3Gen. Not run here yet: 2.6 GB download; the multilingual v3 weights are a separate repo.",
             modelURL: URL(string: "https://huggingface.co/mlx-community/chatterbox-fp16"),
             projectURL: URL(string: "https://github.com/resemble-ai/chatterbox")
         ),

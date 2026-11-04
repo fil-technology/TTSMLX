@@ -34,6 +34,28 @@ struct TTSModelCatalogTests {
         #expect(descriptor.capabilities.supportsReferenceAudio)
     }
 
+    @Test("Chatterbox Turbo 4-bit is implemented with cloning, a default voice and a full file plan")
+    func chatterboxTurboEntry() throws {
+        let e = try #require(entry("mlx-community/chatterbox-turbo-4bit"))
+        let descriptor = try #require(e.descriptor)
+        #expect(e.supportStage == .implemented)
+        #expect(descriptor.capabilities.isRuntimeSupported)
+        #expect(descriptor.capabilities.supportsReferenceAudio)
+        #expect(descriptor.suggestedVoices.first == "default")
+        #expect(descriptor.supportedLanguages == [.english])
+        // The bundled default voice must be part of the background download plan,
+        // or a fresh install would fail the no-reference-audio path.
+        let files = try #require(descriptor.files)
+        #expect(files.contains("conds.safetensors"))
+        #expect(files.contains("model.safetensors"))
+        // The S3TokenizerV2 companion is planned by the registry, not the file list.
+        #expect(TTSBackgroundModelDownloader.companionRepositories(for: descriptor)
+            == ["mlx-community/S3TokenizerV2"])
+        // The fp16 build stays discovery-only (3 GB; never run here).
+        #expect(entry("mlx-community/chatterbox-turbo-fp16") == nil)
+        #expect(entry("mlx-community/chatterbox-fp16")?.descriptor == nil)
+    }
+
     @Test("Soprano-80M-4bit is a tiny, fast English entry")
     func sopranoFastVariant() throws {
         let e = try #require(entry("mlx-community/Soprano-80M-4bit"))
