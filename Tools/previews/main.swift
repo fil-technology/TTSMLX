@@ -60,6 +60,13 @@ let specs: [String: [ClipSpec]] = [
         .init(label: "US_Emma-en", voice: "US_Emma", language: "English", text: english),
         .init(label: "UK_George-fr", voice: "UK_George", language: "French", text: french),
     ],
+    "mlx-community/Voxtral-4B-TTS-2603-mlx-4bit": [
+        .init(label: "casual_male-en", voice: "casual_male", language: "English", text: english),
+        .init(label: "fr_female-fr", voice: "fr_female", language: "French", text: french),
+    ],
+    "mlx-community/OmniVoice": [
+        .init(label: "design-en", voice: "female, warm, clear voice", language: "English", text: english),
+    ],
     "mlx-community/chatterbox-turbo-4bit": [
         .init(label: "default-en", voice: nil, language: nil, text: english),
         .init(label: "default-tags", voice: nil, language: nil, text: tagged),
@@ -111,6 +118,8 @@ for entry in TTSMLX.modelCatalog {
         record["defaultGenerationProfile"] = "\(d.capabilities.defaultGenerationProfile)"
         record["files"] = d.files ?? []
         record["features"] = d.sortedFeatures.map(\.displayName)
+        record["license"] = entry.license.name
+        record["usageTier"] = entry.license.tier.displayName
         record["eventTags"] = d.supportedEventTags.map { "\($0.marker) → \(d.capabilities.eventTags[$0]!)" }
         record["sampleRate"] = d.capabilities.sampleRate ?? 0
         record["voiceDetails"] = d.suggestedVoices.map {

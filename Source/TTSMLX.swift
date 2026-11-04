@@ -108,6 +108,34 @@ public enum TTSMLX {
     /// Ming-3.0-TTS target languages. Chinese and English need no language
     /// option; the other five are passed to the runtime as a target-language
     /// line in the prompt (`TTSSynthesisOptions.language`).
+    static let omniVoiceLanguages: [TTSLanguage] = [.english, .chinese, .spanish, .french, .german, .japanese]
+
+    static let voxtralLanguages: [TTSLanguage] = [.english, .french, .spanish, .german, .italian, .portuguese, .dutch, .arabic, .hindi]
+
+    /// Voxtral's preset voices: five English styles, then one or two per language.
+    static let voxtralVoices: [TTSVoice] = [
+        TTSVoice("casual_male", displayName: "Casual (male)", language: .english, gender: .male),
+        TTSVoice("casual_female", displayName: "Casual (female)", language: .english, gender: .female),
+        TTSVoice("cheerful_female", displayName: "Cheerful (female)", language: .english, gender: .female),
+        TTSVoice("neutral_female", displayName: "Neutral (female)", language: .english, gender: .female),
+        TTSVoice("neutral_male", displayName: "Neutral (male)", language: .english, gender: .male),
+        TTSVoice("fr_female", displayName: "French (female)", language: .french, gender: .female),
+        TTSVoice("fr_male", displayName: "French (male)", language: .french, gender: .male),
+        TTSVoice("es_female", displayName: "Spanish (female)", language: .spanish, gender: .female),
+        TTSVoice("es_male", displayName: "Spanish (male)", language: .spanish, gender: .male),
+        TTSVoice("de_female", displayName: "German (female)", language: .german, gender: .female),
+        TTSVoice("de_male", displayName: "German (male)", language: .german, gender: .male),
+        TTSVoice("it_female", displayName: "Italian (female)", language: .italian, gender: .female),
+        TTSVoice("it_male", displayName: "Italian (male)", language: .italian, gender: .male),
+        TTSVoice("pt_female", displayName: "Portuguese (female)", language: .portuguese, gender: .female),
+        TTSVoice("pt_male", displayName: "Portuguese (male)", language: .portuguese, gender: .male),
+        TTSVoice("nl_female", displayName: "Dutch (female)", language: .dutch, gender: .female),
+        TTSVoice("nl_male", displayName: "Dutch (male)", language: .dutch, gender: .male),
+        TTSVoice("ar_male", displayName: "Arabic (male)", language: .arabic, gender: .male),
+        TTSVoice("hi_female", displayName: "Hindi (female)", language: .hindi, gender: .female),
+        TTSVoice("hi_male", displayName: "Hindi (male)", language: .hindi, gender: .male),
+    ]
+
     static let mingLanguages: [TTSLanguage] = [.chinese, .english, .japanese, .korean, .german, .french, .spanish]
 
     static let chatterboxLanguages: [TTSLanguage] = [
@@ -168,7 +196,8 @@ public enum TTSMLX {
                     sampleRate: 24_000
                 )
             ),
-            modelURL: URL(string: "https://huggingface.co/Marvis-AI/marvis-tts-250m-v0.2-MLX-8bit")
+            modelURL: URL(string: "https://huggingface.co/Marvis-AI/marvis-tts-250m-v0.2-MLX-8bit"),
+            license: .apache2
         ),
         validatedEntry(
             descriptor: .init(
@@ -210,7 +239,8 @@ public enum TTSMLX {
                     "embeddings/marius.safetensors"
                 ]
             ),
-            modelURL: URL(string: "https://huggingface.co/mlx-community/pocket-tts")
+            modelURL: URL(string: "https://huggingface.co/mlx-community/pocket-tts"),
+            license: .ccBy4(credit: "Kyutai (Pocket-TTS)")
         ),
         validatedEntry(
             descriptor: .init(
@@ -240,7 +270,8 @@ public enum TTSMLX {
                     "model.safetensors.index.json"
                 ]
             ),
-            modelURL: URL(string: "https://huggingface.co/mlx-community/Soprano-80M-bf16")
+            modelURL: URL(string: "https://huggingface.co/mlx-community/Soprano-80M-bf16"),
+            license: .apache2
         ),
         validatedEntry(
             descriptor: .init(
@@ -260,7 +291,8 @@ public enum TTSMLX {
                     sampleRate: 24_000
                 )
             ),
-            modelURL: URL(string: "https://huggingface.co/mlx-community/VyvoTTS-EN-Beta-4bit")
+            modelURL: URL(string: "https://huggingface.co/mlx-community/VyvoTTS-EN-Beta-4bit"),
+            license: .unknown
         ),
         validatedEntry(
             descriptor: .init(
@@ -290,7 +322,8 @@ public enum TTSMLX {
                     sampleRate: 24_000
                 )
             ),
-            modelURL: URL(string: "https://huggingface.co/mlx-community/orpheus-3b-0.1-ft-bf16")
+            modelURL: URL(string: "https://huggingface.co/mlx-community/orpheus-3b-0.1-ft-bf16"),
+            license: .apache2
         ),
         validatedEntry(
             descriptor: .init(
@@ -316,7 +349,8 @@ public enum TTSMLX {
                     sampleRate: 24_000
                 )
             ),
-            modelURL: URL(string: "https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit")
+            modelURL: URL(string: "https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit"),
+            license: .apache2
         ),
         // ── Additional multilingual / fast variants ───────────────────────
         // All of the following route to a loader the backend already ships
@@ -354,7 +388,8 @@ public enum TTSMLX {
                     minimumDeviceClass: .iPhone,
                     sampleRate: 24_000
                 )
-            )
+            ),
+            license: .apache2
         ),
         .init(
             id: "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-4bit",
@@ -382,7 +417,8 @@ public enum TTSMLX {
                     minimumDeviceClass: .iPhone,
                     sampleRate: 24_000
                 )
-            )
+            ),
+            license: .apache2
         ),
         .init(
             id: "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-4bit",
@@ -409,7 +445,8 @@ public enum TTSMLX {
                     features: [.instruction, .emotion, .speed],
                     sampleRate: 24_000
                 )
-            )
+            ),
+            license: .apache2
         ),
         .init(
             id: "mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-4bit",
@@ -436,7 +473,8 @@ public enum TTSMLX {
                     features: [.instruction, .emotion, .speed],
                     sampleRate: 24_000
                 )
-            )
+            ),
+            license: .apache2
         ),
         .init(
             id: "mlx-community/Soprano-80M-4bit",
@@ -472,7 +510,8 @@ public enum TTSMLX {
                     "model.safetensors",
                     "model.safetensors.index.json"
                 ]
-            )
+            ),
+            license: .apache2
         ),
         .init(
             id: "mlx-community/Soprano-1.1-80M-bf16",
@@ -509,7 +548,8 @@ public enum TTSMLX {
                     "model.safetensors",
                     "model.safetensors.index.json"
                 ]
-            )
+            ),
+            license: .apache2
         ),
         .init(
             id: "mlx-community/Kokoro-82M-bf16",
@@ -547,7 +587,8 @@ public enum TTSMLX {
                 ),
                 modelURL: URL(string: "https://huggingface.co/mlx-community/Kokoro-82M-bf16"),
                 files: Self.kokoroFiles
-            )
+            ),
+            license: .apache2
         ),
         .init(
             id: "gradium/phonon-31m-en",
@@ -592,7 +633,8 @@ public enum TTSMLX {
                     "default-voice.safetensors",
                     "model.safetensors"
                 ]
-            )
+            ),
+            license: .apache2
         ),
         .init(
             id: "mlx-community/MeloTTS-English-MLX",
@@ -630,7 +672,8 @@ public enum TTSMLX {
                 ),
                 modelURL: URL(string: "https://huggingface.co/mlx-community/MeloTTS-English-MLX"),
                 files: ["config.json", "model.safetensors", "bert_weights.npz"]
-            )
+            ),
+            license: .mit
         ),
         .init(
             id: "mlx-community/kitten-tts-mini-0.8",
@@ -639,7 +682,8 @@ public enum TTSMLX {
             supportStage: .implemented,
             supportedLanguages: [.english],
             runtimeNotes: "Discovery-only. The kitten_tts loader (runtime 0.1.8-tts.3) requires `voices.safetensors`, while mlx-community/kitten-tts-mini-0.8 ships only `voices.npz`, which the loader rejects by design; load fails with \"No voices file found\". Needs a converted voices file in the repo or a conversion step at download time.",
-            modelURL: URL(string: "https://huggingface.co/mlx-community/kitten-tts-mini-0.8")
+            modelURL: URL(string: "https://huggingface.co/mlx-community/kitten-tts-mini-0.8"),
+            license: .apache2
         ),
         .init(
             id: "mlx-community/MOSS-TTS-Nano-100M",
@@ -690,7 +734,8 @@ public enum TTSMLX {
                     sampleRate: 48_000
                 ),
                 modelURL: URL(string: "https://huggingface.co/mlx-community/MOSS-TTS-Nano-100M")
-            )
+            ),
+            license: .apache2
         ),
 
         .init(
@@ -749,7 +794,8 @@ public enum TTSMLX {
                     "tokenizer_config.json",
                     "vocab.json"
                 ]
-            )
+            ),
+            license: .mit
         ),
 
         .init(
@@ -808,7 +854,8 @@ public enum TTSMLX {
                     "tokenizer.json",
                     "Cangjie5_TC.json"
                 ]
-            )
+            ),
+            license: .mit
         ),
 
         .init(
@@ -879,7 +926,8 @@ public enum TTSMLX {
                     "added_tokens.json",
                     "special_tokens_map.json"
                 ]
-            )
+            ),
+            license: .mit
         ),
 
         // MARK: Discovery-only entries. The 0.1.8-tts.3 runtime routes to every
@@ -895,27 +943,103 @@ public enum TTSMLX {
             supportedLanguages: [.english, .chinese, .spanish, .french, .german, .japanese, .korean],
             runtimeNotes: "Routes to the higgs_audio_v3 loader. Listed for research use only: the weights forbid commercial use, and at ~8 GB bf16 with no mlx-community quantization yet they exceed what phones can hold.",
             modelURL: URL(string: "https://huggingface.co/bosonai/higgs-tts-3-4b"),
-            projectURL: URL(string: "https://github.com/boson-ai/higgs-audio")
+            projectURL: URL(string: "https://github.com/boson-ai/higgs-audio"),
+            license: .researchOnly(name: "Boson Higgs TTS 3 Research and Non-Commercial License", url: URL(string: "https://huggingface.co/bosonai/higgs-tts-3-4b"), note: "Research use only; no commercial use and no public distribution of generated audio.")
         ),
         .init(
             id: "mlx-community/OmniVoice",
             displayName: "OmniVoice",
-            summary: "OmniVoice (~1B diffusion LM over Qwen3-0.6B with the Higgs v2 codec): #8 on the board. 600+ languages, cloning, voice design. Weights are CC-BY-NC.",
+            summary: "OmniVoice (~1B bidirectional diffusion LM over Qwen3-0.6B with the Higgs v2 codec): #8 on the tts-bench board. Voice design from a description, cloning from a clip plus its transcript, 24 kHz. Weights are CC-BY-NC: non-commercial use only.",
             supportStage: .implemented,
-            supportedLanguages: [.english, .chinese, .spanish, .french, .german, .japanese],
-            runtimeNotes: "Routes to the omnivoice loader (3.3 GB incl. the bundled audio tokenizer). Listed for research use only because the weights are non-commercial; not validated here.",
+            supportedLanguages: omniVoiceLanguages,
+            runtimeNotes: """
+                Routes to the omnivoice loader (3.3 GB fp32 checkpoint with the bundled Higgs v2 \
+                audio tokenizer). Weights are CC-BY-NC: this entry is only reachable through \
+                `TTSMLX.models(maximumTier: .nonCommercial)`, never `supportedModels`. No preset \
+                voices: leave the voice empty for the model's own speaker, describe one in words \
+                through `voice` or `instruction` ("female, warm, clear voice"; `emotion` and \
+                `speed` are folded into the description), or clone a clip through \
+                `referenceAudio` plus `referenceText` (the transcript is required). Validated on \
+                macOS: auto voice, voice design, instruction with emotion, a French clone from an \
+                English clip, and streaming. About 1x realtime warm in a debug build; \
+                generation is non-autoregressive (32 diffusion steps), so a streaming request \
+                delivers everything at the end. Memory: MLX peak 5.0-5.7 GB (active 3.0 GB) with \
+                the cache capped at 512 MB, 6.3 GB process footprint, which is why the entry is \
+                gated to Macs. `mlx-community/OmniVoice-bf16` (1.6 GB) halves that for voice \
+                design but strips the semantic encoder, so it cannot clone; not validated here.
+                """,
             modelURL: URL(string: "https://huggingface.co/mlx-community/OmniVoice"),
-            projectURL: URL(string: "https://github.com/k2-fsa/OmniVoice")
+            projectURL: URL(string: "https://github.com/k2-fsa/OmniVoice"),
+            descriptor: .init(
+                id: "mlx-community/OmniVoice",
+                displayName: "OmniVoice",
+                summary: "Voice design from a description and cloning from a clip; non-commercial weights.",
+                supportedLanguages: omniVoiceLanguages,
+                suggestedVoices: [],
+                capabilities: .init(
+                    isRuntimeSupported: true,
+                    supportsReferenceAudio: true,
+                    supportsLanguageList: true,
+                    supportedLanguages: omniVoiceLanguages,
+                    defaultGenerationProfile: .balanced,
+                    // fp32 weights: 3.0 GB active, 5.7 GB MLX peak on macOS. Too much for
+                    // phones; the bf16 build is the phone candidate once it is validated.
+                    peakMemoryMB: 6_000,
+                    minimumDeviceClass: .mac,
+                    features: [.instruction, .voiceDesign, .referenceTranscript],
+                    sampleRate: 24_000
+                ),
+                modelURL: URL(string: "https://huggingface.co/mlx-community/OmniVoice"),
+                files: [
+                    "config.json", "model.safetensors", "model.safetensors.index.json", "tokenizer.json",
+                    "tokenizer_config.json", "chat_template.jinja", "mlx_manifest.json",
+                    "audio_tokenizer/config.json", "audio_tokenizer/model.safetensors", "audio_tokenizer/preprocessor_config.json"
+                ]
+            ),
+            license: TTSModelLicense(name: "CC-BY-NC", tier: .nonCommercial, url: URL(string: "https://github.com/k2-fsa/OmniVoice"), note: "The code is Apache-2.0; the weights are non-commercial.")
         ),
         .init(
             id: "mlx-community/Voxtral-4B-TTS-2603-mlx-4bit",
             displayName: "Voxtral 4B TTS",
-            summary: "Mistral Voxtral TTS (Ministral-3B backbone, 4-bit): #10 on the board. 9 languages, 20 preset voices, cloning, streaming. CC-BY-NC-4.0.",
+            summary: "Mistral Voxtral TTS (Ministral-3B backbone + flow-matching audio decoder, 4-bit): #10 on the tts-bench board. 9 languages, 20 preset voices, 24 kHz, incremental output. CC-BY-NC-4.0: non-commercial use only.",
             supportStage: .implemented,
-            supportedLanguages: [.english, .french, .german, .spanish, .italian, .portuguese, .dutch, .hindi, .arabic],
-            runtimeNotes: "Routes to the voxtral_tts loader (2.5 GB). Listed for research use only because the weights are non-commercial; not validated here.",
+            supportedLanguages: voxtralLanguages,
+            runtimeNotes: """
+                Routes to the voxtral_tts loader (2.5 GB 4-bit checkpoint with the 20 voice \
+                embeddings). Weights are CC-BY-NC-4.0: this entry is only reachable through \
+                `TTSMLX.models(maximumTier: .nonCommercial)`, never `supportedModels`. Voices are \
+                tied to languages (each `TTSVoice.language` says which); pass a voice for the \
+                language of the text. No reference audio and no delivery controls (`emotion`, \
+                `speed`, `instruction` are reported as ignored). Validated on macOS in English \
+                and French: about 0.8x realtime warm in a debug build, incremental output with \
+                the first streamed chunk after 2.8-3.7 s, first load about 60 s. Memory: MLX peak \
+                3.1-3.4 GB (active 2.4 GB) with the cache capped at 512 MB (3.8 GB process \
+                footprint); uncapped the cache grows to 3.2 GB (5.9 GB footprint). Plan on an \
+                8 GB device; pending on-device validation.
+                """,
             modelURL: URL(string: "https://huggingface.co/mlx-community/Voxtral-4B-TTS-2603-mlx-4bit"),
-            projectURL: URL(string: "https://huggingface.co/mistralai/Voxtral-4B-TTS-2603")
+            projectURL: URL(string: "https://huggingface.co/mistralai/Voxtral-4B-TTS-2603"),
+            descriptor: .init(
+                id: "mlx-community/Voxtral-4B-TTS-2603-mlx-4bit",
+                displayName: "Voxtral 4B TTS",
+                summary: "Nine languages with twenty preset voices; non-commercial weights.",
+                supportedLanguages: voxtralLanguages,
+                suggestedVoices: voxtralVoices,
+                capabilities: .init(
+                    isRuntimeSupported: true,
+                    supportsReferenceAudio: false,
+                    supportsLanguageList: true,
+                    supportedLanguages: voxtralLanguages,
+                    defaultGenerationProfile: .balanced,
+                    peakMemoryMB: 4_000,
+                    minimumDeviceClass: .iPhone,
+                    sampleRate: 24_000
+                ),
+                modelURL: URL(string: "https://huggingface.co/mlx-community/Voxtral-4B-TTS-2603-mlx-4bit"),
+                files: ["config.json", "model.safetensors", "model.safetensors.index.json", "params.json", "tekken.json"]
+                    + voxtralVoices.map { "voice_embedding/\($0.identifier).safetensors" }
+            ),
+            license: .ccByNc4
         ),
         .init(
             id: "mlx-community/LongCat-AudioDiT-1B-bf16",
@@ -925,7 +1049,8 @@ public enum TTSMLX {
             supportedLanguages: [.chinese, .english],
             runtimeNotes: "Routes to the longcat_audiodit loader. Not validated here: 5.7 GB bf16 download; the 4-bit build is the candidate for phones. Non-streaming by design, so time to first audio equals the whole chunk.",
             modelURL: URL(string: "https://huggingface.co/mlx-community/LongCat-AudioDiT-1B-bf16"),
-            projectURL: URL(string: "https://github.com/meituan-longcat/LongCat-AudioDiT")
+            projectURL: URL(string: "https://github.com/meituan-longcat/LongCat-AudioDiT"),
+            license: .mit
         ),
         .init(
             id: "mlx-community/maya1-4bit",
@@ -935,7 +1060,8 @@ public enum TTSMLX {
             supportedLanguages: [.english],
             runtimeNotes: "Routes to the llama_tts (Orpheus) loader with the SNAC companion repo. Needs the `<description=\"…\">` prompt format wired through the voice option before it is useful; not validated here.",
             modelURL: URL(string: "https://huggingface.co/mlx-community/maya1-4bit"),
-            projectURL: URL(string: "https://huggingface.co/maya-research/maya1")
+            projectURL: URL(string: "https://huggingface.co/maya-research/maya1"),
+            license: .apache2
         ),
         .init(
             id: "mlx-community/csm-1b-8bit",
@@ -945,7 +1071,8 @@ public enum TTSMLX {
             supportedLanguages: [.english],
             runtimeNotes: "Routes to the csm loader shared with Marvis. Not validated here; validate the load and the speaker-id voice mapping before adding a descriptor.",
             modelURL: URL(string: "https://huggingface.co/mlx-community/csm-1b-8bit"),
-            projectURL: URL(string: "https://github.com/SesameAILabs/csm")
+            projectURL: URL(string: "https://github.com/SesameAILabs/csm"),
+            license: .apache2
         ),
         .init(
             id: "mlx-community/Llama-OuteTTS-1.0-1B-fp16",
@@ -955,7 +1082,8 @@ public enum TTSMLX {
             supportedLanguages: [.english, .chinese, .japanese, .korean, .german, .french, .spanish, .italian, .portuguese, .dutch, .arabic, .russian],
             runtimeNotes: "Routes to the outetts loader with the mlx-community/dac-speech-24khz-1.5kbps companion repo. Listed for research use only because the weights are non-commercial; not validated here.",
             modelURL: URL(string: "https://huggingface.co/mlx-community/Llama-OuteTTS-1.0-1B-fp16"),
-            projectURL: URL(string: "https://github.com/edwko/OuteTTS")
+            projectURL: URL(string: "https://github.com/edwko/OuteTTS"),
+            license: TTSModelLicense(name: "CC-BY-NC-SA-4.0 + Llama 3.2", tier: .nonCommercial, url: URL(string: "https://huggingface.co/OuteAI/Llama-OuteTTS-1.0-1B"), note: "The OuteTTS weights are non-commercial; the Llama 3.2 licence applies as well.")
         ),
         .init(
             id: "mlx-community/VibeVoice-Realtime-0.5B-8bit",
@@ -965,7 +1093,8 @@ public enum TTSMLX {
             supportedLanguages: [.english],
             runtimeNotes: "Routes to the vibevoice_streaming loader. Not validated here.",
             modelURL: URL(string: "https://huggingface.co/mlx-community/VibeVoice-Realtime-0.5B-8bit"),
-            projectURL: URL(string: "https://github.com/microsoft/VibeVoice")
+            projectURL: URL(string: "https://github.com/microsoft/VibeVoice"),
+            license: .mit
         ),
         .init(
             id: "mlx-community/Audio8-TTS-Preview-0.6b-bf16",
@@ -975,7 +1104,8 @@ public enum TTSMLX {
             supportedLanguages: [.english, .chinese, .japanese, .korean, .german, .french, .spanish, .italian, .portuguese, .russian, .arabic],
             runtimeNotes: "Routes to the arktts (Audio8) loader. Not validated here.",
             modelURL: URL(string: "https://huggingface.co/mlx-community/Audio8-TTS-Preview-0.6b-bf16"),
-            projectURL: URL(string: "https://huggingface.co/Audio8")
+            projectURL: URL(string: "https://huggingface.co/Audio8"),
+            license: .apache2
         ),
         .init(
             id: "mlx-community/VoxCPM2-4bit",
@@ -985,7 +1115,8 @@ public enum TTSMLX {
             supportedLanguages: [.chinese, .english, .japanese, .korean, .german, .french, .spanish, .italian, .portuguese, .russian],
             runtimeNotes: "Routes to the voxcpm2 loader. Not validated here.",
             modelURL: URL(string: "https://huggingface.co/mlx-community/VoxCPM2-4bit"),
-            projectURL: URL(string: "https://github.com/OpenBMB/VoxCPM")
+            projectURL: URL(string: "https://github.com/OpenBMB/VoxCPM"),
+            license: .apache2
         ),
         .init(
             id: "mlx-community/Dia-1.6B",
@@ -995,13 +1126,25 @@ public enum TTSMLX {
             supportedLanguages: [.english],
             runtimeNotes: "Routes to the dia loader with the mlx-community/descript-audio-codec-44khz companion repo. Not validated here; dialogue-script prompting needs its own text formatting before it suits narration.",
             modelURL: URL(string: "https://huggingface.co/mlx-community/Dia-1.6B"),
-            projectURL: URL(string: "https://github.com/nari-labs/dia")
+            projectURL: URL(string: "https://github.com/nari-labs/dia"),
+            license: .apache2
         ),
     ]
 
     public static let supportedModels: [TTSModelDescriptor] = modelCatalog.compactMap { entry in
         guard entry.supportStage == .validated else { return nil }
         return entry.descriptor
+    }
+
+    /// Every catalog model with a descriptor (validated or implemented) whose
+    /// licence tier is at most `maximumTier`, in catalog order. Pass
+    /// `.nonCommercial` for a personal, non-monetised project; `.researchOnly`
+    /// only if nothing generated leaves the lab.
+    public static func models(maximumTier: TTSModelUsageTier) -> [TTSModelDescriptor] {
+        modelCatalog.compactMap { entry in
+            guard entry.supportStage != .planned, entry.license.tier <= maximumTier else { return nil }
+            return entry.descriptor
+        }
     }
 
     public static let validatedModels: [TTSModelCatalogEntry] = modelCatalog.filter { $0.supportStage == .validated }
@@ -1081,7 +1224,8 @@ public enum TTSMLX {
 private extension TTSMLX {
     static func validatedEntry(
         descriptor: TTSModelDescriptor,
-        modelURL: URL?
+        modelURL: URL?,
+        license: TTSModelLicense
     ) -> TTSModelCatalogEntry {
         TTSModelCatalogEntry(
             id: descriptor.id,
@@ -1091,7 +1235,8 @@ private extension TTSMLX {
             supportedLanguages: descriptor.supportedLanguages,
             runtimeNotes: "Validated against the current TTSMLX wrapper and local MLXAudioTTS runtime.",
             modelURL: modelURL,
-            descriptor: descriptor
+            descriptor: descriptor,
+            license: license
         )
     }
 }

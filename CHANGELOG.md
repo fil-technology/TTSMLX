@@ -6,6 +6,25 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-04
+
+### Added
+- Licence tiers. Every catalog entry (and its descriptor) carries a
+  `TTSModelLicense` with a `TTSModelUsageTier`: commercial (MIT, Apache-2.0),
+  attribution required (CC-BY: Pocket-TTS), non-commercial (CC-BY-NC and
+  -SA), research only (Higgs v3) or unknown (VyvoTTS publishes none).
+  `TTSMLX.supportedModels` stays commercial-only; `TTSMLX.models(maximumTier:)`
+  is the explicit opt-in for the rest. The previews table shows the licence.
+- `mlx-community/Voxtral-4B-TTS-2603-mlx-4bit` (Mistral, CC-BY-NC-4.0) is
+  validated on macOS and has a descriptor: 9 languages, 20 preset voices tied
+  to their language, incremental output. About 0.8x realtime warm, first
+  streamed chunk in 2.8-3.7 s, MLX peak 3.1-3.4 GB with the cache capped.
+- `mlx-community/OmniVoice` (k2-fsa, CC-BY-NC weights) is validated on macOS
+  and has a descriptor: voice design from a description (through
+  `TTSSynthesisOptions.voice` or `instruction`) and cloning from a clip plus
+  its transcript. About 1x realtime warm, all audio at the end (non-autoregressive), MLX
+  peak 5.0-5.7 GB in fp32, so the entry is gated to Macs.
+
 ## [0.12.0] - 2026-11-04
 
 ### Changed
