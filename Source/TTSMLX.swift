@@ -46,6 +46,15 @@ public enum TTSMLX {
         "zf_xiaobei", "zf_xiaoni", "zf_xiaoxiao", "zf_xiaoyi", "zm_yunjian", "zm_yunxi", "zm_yunxia", "zm_yunyang"
     ]
 
+    /// The 23 languages of the Chatterbox multilingual checkpoint, as `[xx]` tags
+    /// in its tokenizer: ar da de el en es fi fr he hi it ja ko ms nl no pl pt
+    /// ru sv sw tr zh.
+    static let chatterboxLanguages: [TTSLanguage] = [
+        .english, .french, .german, .spanish, .italian, .portuguese, .dutch, .polish,
+        .turkish, .russian, .japanese, .korean, .chinese, .arabic, .hindi, .danish,
+        .swedish, .greek, "Finnish", "Hebrew", "Malay", "Norwegian", "Swahili"
+    ]
+
     static let kokoroLanguages: [TTSLanguage] = [
         .english, .spanish, .french, .hindi, .italian, .japanese, .portuguese, .chinese
     ]
@@ -637,21 +646,67 @@ public enum TTSMLX {
             )
         ),
 
+        .init(
+            id: "mlx-community/chatterbox-4bit",
+            displayName: "Chatterbox 4-bit",
+            summary: "Resemble AI Chatterbox (~0.5B Llama T3 over S3 tokens, 10-step flow-matching S3Gen): #2 on the tts-bench board. Multilingual weights (23 languages), 24 kHz, bundled default voice, cloning from a clip, inline `[laughter]`/`[sigh]`-style tags. MIT upstream.",
+            supportStage: .implemented,
+            supportedLanguages: chatterboxLanguages,
+            runtimeNotes: """
+                Routes to the chatterbox loader (runtime 0.1.8-tts.4+, which adds the \
+                reference text pipeline for the regular model: punctuation normalisation, \
+                lowercase + NFKD for the multilingual vocabulary, `[SPACE]` word boundaries, \
+                and a leading `[xx]` language tag taken from `TTSSynthesisOptions.language`; \
+                upstream alone drops every space and ignores the language). Companion repo \
+                `mlx-community/S3TokenizerV2` (495 MB) on top of the 612 MB checkpoint. \
+                Voice: bundled `conds.safetensors` default (`default`) or a reference clip \
+                through `referenceAudio`. Chinese, Japanese, Hebrew, Korean and Russian skip \
+                the reference's script-specific rewrites (Cangjie, kana, niqqud, stress \
+                marks), so expect lower quality there. Loads and synthesizes end to end on \
+                macOS in English, French and German with the default voice and in English with \
+                a 48 kHz reference clip. Generation is whole-chunk; T3 runs about 40 tokens/s \
+                in a debug build with the MLX cache capped (25 tokens = 1 s of audio) and \
+                S3Gen's 10 steps add about 2.5 s per chunk. Memory on macOS: MLX peak active \
+                2.5 GB (3.0 GB with a reference clip); the MLX buffer cache grows to 14 GB per \
+                run unless capped (`MLX.Memory.cacheLimit`; 512 MB held the process at 3.3 GB). \
+                Pending on-device validation. fp16 (2.6 GB) and 8-bit (0.9 GB) siblings exist; \
+                the `Chatterbox-TTS-*` repos are the older English-only v1 weights without a \
+                bundled voice.
+                """,
+            modelURL: URL(string: "https://huggingface.co/mlx-community/chatterbox-4bit"),
+            projectURL: URL(string: "https://github.com/resemble-ai/chatterbox"),
+            descriptor: .init(
+                id: "mlx-community/chatterbox-4bit",
+                displayName: "Chatterbox 4-bit",
+                summary: "Multilingual model with a bundled default voice, reference-clip cloning and inline event tags.",
+                supportedLanguages: chatterboxLanguages,
+                suggestedVoices: ["default"],
+                capabilities: .init(
+                    isRuntimeSupported: true,
+                    supportsReferenceAudio: true,
+                    supportsLanguageList: true,
+                    supportedLanguages: chatterboxLanguages,
+                    defaultGenerationProfile: .balanced,
+                    peakMemoryMB: 3_000,
+                    minimumDeviceClass: .iPhone
+                ),
+                modelURL: URL(string: "https://huggingface.co/mlx-community/chatterbox-4bit"),
+                files: [
+                    "config.json",
+                    "conds.safetensors",
+                    "model.safetensors",
+                    "model.safetensors.index.json",
+                    "tokenizer.json",
+                    "Cangjie5_TC.json"
+                ]
+            )
+        ),
+
         // MARK: Discovery-only entries. The 0.1.8-tts.3 runtime routes to every
         // family below, but none has been synthesized end to end through TTSMLX
         // yet, so they carry no descriptor: apps can list them, not select them.
         // Reasons are in runtimeNotes; see Docs/model-support.md for the full
         // leaderboard matrix.
-        .init(
-            id: "mlx-community/chatterbox-fp16",
-            displayName: "Chatterbox",
-            summary: "Resemble AI Chatterbox (~0.5B T3 Llama over S3 tokens, flow-matching S3Gen): #2 on the tts-bench board. Cloning from a clip, exaggeration and CFG knobs. MIT.",
-            supportStage: .implemented,
-            supportedLanguages: [.english],
-            runtimeNotes: "Routes to the chatterbox loader (same stack as Chatterbox Turbo 4-bit, which is validated here), adding exaggeration and CFG knobs and a 10-step flow-matching S3Gen. Not run here yet: 2.6 GB download; the multilingual v3 weights are a separate repo.",
-            modelURL: URL(string: "https://huggingface.co/mlx-community/chatterbox-fp16"),
-            projectURL: URL(string: "https://github.com/resemble-ai/chatterbox")
-        ),
         .init(
             id: "bosonai/higgs-tts-3-4b",
             displayName: "Higgs Audio v3 TTS",

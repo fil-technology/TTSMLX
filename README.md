@@ -69,8 +69,8 @@ Quick picking guide:
 - Try `VyvoTTS` if you want a smaller English Qwen3-style model.
 Current upstream note:
 
-- As of `0.10.0`, `TTSMLX` runs on upstream `Blaizzy/mlx-audio-swift` v0.1.8 through the thin fork `fil-technology/mlx-audio-swift @ 0.1.8-tts.3` (38 TTS families; the fork only adds `TTSModelRegistry` and MOSS-TTS-Nano bundled voices), and on `fil-technology/mlx-swift @ 0.33.100` (upstream 0.33.0 whose `mlx` C++ submodule points at `mlx @ v0.33.0-tts-bg-safe.1`, the iOS background-safe Metal patch). `mlx-swift-lm` is no longer a dependency. See `Docs/mlx-swift-bg-safe-fork.md` and `Docs/model-support.md`.
-- The catalog lists a model with a descriptor (selectable by apps) only once TTSMLX has synthesized with it end to end; the 0.1.8 runtime routes to 38 families, and the ones not yet validated here (Chatterbox regular, Higgs v3, OmniVoice, Voxtral, LongCat, Ming, Dia, ...) are listed discovery-only with the reason in their `runtimeNotes`. `Docs/model-support.md` has the full tts-bench leaderboard matrix.
+- As of `0.10.0`, `TTSMLX` runs on upstream `Blaizzy/mlx-audio-swift` v0.1.8 through the thin fork `fil-technology/mlx-audio-swift @ 0.1.8-tts.4` (38 TTS families; the fork only adds `TTSModelRegistry`, MOSS-TTS-Nano bundled voices and the regular-Chatterbox text-pipeline fixes), and on `fil-technology/mlx-swift @ 0.33.100` (upstream 0.33.0 whose `mlx` C++ submodule points at `mlx @ v0.33.0-tts-bg-safe.1`, the iOS background-safe Metal patch). `mlx-swift-lm` is no longer a dependency. See `Docs/mlx-swift-bg-safe-fork.md` and `Docs/model-support.md`.
+- The catalog lists a model with a descriptor (selectable by apps) only once TTSMLX has synthesized with it end to end; the 0.1.8 runtime routes to 38 families, and the ones not yet validated here (Higgs v3, OmniVoice, Voxtral, LongCat, Ming, Dia, ...) are listed discovery-only with the reason in their `runtimeNotes`. `Docs/model-support.md` has the full tts-bench leaderboard matrix.
 - `Kitten TTS` stays discovery-only: the runtime's loader needs `voices.safetensors`, and the mlx-community checkpoint ships `voices.npz`.
 - `MOSS-TTS-Nano` runs on upstream's port plus the fork's bundled voices; reference-audio cloning now works through upstream's codec encoder.
 - Upstream additions outside the TTS wrapper scope, such as `Cohere Transcribe ASR`, `Qwen2-Audio-7B-Instruct`, `Moshi STS`, and Distil-Whisper documentation updates, are not exposed through `TTSMLX` yet.
@@ -90,6 +90,9 @@ for entry in TTSMLX.modelCatalog {
 
 Nothing in this catalog is downloaded automatically.
 Models are downloaded only when you explicitly call `ensureDownloaded(...)`, or when you synthesize using a specific selected model.
+
+<!-- PREVIEWS:START -->
+<!-- PREVIEWS:END -->
 
 ## Usage
 
@@ -129,7 +132,7 @@ these — don't pin older versions of them yourself.
 
 | Dependency | Required | Why the fork |
 | --- | --- | --- |
-| `mlx-audio-swift` | `fil-technology/mlx-audio-swift` **0.1.8-tts.3** | Upstream v0.1.8 plus `TTSModelRegistry` (queryable loader table and companion repositories, which TTSMLX calls directly) and MOSS-TTS-Nano bundled voices / codebook dial / per-chunk decoding. |
+| `mlx-audio-swift` | `fil-technology/mlx-audio-swift` **0.1.8-tts.4** | Upstream v0.1.8 plus `TTSModelRegistry` (queryable loader table and companion repositories, which TTSMLX calls directly) and MOSS-TTS-Nano bundled voices / codebook dial / per-chunk decoding; since `0.1.8-tts.4` also the regular-Chatterbox fixes (multilingual config detection, reference-faithful text pipeline with `[SPACE]` and language tags). |
 | `mlx-swift` | `fil-technology/mlx-swift` **0.33.100** | Upstream 0.33.0 with the MLX C++ submodule repointed at `fil-technology/mlx`, which ignores the iOS background-clamp error on in-flight Metal command buffers (Metal-in-background crash fix). The `.100` patch number is reserved so the tag can never collide with an upstream release. |
 
 **`mlx-swift` identity conflict.** Upstream `mlx-audio-swift` names
@@ -167,7 +170,7 @@ swift package update mlx-audio-swift     # or: rm Package.resolved && swift pack
 
 In Xcode: **File ▸ Packages ▸ Reset Package Caches**, then **Update to Latest
 Package Versions**. Confirm your `Package.resolved` then shows
-`fil-technology/mlx-audio-swift` at `0.1.8-tts.3` and `mlx-swift` at
+`fil-technology/mlx-audio-swift` at `0.1.8-tts.4` and `mlx-swift` at
 `0.33.100` from `fil-technology/mlx-swift`.
 
 ## Streaming
