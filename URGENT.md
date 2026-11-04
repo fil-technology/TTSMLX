@@ -37,27 +37,18 @@ is re-targeted at `device.cpp`, where the completion handler now lives
 so only upstream mlx-audio-swift still names `ml-explore/mlx-swift`; the
 tracked mirror plus CI verification stay in place for that (see item 5).
 
-## 3. MOSS-TTS-Nano is `.implemented`, not `.validated`
+## 3. MOSS-TTS-Nano is `.implemented`, not `.validated` — RESOLVED (0.12.0)
 
-Since 0.10.0 MOSS runs on **upstream's** port (`Blaizzy/mlx-audio-swift`
-v0.1.8, which includes the codec *encoder*, so `referenceAudio` cloning now
-works) plus three fork additions kept from the old port: the bundled
-pre-encoded voices (`MossVoicePack`, default `en_news`), the `codebookCount`
-dial the generation profiles drive, and sentence-by-sentence decoding (a
-whole-passage decode is quadratic in length). The old port is gone with the
-old fork lineage.
-
-Still open before `.validated`:
-
-* **Peak memory** has not been re-measured on the upstream port; the catalog
-  keeps the previous macOS figure (1.6 GB) and says so.
-* **Throughput** on macOS in a debug build is about 0.7x realtime (the old
-  port measured 1.2x); nothing in TTSMLX changed, so the difference is the
-  upstream generation loop. Worth profiling before promoting.
-* **End-of-audio** occasionally does not fire at the model's sampling
-  defaults: one of five macOS runs filled the 375-frame budget with silence
-  after the speech. The text chunker limits that to one chunk; the catalog
-  entry documents it.
+Validated on an iPhone 17 (iOS 27.2) on 2026-11-04 with the demo app's
+`--moss-validation` mode (Xcode cannot host package tests on a device):
+five 60-word passages through the Reader path, debug build. First audio
+2.4-3.1 s warm (18 s cold including the load), 1.3x realtime, MLX peak
+1.0-1.2 GB, process footprint up to 1.2 GB with 2.2-2.9 GB still available,
+no end-of-audio miss in 42 chunks, and the model landed in Application
+Support (item 4 confirmed on device). The same harness on macOS
+(`Tests/MossDeviceValidationTests.swift` under `xcodebuild`) gives 0.85x
+realtime, first audio 4-6 s, MLX peak 1.6 GB, no miss in 42 chunks. The
+catalog entry is `.validated` with `peakMemoryMB` 1300.
 
 ## 4. Downloaded models live in a directory iOS is allowed to delete — RESOLVED (0.11.1)
 

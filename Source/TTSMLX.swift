@@ -645,7 +645,7 @@ public enum TTSMLX {
             id: "mlx-community/MOSS-TTS-Nano-100M",
             displayName: "MOSS TTS Nano",
             summary: "Tiny 0.1B multilingual model from OpenMOSS that outputs 48 kHz audio. Voice-cloning only — it has no speaker embeddings, so it always reads in the voice of a reference clip: one of the bundled voices, or your own audio.",
-            supportStage: .implemented,
+            supportStage: .validated,
             supportedLanguages: Self.mossTTSNanoLanguages,
             runtimeNotes: """
                 Routes to upstream's moss_tts_nano loader (runtime 0.1.8-tts.3+: backbone, \
@@ -653,13 +653,17 @@ public enum TTSMLX {
                 voices, a codebook dial the generation profiles drive (fast 8, balanced 12, \
                 highQuality all 16) and sentence-by-sentence decoding, because the codec's \
                 deepest stage attends over frames x 32 positions and a whole-passage decode is \
-                quadratic in length. Pass `referenceAudio` (48 kHz is native; other rates are \
-                encoded as-is) to clone a voice, or a bundled voice name; with neither it reads \
-                as `en_news`. Known behaviour: at the model's own sampling defaults it \
-                occasionally misses end-of-audio and fills the 375-frame budget with silence \
-                (one of five macOS runs); the text chunker bounds the damage to one chunk. \
-                About 0.7x realtime in a debug build on an M-series Mac. peakMemoryMB is the \
-                macOS measurement of the previous port; re-measure on device before promoting.
+                quadratic in length. Pass `referenceAudio` (resampled to 48 kHz) to clone a \
+                voice, or a bundled voice name; with neither it reads as `en_news`. Validated \
+                on an iPhone 17 (iOS 27.2, debug build, Reader path over 60-word passages): \
+                first audio 2.4-3.1 s warm (18 s cold, including the load), 1.3x realtime, \
+                MLX peak 1.0-1.2 GB, process footprint up to 1.2 GB, no end-of-audio miss in \
+                42 chunks; the model landed in Application Support. On an M-series Mac the \
+                same run is 0.85x realtime with first audio in 4-6 s and MLX peak 1.6 GB. \
+                Known behaviour: at the model's own sampling defaults it can miss end-of-audio \
+                and fill the 375-frame budget with silence (seen once in five runs on an \
+                earlier port, not in 84 chunks here); the text chunker bounds the damage to one \
+                chunk.
                 """,
             modelURL: URL(string: "https://huggingface.co/mlx-community/MOSS-TTS-Nano-100M"),
             projectURL: URL(string: "https://github.com/OpenMOSS/MOSS-TTS-Nano"),
@@ -681,7 +685,7 @@ public enum TTSMLX {
                     // Measured on macOS via MLX.GPU.peakMemory across a
                     // ~17s generation at the default chunk budget (1.36-1.53GB
                     // observed). Rounded up; re-measure on device.
-                    peakMemoryMB: 1_600,
+                    peakMemoryMB: 1_300,
                     minimumDeviceClass: .iPhone,
                     sampleRate: 48_000
                 ),

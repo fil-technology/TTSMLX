@@ -304,13 +304,14 @@ struct TTSModelStoreTests {
         #expect(TTSMLX.implementedModels.contains { $0.id == "mlx-community/kitten-tts-mini-0.8" })
 
         // MOSS-TTS-Nano moved planned -> implemented once the backbone and the
-        // MOSS-Audio-Tokenizer-Nano decoder were ported into mlx-audio-swift.
-        // It stays out of `supportedModels` until an on-device iPhone run
-        // confirms resident peak and throughput.
+        // MOSS-Audio-Tokenizer-Nano decoder were ported into mlx-audio-swift,
+        // and implemented -> validated (0.12.0) after the on-device iPhone run
+        // confirmed resident peak and throughput, so it is in `supportedModels`.
         let moss = try #require(
-            TTSMLX.implementedModels.first(where: { $0.id == "mlx-community/MOSS-TTS-Nano-100M" })
+            TTSMLX.validatedModels.first(where: { $0.id == "mlx-community/MOSS-TTS-Nano-100M" })
         )
-        #expect(moss.supportStage == .implemented)
+        #expect(moss.supportStage == .validated)
+        #expect(TTSMLX.supportedModels.contains { $0.id == moss.id })
         #expect(moss.projectURL?.absoluteString == "https://github.com/OpenMOSS/MOSS-TTS-Nano")
         #expect(moss.modelURL?.absoluteString == "https://huggingface.co/mlx-community/MOSS-TTS-Nano-100M")
         #expect(moss.supportedLanguages.contains(.greek))

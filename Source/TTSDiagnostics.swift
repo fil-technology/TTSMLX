@@ -77,3 +77,25 @@ public enum TTSDiagnostic: Sendable {
 }
 
 public typealias TTSDiagnosticHandler = @Sendable (TTSDiagnostic) -> Void
+
+import MLX
+
+/// MLX runtime memory, for apps that show or log it (the demo's Reader
+/// readout, device validation runs). Bytes.
+public struct TTSRuntimeMemory: Sendable, Hashable {
+    /// High-water mark of active memory since the last `resetPeak()`.
+    public let peakBytes: Int
+    /// Buffers currently in use by loaded models and in-flight generation.
+    public let activeBytes: Int
+    /// Freed buffers MLX keeps for reuse; bounded by `MLX.Memory.cacheLimit`.
+    public let cacheBytes: Int
+
+    public static func current() -> TTSRuntimeMemory {
+        TTSRuntimeMemory(peakBytes: MLX.Memory.peakMemory, activeBytes: MLX.Memory.activeMemory, cacheBytes: MLX.Memory.cacheMemory)
+    }
+
+    /// Resets the peak so the next `current()` reports this request only.
+    public static func resetPeak() {
+        MLX.GPU.resetPeakMemory()
+    }
+}
