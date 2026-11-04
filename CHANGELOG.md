@@ -6,6 +6,10 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+### Removed
+- `URGENT.md`: every pre-release blocker it tracked is resolved (last one in
+  0.15.0). The history stays in this changelog.
+
 ## [0.15.0] - 2026-11-04
 
 ### Fixed
