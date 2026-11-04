@@ -18,7 +18,7 @@ import sys
 
 REPO = "fil-technology/TTSMLX"
 RAW = f"https://raw.githubusercontent.com/{REPO}/main/Docs/previews/audio"
-PAGE = f"https://htmlpreview.github.io/?https://github.com/{REPO}/blob/main/Docs/previews/index.html"
+PAGE = f"https://{REPO.split('/')[0]}.github.io/{REPO.split('/')[1]}/"
 
 src = pathlib.Path(sys.argv[1])
 root = pathlib.Path(__file__).resolve().parent.parent
