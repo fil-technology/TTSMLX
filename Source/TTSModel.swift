@@ -65,6 +65,11 @@ public struct TTSModelCapabilities: Sendable, Hashable, Codable {
     public let eventTags: [TTSEventTag: String]
     /// Output sample rate in Hz, when known.
     public let sampleRate: Int?
+    /// Longest text one runtime take handles well, in characters, when
+    /// known. `synthesizeLong` and the narration bundles chunk at the
+    /// `TTSTextChunker` defaults regardless; a host sending single takes
+    /// should stay under this.
+    public let maxCharactersPerTake: Int?
     /// Empirical peak resident memory in MB while generating. `nil` means unknown.
     ///
     /// Prefer this over ``minimumDeviceClass`` for any **memory-pressure**
@@ -97,8 +102,10 @@ public struct TTSModelCapabilities: Sendable, Hashable, Codable {
         features: Set<TTSModelFeature> = [],
         eventTags: [TTSEventTag: String] = [:],
         sampleRate: Int? = nil,
-        hasBuiltInVoices: Bool = false
+        hasBuiltInVoices: Bool = false,
+        maxCharactersPerTake: Int? = nil
     ) {
+        self.maxCharactersPerTake = maxCharactersPerTake
         self.isRuntimeSupported = isRuntimeSupported
         self.supportsReferenceAudio = supportsReferenceAudio
         self.supportsLanguageList = supportsLanguageList
@@ -144,6 +151,7 @@ public struct TTSModelCapabilities: Sendable, Hashable, Codable {
         self.minimumDeviceClass = try c.decodeIfPresent(TTSDeviceClass.self, forKey: .minimumDeviceClass)
         self.eventTags = try c.decodeIfPresent([TTSEventTag: String].self, forKey: .eventTags) ?? [:]
         self.sampleRate = try c.decodeIfPresent(Int.self, forKey: .sampleRate)
+        self.maxCharactersPerTake = try c.decodeIfPresent(Int.self, forKey: .maxCharactersPerTake)
         let explicit = try c.decodeIfPresent(Set<TTSModelFeature>.self, forKey: .features) ?? []
         self.features = Self.impliedFeatures(
             explicit: explicit, supportsStreaming: supportsStreaming,

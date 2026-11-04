@@ -221,6 +221,11 @@ public actor TTSSpeechSynthesizer {
     /// consumer deliberately keeps several models hot. A value < 1 is clamped
     /// to 1.
     private let maxResidentModels: Int
+    /// Calls `releaseRuntimeBuffers()` after every file-producing request so
+    /// the MLX buffer cache cannot grow across a long session (Chatterbox and
+    /// Ming let it reach several GB otherwise). Set together with
+    /// `runtimeCacheLimitMB`, which bounds it during a request.
+    let releasesRuntimeBuffersAfterEachRequest: Bool
     /// LRU order of resident model ids (front = least-recently-used). Only
     /// tracks ids actually present in `loadedModels`; the test-only warmed
     /// marker (`_markWarmedInternal`) does not populate it.
@@ -264,11 +269,17 @@ public actor TTSSpeechSynthesizer {
     public init(
         modelStore: TTSModelStore = TTSModelStore(),
         diagnosticHandler: TTSDiagnosticHandler? = nil,
-        maxResidentModels: Int = 1
+        maxResidentModels: Int = 1,
+        runtimeCacheLimitMB: Int? = nil,
+        releasesRuntimeBuffersAfterEachRequest: Bool = false
     ) {
         self.modelStore = modelStore
         self.diagnosticHandler = diagnosticHandler
         self.maxResidentModels = max(1, maxResidentModels)
+        self.releasesRuntimeBuffersAfterEachRequest = releasesRuntimeBuffersAfterEachRequest
+        if let runtimeCacheLimitMB {
+            MLX.Memory.cacheLimit = max(0, runtimeCacheLimitMB) << 20
+        }
         // Three observers cover the three ways iOS signals "you're about to
         // lose GPU access": application-level `willResignActive` (still the
         // most reliable on UIApplication-based apps), the scene equivalent
@@ -625,6 +636,54 @@ public actor TTSSpeechSynthesizer {
         options: TTSSynthesisOptions = .init(),
         progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)? = nil
     ) async throws -> TTSAudioFile {
+        let take = try await synthesizeNarration(text, using: model, options: options, progressHandler: progressHandler)
+        if let progressHandler {
+            await progressHandler(.init(
+                stage: .writingFile,
+                message: "Writing WAV file..."
+            ))
+        }
+        let outputURL = try options.outputURL ?? Self.makeDefaultOutputURL(fileManager: .default)
+        let finalURL = outputURL.pathExtension.lowercased() == "wav"
+            ? outputURL
+            : outputURL.appendingPathExtension("wav")
+
+        let parentDirectory = finalURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: parentDirectory, withIntermediateDirectories: true)
+        try AudioUtils.writeWavFile(
+            samples: take.samples,
+            sampleRate: Double(take.sampleRate),
+            fileURL: finalURL
+        )
+
+        let audioFile = TTSAudioFile(
+            url: finalURL,
+            modelID: model.id,
+            language: options.language,
+            voice: options.voice,
+            sampleRate: take.sampleRate
+        )
+
+        if let progressHandler {
+            await progressHandler(.init(
+                stage: .completed,
+                fractionCompleted: 1,
+                message: "Finished."
+            ))
+        }
+
+        return audioFile
+    }
+
+    /// One runtime take for `text` as given (no pause handling, no
+    /// time-stretch). The narration path above it assembles takes into the
+    /// audio a caller receives.
+    func synthesizeTake(
+        _ text: String,
+        using model: TTSModelDescriptor,
+        options: TTSSynthesisOptions,
+        progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)?
+    ) async throws -> TTSTake {
         let prompt = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else {
             info("synthesize: REJECTED empty text")
@@ -646,6 +705,9 @@ public actor TTSSpeechSynthesizer {
         }
         if let topP = options.topP {
             parameters.topP = topP
+        }
+        if let seed = options.seed {
+            parameters.seed = seed
         }
 
         let referenceAudio = try options.referenceAudio.map {
@@ -707,42 +769,7 @@ public actor TTSSpeechSynthesizer {
             sampleCount: samples.count
         ))
 
-        if let progressHandler {
-            await progressHandler(.init(
-                stage: .writingFile,
-                message: "Writing WAV file..."
-            ))
-        }
-        let outputURL = try options.outputURL ?? Self.makeDefaultOutputURL(fileManager: .default)
-        let finalURL = outputURL.pathExtension.lowercased() == "wav"
-            ? outputURL
-            : outputURL.appendingPathExtension("wav")
-
-        let parentDirectory = finalURL.deletingLastPathComponent()
-        try FileManager.default.createDirectory(at: parentDirectory, withIntermediateDirectories: true)
-        try AudioUtils.writeWavFile(
-            samples: samples,
-            sampleRate: Double(loadedModel.sampleRate),
-            fileURL: finalURL
-        )
-
-        let audioFile = TTSAudioFile(
-            url: finalURL,
-            modelID: model.id,
-            language: options.language,
-            voice: options.voice,
-            sampleRate: Int(loadedModel.sampleRate)
-        )
-
-        if let progressHandler {
-            await progressHandler(.init(
-                stage: .completed,
-                fractionCompleted: 1,
-                message: "Finished."
-            ))
-        }
-
-        return audioFile
+        return TTSTake(samples: samples, sampleRate: loadedModel.sampleRate, generationDuration: generationDuration)
     }
 
 #if canImport(AVFoundation)
@@ -2172,6 +2199,9 @@ private extension TTSSpeechSynthesizer {
         }
         if let topP = options.topP {
             parameters.topP = topP
+        }
+        if let seed = options.seed {
+            parameters.seed = seed
         }
         return parameters
     }

@@ -6,6 +6,47 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-04
+
+Narration toolkit, from a list of pain points a narration app (Rendma) hit
+while driving TTSMLX.
+
+### Added
+- `synthesizeSegments(_:using:options:pauseBetween:)`: several lines as one
+  continuous take with the exact start and duration of every segment
+  (`TTSSegment`), plus `synthesizeSegmentsStream` which delivers each segment
+  as soon as it is generated. Segments are generated one by one with the same
+  options, so a reference clip or built-in voice keeps the speaker consistent.
+- `synthesizeAudio`: `synthesize` without the file. `TTSSynthesizedAudio`
+  carries the samples, a PCM buffer, the segment table and a
+  `TTSAudioAnalysis` (peak, RMS level, leading and trailing silence) so a host
+  can level and trim without decoding the file again. `write(to:)` saves it.
+- `[pause 0.8s]` / `[pause 500ms]` markers (`TTSPauseTag`): silence of that
+  length at that point, for every model, on the file-producing APIs.
+- `TTSSynthesisOptions.rate` (continuous) and `targetDuration` ("speak this
+  in 2.8 s"): native on Kokoro, an offline pitch-preserving time-stretch on
+  every other model (ratio clamped to 0.5...2).
+- `TTSSynthesisOptions.seed`, forwarded to the runtime. Whether two takes come
+  out identical depends on the model: Ming and Voxtral seed their samplers,
+  Soprano does not.
+- `TTSSynthesisOptions.expressiveness` (0...1, Chatterbox exaggeration) and
+  `voiceGuidance` (0...1, Chatterbox CFG weight). Reported as ignored on other
+  models, like every control.
+- `TTSSpeechSynthesizer(runtimeCacheLimitMB:releasesRuntimeBuffersAfterEachRequest:)`:
+  bound the MLX buffer cache during a request and release it after each
+  file-producing request, instead of the host calling
+  `releaseRuntimeBuffers()` itself.
+- `TTSModelCapabilities.maxCharactersPerTake` on the validated entries.
+
+### Not done, and why
+- Word timings from the engine: the runtime exposes no token-to-word
+  alignment for any model, so timings stay estimated (`TTSChunkInfo.wordTimings`).
+  Segment boundaries from `synthesizeSegments` are exact, which removes the
+  guesswork for line-level placement.
+- Reusing a prepared reference voice across calls: Chatterbox recomputes its
+  conditioning per call inside the runtime (`prepareConditionals` is not
+  public). Needs a fork change.
+
 ## [0.13.0] - 2026-11-04
 
 ### Added

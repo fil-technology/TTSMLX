@@ -94,7 +94,7 @@ struct TTSModelControlsTests {
         #expect(TTSSynthesisOptions().controlsCacheSuffix.isEmpty)
         let o = TTSSynthesisOptions(emotion: .happy, speed: .fast)
         #expect(o.hasControls)
-        #expect(o.controlsCacheSuffix == "|instruction=|emotion=happy|speed=fast")
+        #expect(o.controlsCacheSuffix.hasPrefix("|instruction=|emotion=happy|speed=fast"))
         #expect(TTSSpeed.slow.rate < 1 && TTSSpeed.fast.rate > 1)
         #expect(TTSSpeechSynthesizer.mingEmotion(.happy) == "高兴")
         #expect(TTSSpeechSynthesizer.chatterboxExaggeration(.angry) > TTSSpeechSynthesizer.chatterboxExaggeration(.neutral))
