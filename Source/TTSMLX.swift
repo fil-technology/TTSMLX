@@ -219,7 +219,8 @@ public enum TTSMLX {
                     // and regressed iPhone users who ran Pocket TTS fine in 0.3.
                     peakMemoryMB: 600,
                     minimumDeviceClass: .iPhone,
-                    sampleRate: 24_000
+                    sampleRate: 24_000,
+                    maxCharactersPerTake: 400
                 ),
                 modelURL: URL(string: "https://huggingface.co/mlx-community/pocket-tts"),
                 files: [
@@ -583,7 +584,8 @@ public enum TTSMLX {
                     peakMemoryMB: 500,
                     minimumDeviceClass: .iPhone,
                     features: [.speed],
-                    sampleRate: 24_000
+                    sampleRate: 24_000,
+                    maxCharactersPerTake: 500
                 ),
                 modelURL: URL(string: "https://huggingface.co/mlx-community/Kokoro-82M-bf16"),
                 files: Self.kokoroFiles
@@ -731,7 +733,8 @@ public enum TTSMLX {
                     // observed). Rounded up; re-measure on device.
                     peakMemoryMB: 1_300,
                     minimumDeviceClass: .iPhone,
-                    sampleRate: 48_000
+                    sampleRate: 48_000,
+                    maxCharactersPerTake: 220
                 ),
                 modelURL: URL(string: "https://huggingface.co/mlx-community/MOSS-TTS-Nano-100M")
             ),
@@ -780,7 +783,8 @@ public enum TTSMLX {
                     peakMemoryMB: 2_500,
                     minimumDeviceClass: .iPhone,
                     eventTags: chatterboxTurboEventTags,
-                    sampleRate: 24_000
+                    sampleRate: 24_000,
+                    maxCharactersPerTake: 300
                 ),
                 modelURL: URL(string: "https://huggingface.co/mlx-community/chatterbox-turbo-4bit"),
                 files: [
@@ -843,7 +847,8 @@ public enum TTSMLX {
                     minimumDeviceClass: .iPhone,
                     features: [.emotion],
                     eventTags: chatterboxEventTags,
-                    sampleRate: 24_000
+                    sampleRate: 24_000,
+                    maxCharactersPerTake: 300
                 ),
                 modelURL: URL(string: "https://huggingface.co/mlx-community/chatterbox-4bit"),
                 files: [
@@ -910,7 +915,8 @@ public enum TTSMLX {
                     minimumDeviceClass: .iPhone,
                     features: [.instruction, .emotion, .speed, .voiceDesign],
                     eventTags: mingEventTags,
-                    sampleRate: 44_100
+                    sampleRate: 44_100,
+                    maxCharactersPerTake: 150
                 ),
                 modelURL: URL(string: "https://huggingface.co/mlx-community/Ming-3.0-tts-0.5B-bf16"),
                 files: [
@@ -987,7 +993,8 @@ public enum TTSMLX {
                     peakMemoryMB: 6_000,
                     minimumDeviceClass: .mac,
                     features: [.instruction, .voiceDesign, .referenceTranscript],
-                    sampleRate: 24_000
+                    sampleRate: 24_000,
+                    maxCharactersPerTake: 300
                 ),
                 modelURL: URL(string: "https://huggingface.co/mlx-community/OmniVoice"),
                 files: [
@@ -1033,7 +1040,8 @@ public enum TTSMLX {
                     defaultGenerationProfile: .balanced,
                     peakMemoryMB: 4_000,
                     minimumDeviceClass: .iPhone,
-                    sampleRate: 24_000
+                    sampleRate: 24_000,
+                    maxCharactersPerTake: 400
                 ),
                 modelURL: URL(string: "https://huggingface.co/mlx-community/Voxtral-4B-TTS-2603-mlx-4bit"),
                 files: ["config.json", "model.safetensors", "model.safetensors.index.json", "params.json", "tekken.json"]

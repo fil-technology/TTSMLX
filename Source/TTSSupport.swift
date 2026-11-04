@@ -63,6 +63,22 @@ public struct TTSSynthesisOptions: Sendable, Hashable {
     public var emotion: TTSEmotion?
     /// Speaking rate, for models with `TTSModelFeature.speed`.
     public var speed: TTSSpeed?
+    /// Continuous speaking rate (1 = as generated, 1.2 = 20% faster). Models
+    /// with `TTSModelFeature.speed` apply it natively; every other model gets
+    /// an offline pitch-preserving time-stretch on the file-producing APIs.
+    /// Takes precedence over `speed`.
+    public var rate: Float?
+    /// Fit the take into this many seconds (file-producing APIs; stretch
+    /// ratio clamped to 0.5...2).
+    public var targetDuration: TimeInterval?
+    /// Runtime seed, for reproducible takes on models that sample.
+    public var seed: UInt64?
+    /// How animated the delivery is, 0...1 (Chatterbox exaggeration, default
+    /// 0.5). Overrides the value `emotion` would pick.
+    public var expressiveness: Float?
+    /// How closely the output follows the voice, 0...1 (Chatterbox CFG weight,
+    /// default 0.5).
+    public var voiceGuidance: Float?
     // Used by synthesize(_:using:options:...). The streaming API currently yields buffers only
     // and does not surface a persisted output artifact through the wrapper.
     public var outputURL: URL?
@@ -101,11 +117,21 @@ public struct TTSSynthesisOptions: Sendable, Hashable {
         chunkJoin: TTSChunkJoin = .natural,
         instruction: String? = nil,
         emotion: TTSEmotion? = nil,
-        speed: TTSSpeed? = nil
+        speed: TTSSpeed? = nil,
+        rate: Float? = nil,
+        targetDuration: TimeInterval? = nil,
+        seed: UInt64? = nil,
+        expressiveness: Float? = nil,
+        voiceGuidance: Float? = nil
     ) {
         self.instruction = instruction
         self.emotion = emotion
         self.speed = speed
+        self.rate = rate
+        self.targetDuration = targetDuration
+        self.seed = seed
+        self.expressiveness = expressiveness
+        self.voiceGuidance = voiceGuidance
         self.language = language
         self.voice = voice
         self.referenceAudio = referenceAudio
@@ -121,14 +147,22 @@ public struct TTSSynthesisOptions: Sendable, Hashable {
         self.chunkJoin = chunkJoin
     }
 
-    /// True when any of `instruction`, `emotion` or `speed` is set.
-    public var hasControls: Bool { instruction != nil || emotion != nil || speed != nil }
+    /// True when any delivery control is set.
+    public var hasControls: Bool {
+        instruction != nil || emotion != nil || speed != nil || rate != nil || targetDuration != nil
+            || seed != nil || expressiveness != nil || voiceGuidance != nil
+    }
+
+    /// `rate`, or the rate `speed` stands for.
+    public var effectiveRate: Float? { rate ?? speed?.rate }
 
     /// Cache-key suffix for the controls; empty when none are set so keys of
     /// plain requests are unchanged.
     var controlsCacheSuffix: String {
         guard hasControls else { return "" }
         return "|instruction=\(instruction ?? "")|emotion=\(emotion?.rawValue ?? "")|speed=\(speed?.rawValue ?? "")"
+            + "|rate=\(rate.map { String($0) } ?? "")|target=\(targetDuration.map { String($0) } ?? "")|seed=\(seed.map { String($0) } ?? "")"
+            + "|expr=\(expressiveness.map { String($0) } ?? "")|guide=\(voiceGuidance.map { String($0) } ?? "")"
     }
 }
 

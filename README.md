@@ -8,6 +8,7 @@ Small Swift package for text-to-speech with Hugging Face models running through 
 
 - Simple actor-based API
 - Streaming playback API for long-form speech
+- Narration toolkit: segments with exact boundaries, `[pause]` markers, duration fitting, levels and silences of each take, per-segment streaming
 - One voice, feature and control surface across every model: `TTSModelDescriptor.features`, annotated `TTSVoice`s, `TTSSynthesisOptions.instruction` / `emotion` / `speed` and canonical `TTSEventTag` markers, translated per loader
 - Natural prosody: punctuation-aware chunking, model-tuned sampling, breath-like pauses and click-free seams between chunks (`TTSChunkJoin`)
 - Built-in catalog of supported MLX TTS models
@@ -224,6 +225,30 @@ let audio = try await synthesizer.synthesize(text, using: model, options: option
 ```
 
 `model.features.contains(.emotion)` tells you up front whether a knob will be used. `Docs/model-previews.md` lists the features, voices and languages of every entry with a clip per voice.
+
+## Narration toolkit
+
+For narration work (video voice-over, guided audio, line-by-line scripts):
+
+```swift
+let synthesizer = TTSSpeechSynthesizer(runtimeCacheLimitMB: 512, releasesRuntimeBuffersAfterEachRequest: true)
+
+// Several lines as one take, with exact boundaries
+let take = try await synthesizer.synthesizeSegments(
+    ["Breathe in slowly. [pause 0.8s] And hold.", "Now let it go."],
+    using: model, options: .init(voice: "UK_George", seed: 42))
+take.segments            // [TTSSegment(index, text, start, duration)]
+take.analysis            // peak, RMS dBFS, leading/trailing silence
+take.pcmBuffer           // play it, or take.write(to: url)
+
+// Or one line, fitted into a fixed slot
+let cue = try await synthesizer.synthesizeAudio("And release.", using: model, options: .init(targetDuration: 2.8))
+
+// Or segment by segment as they finish
+for try await piece in synthesizer.synthesizeSegmentsStream(lines, using: model) { place(piece.audio, at: piece.segment.start) }
+```
+
+`[pause 0.8s]` markers work with every model. `rate` and `targetDuration` are native on Kokoro and a pitch-preserving time-stretch elsewhere. `expressiveness` and `voiceGuidance` drive Chatterbox's exaggeration and CFG weight. `seed` is forwarded to the runtime (Ming and Voxtral honour it; Soprano does not). Word timings remain estimates (`TTSChunkInfo.wordTimings`): no runtime model exposes an alignment, which is why segment boundaries, which are exact, are the unit to build on.
 
 ## Streaming
 

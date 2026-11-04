@@ -60,21 +60,28 @@ extension TTSSpeechSynthesizer {
             }
 
         case let kokoro as KokoroModel:
-            kokoro.speed = options.speed?.rate ?? 1
+            kokoro.speed = options.effectiveRate ?? 1
             ignore("instruction", unless: .instruction, set: options.instruction != nil)
             ignore("emotion", unless: .emotion, set: options.emotion != nil)
 
         case let chatterbox as ChatterboxModel:
             chatterbox.emotionAdvOverride = nil
-            if let emotion = options.emotion {
-                if chatterbox.config.isTurbo {
-                    request.ignored.append("emotion (Chatterbox Turbo has no exaggeration input)")
-                } else {
+            chatterbox.cfgWeightOverride = nil
+            if chatterbox.config.isTurbo {
+                if options.emotion != nil { request.ignored.append("emotion (Chatterbox Turbo has no exaggeration input)") }
+                if options.expressiveness != nil { request.ignored.append("expressiveness (Chatterbox Turbo has no exaggeration input)") }
+                if options.voiceGuidance != nil { request.ignored.append("voiceGuidance (Chatterbox Turbo has no CFG weight)") }
+            } else {
+                if let expressiveness = options.expressiveness {
+                    chatterbox.emotionAdvOverride = min(1, max(0, expressiveness))
+                } else if let emotion = options.emotion {
                     chatterbox.emotionAdvOverride = Self.chatterboxExaggeration(emotion)
+                }
+                if let guidance = options.voiceGuidance {
+                    chatterbox.cfgWeightOverride = min(1, max(0, guidance))
                 }
             }
             ignore("instruction", unless: .instruction, set: options.instruction != nil)
-            ignore("speed", unless: .speed, set: options.speed != nil)
 
         case is OmniVoiceModel:
             // OmniVoice reads `voice` as a free-form description of the speaker
@@ -100,7 +107,10 @@ extension TTSSpeechSynthesizer {
         default:
             ignore("instruction", unless: .instruction, set: options.instruction != nil)
             ignore("emotion", unless: .emotion, set: options.emotion != nil)
-            ignore("speed", unless: .speed, set: options.speed != nil)
+        }
+        if !(model is ChatterboxModel) {
+            if options.expressiveness != nil { request.ignored.append("expressiveness") }
+            if options.voiceGuidance != nil { request.ignored.append("voiceGuidance") }
         }
 
         return request
