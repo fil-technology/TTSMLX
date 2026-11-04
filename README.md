@@ -177,6 +177,21 @@ Package Versions**. Confirm your `Package.resolved` then shows
 `fil-technology/mlx-audio-swift` at `0.1.8-tts.4` and `mlx-swift` at
 `0.33.100` from `fil-technology/mlx-swift`.
 
+## Licences
+
+Every catalog entry says what its weights allow, so an app never has to look it up:
+
+```swift
+entry.license.name          // "CC-BY-NC-4.0"
+entry.license.tier          // .nonCommercial
+entry.license.note          // who to credit, which clause bites
+TTSMLX.supportedModels                         // validated, commercial use allowed
+TTSMLX.models(maximumTier: .attributionRequired)  // adds CC-BY models (credit them)
+TTSMLX.models(maximumTier: .nonCommercial)        // adds Voxtral and OmniVoice: personal, non-monetised use only
+```
+
+Non-commercial means exactly that: a monetised, sponsored or product-promoting video is commercial use. Research-only weights (Higgs Audio v3) never get a descriptor because their licence forbids publishing the output.
+
 ## Voices, features and controls
 
 Every descriptor answers the same questions, whichever loader is behind it:

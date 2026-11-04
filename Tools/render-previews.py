@@ -78,9 +78,12 @@ for e in manifest:
     if details:
         def label(v):
             g = v.get("gender")
-            return v["name"] + (f" ({g[0]})" if g else "")
+            return v["name"] + (f" ({g[0]})" if g and "(" not in v["name"] else "")
         voices = [label(v) for v in details]
-    voices_s = (", ".join(voices[:8]) + (f", … ({len(voices)} total)" if len(voices) > 8 else "")) if voices else ("— (discovery-only)" if voices is None else "default")
+    if voices == [] and "voice design" in e.get("features", []):
+        voices_s = "described in words"
+    else:
+        voices_s = (", ".join(voices[:8]) + (f", … ({len(voices)} total)" if len(voices) > 8 else "")) if voices else ("— (discovery-only)" if voices is None else "default")
     feats = ", ".join(features(e)) or "—"
     mem = f'{e["peakMemoryMB"]} MB' if e.get("peakMemoryMB") else "—"
     links = []
@@ -96,12 +99,15 @@ for e in manifest:
             f'<p class="text">{html.escape(c["text"])}</p></div>'
         )
     clip_md = " · ".join(links) if links else "_no clip yet_"
-    rows_md.append(f'| [{e["displayName"]}]({e["modelURL"]}) | {stage} | {langs} | {voices_s} | {feats} | {mem} | {clip_md} |')
+    lic = e.get("license") or "—"
+    if e.get("usageTier") and e["usageTier"] not in ("commercial",):
+        lic += f' ({e["usageTier"]})'
+    rows_md.append(f'| [{e["displayName"]}]({e["modelURL"]}) | {stage} | {lic} | {langs} | {voices_s} | {feats} | {mem} | {clip_md} |')
     cards.append(
         f'<section class="model"><h2>{html.escape(e["displayName"])} <small>{html.escape(stage)}</small></h2>'
         f'<p class="id"><a href="{html.escape(e["modelURL"])}">{html.escape(e["id"])}</a></p>'
         f'<p>{html.escape(e["summary"])}</p>'
-        f'<dl><dt>Languages</dt><dd>{html.escape(langs)}</dd><dt>Voices</dt><dd>{html.escape(voices_s)}</dd>'
+        f'<dl><dt>Licence</dt><dd>{html.escape(lic)}</dd><dt>Languages</dt><dd>{html.escape(langs)}</dd><dt>Voices</dt><dd>{html.escape(voices_s)}</dd>'
         f'<dt>Features</dt><dd>{html.escape(feats)}</dd><dt>Peak memory (catalog)</dt><dd>{html.escape(mem)}</dd></dl>'
         + ("".join(players) if players else '<p class="none">No preview clip yet.</p>')
         + "</section>"
@@ -137,8 +143,8 @@ md = "\n".join([
     "",
     "Clips are mono MP3 files under `Docs/previews/audio`, generated with `Tools/previews` + `Tools/render-previews.py` on an Apple-silicon Mac at each model's default generation profile. Each link opens in the browser's native player. Languages, voices and features come straight from the catalog in `Source/TTSMLX.swift`.",
     "",
-    "| Model | Status | Languages | Voices | Features | Peak memory | Clips |",
-    "|---|---|---|---|---|---|---|",
+    "| Model | Status | Licence | Languages | Voices | Features | Peak memory | Clips |",
+    "|---|---|---|---|---|---|---|---|",
     *rows_md,
     "",
 ])

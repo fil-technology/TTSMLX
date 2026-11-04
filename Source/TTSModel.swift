@@ -10,6 +10,9 @@ public struct TTSModelDescriptor: Sendable, Hashable, Identifiable, Codable {
     public let metadata: TTSModelMetadata?
     public let modelURL: URL?
     public let files: [String]?
+    /// Licence of the weights. Catalog descriptors always carry one; a
+    /// descriptor discovered from the hub may not.
+    public let license: TTSModelLicense?
 
     public init(
         id: String,
@@ -20,7 +23,8 @@ public struct TTSModelDescriptor: Sendable, Hashable, Identifiable, Codable {
         capabilities: TTSModelCapabilities = .init(),
         metadata: TTSModelMetadata? = nil,
         modelURL: URL? = nil,
-        files: [String]? = nil
+        files: [String]? = nil,
+        license: TTSModelLicense? = nil
     ) {
         self.id = id
         self.displayName = displayName ?? id
@@ -31,7 +35,19 @@ public struct TTSModelDescriptor: Sendable, Hashable, Identifiable, Codable {
         self.metadata = metadata
         self.modelURL = modelURL
         self.files = files
+        self.license = license
     }
+
+    /// The same descriptor with `license` set.
+    public func withLicense(_ license: TTSModelLicense) -> TTSModelDescriptor {
+        TTSModelDescriptor(
+            id: id, displayName: displayName, summary: summary, supportedLanguages: supportedLanguages,
+            suggestedVoices: suggestedVoices, capabilities: capabilities, metadata: metadata,
+            modelURL: modelURL, files: files, license: license)
+    }
+
+    /// False for non-commercial, research-only and unlicensed weights.
+    public var allowsCommercialUse: Bool { license?.allowsCommercialUse ?? false }
 }
 
 public struct TTSModelCapabilities: Sendable, Hashable, Codable {

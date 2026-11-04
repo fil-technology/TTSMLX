@@ -76,6 +76,16 @@ extension TTSSpeechSynthesizer {
             ignore("instruction", unless: .instruction, set: options.instruction != nil)
             ignore("speed", unless: .speed, set: options.speed != nil)
 
+        case is OmniVoiceModel:
+            // OmniVoice reads `voice` as a free-form description of the speaker
+            // (voice design); a reference clip with its transcript clones instead.
+            var parts: [String] = []
+            if let voice = request.voice { parts.append(voice) }
+            if let instruction = options.instruction { parts.append(instruction) }
+            if let emotion = options.emotion { parts.append("\(emotion.rawValue) tone") }
+            if let speed = options.speed, speed != .normal { parts.append(speed == .slow ? "slow pace" : "fast pace") }
+            request.voice = parts.isEmpty ? nil : parts.joined(separator: ", ")
+
         case is Qwen3TTSModel where features.contains(.instruction):
             // CustomVoice builds read the voice as "speaker, instruction".
             var parts: [String] = []
