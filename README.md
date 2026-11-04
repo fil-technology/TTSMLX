@@ -92,6 +92,8 @@ for entry in TTSMLX.modelCatalog {
 Nothing in this catalog is downloaded automatically.
 Models are downloaded only when you explicitly call `ensureDownloaded(...)`, or when you synthesize using a specific selected model.
 
+Where models live: on iOS, iPadOS, tvOS, watchOS and visionOS the store downloads into `Library/Application Support/huggingface/hub` (excluded from backup) rather than `Library/Caches`, which the system purges without notice; installs from earlier versions are moved there on first use. On macOS the runtime's own cache (`~/.cache/huggingface/hub`, or `HF_HOME` / `HF_HUB_CACHE`) is used. `TTSModelStore(cacheRoots:)` overrides both.
+
 <!-- PREVIEWS:START -->
 Hear every catalogued model before you pick one: [Docs/model-previews.md](Docs/model-previews.md) lists languages, voices, features and a short clip per voice (same sentence for all), and the [playable page](https://fil-technology.github.io/TTSMLX/) has inline players.
 <!-- PREVIEWS:END -->

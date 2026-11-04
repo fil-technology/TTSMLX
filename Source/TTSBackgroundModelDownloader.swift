@@ -396,7 +396,12 @@ public final class TTSBackgroundModelDownloader: NSObject, @unchecked Sendable {
     /// Destination directory a repository's files must land in for the runtime
     /// loader to treat it as already downloaded.
     static func destinationDirectory(for repository: String) -> URL {
-        HubCache.default.cacheDirectory
+        // The store's first default root: durable on iOS-family systems, the
+        // runtime's own cache on macOS. Both halves must agree or a background
+        // download would be invisible to the loader.
+        let root = TTSModelStore.defaultModelCacheRoots().first ?? HubCache.default.cacheDirectory
+        try? TTSModelStore.prepareDurableDirectory(root)
+        return root
             .appendingPathComponent("mlx-audio", isDirectory: true)
             .appendingPathComponent(
                 repository.replacingOccurrences(of: "/", with: "_"), isDirectory: true

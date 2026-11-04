@@ -8,6 +8,7 @@ public actor TTSModelStore {
     private let session: URLSession
     private let defaultModels: [TTSModelDescriptor]
     private let cacheRoots: [URL]
+    private var didMigrateLegacyInstalls = false
     /// The Hugging Face cache every download *and* every runtime load goes
     /// through. Rooted at the first entry of `cacheRoots`, so what this store
     /// downloads, what the MLX loader resolves, and what `isInstalled` /
@@ -94,7 +95,8 @@ public actor TTSModelStore {
     }
 
     public func installedModels() throws -> [TTSInstalledModel] {
-        try discoverInstalledModels()
+        migrateLegacyInstallsIfNeeded()
+        return try discoverInstalledModels()
             .sorted { $0.sizeBytes > $1.sizeBytes }
     }
 
@@ -766,6 +768,7 @@ extension TTSModelStore {
     }
 
     func modelCacheLocation(for modelID: String) -> URL? {
+        migrateLegacyInstallsIfNeeded()
         let legacyKey = modelID.replacingOccurrences(of: "/", with: "_")
         let hubKey = "models--" + modelID.replacingOccurrences(of: "/", with: "--")
 
@@ -784,37 +787,118 @@ extension TTSModelStore {
         return nil
     }
 
-    /// Where installed models are looked for, most authoritative first. The
-    /// runtime's own cache directory (`HubCache.default`, which honours
-    /// `HF_HUB_CACHE` / `HF_HOME`) leads, so lookups always cover the place the
-    /// runtime downloads to; the platform-conventional locations follow for
-    /// models installed by earlier versions or by hand.
+    /// Where installed models are looked for, most authoritative first.
+    ///
+    /// On iOS-family systems the first root is `Library/Application Support`,
+    /// because the runtime's default (`Library/Caches`) is deleted by the
+    /// system under storage pressure without telling the app; the purgeable
+    /// locations still follow for lookup, and installs found there are moved
+    /// into the durable root on first use (see `migrateLegacyInstallsIfNeeded`).
+    /// On macOS the runtime's own cache directory (`HubCache.default`, which
+    /// honours `HF_HUB_CACHE` / `HF_HOME`) leads, so lookups always cover the
+    /// place the runtime downloads to; the platform-conventional locations
+    /// follow for models installed by earlier versions or by hand.
     static func defaultModelCacheRoots() -> [URL] {
-        let home = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
-        let conventional: [URL]
+        modelCacheRoots(
+            platformPurgesCaches: platformPurgesCaches,
+            environment: ProcessInfo.processInfo.environment,
+            home: URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true),
+            runtimeCache: HubCache.default.cacheDirectory
+        )
+    }
+
+    /// iOS-family systems purge `Library/Caches` under storage pressure
+    /// without notice; macOS does not.
+    static var platformPurgesCaches: Bool {
         #if os(iOS) || os(tvOS) || os(watchOS) || os(visionOS)
-        conventional = [
-            home.appendingPathComponent("Library/Caches/huggingface/hub", isDirectory: true),
-            home.appendingPathComponent("Library/Application Support/huggingface/hub", isDirectory: true)
-        ]
+        true
         #else
-        let isSandboxed = ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil
-        if isSandboxed {
-            conventional = [
-                home.appendingPathComponent("Library/Caches/huggingface/hub", isDirectory: true),
-                home.appendingPathComponent("Library/Application Support/huggingface/hub", isDirectory: true)
-            ]
-        } else {
-            conventional = [
-                home.appendingPathComponent(".cache/huggingface/hub", isDirectory: true),
-                home.appendingPathComponent("Library/Caches/huggingface/hub", isDirectory: true),
-                home.appendingPathComponent("Library/Application Support/huggingface/hub", isDirectory: true)
-            ]
-        }
+        false
         #endif
-        let runtime = HubCache.default.cacheDirectory
-        let runtimePath = runtime.standardizedFileURL.path
-        return [runtime] + conventional.filter { $0.standardizedFileURL.path != runtimePath }
+    }
+
+    static func modelCacheRoots(
+        platformPurgesCaches: Bool,
+        environment: [String: String],
+        home: URL,
+        runtimeCache: URL
+    ) -> [URL] {
+        let caches = home.appendingPathComponent("Library/Caches/huggingface/hub", isDirectory: true)
+        let support = home.appendingPathComponent("Library/Application Support/huggingface/hub", isDirectory: true)
+        let dotCache = home.appendingPathComponent(".cache/huggingface/hub", isDirectory: true)
+        let explicitLocation = environment["HF_HUB_CACHE"] != nil || environment["HF_HOME"] != nil
+        let roots: [URL]
+        if platformPurgesCaches, !explicitLocation {
+            roots = [support, runtimeCache, caches]
+        } else if platformPurgesCaches || environment["APP_SANDBOX_CONTAINER_ID"] != nil {
+            roots = [runtimeCache, caches, support]
+        } else {
+            roots = [runtimeCache, dotCache, caches, support]
+        }
+        var seen = Set<String>()
+        return roots.filter { seen.insert($0.standardizedFileURL.path).inserted }
+    }
+
+    /// A root the system may delete behind the app's back.
+    static func isPurgeable(_ root: URL) -> Bool {
+        root.standardizedFileURL.pathComponents.contains("Caches")
+    }
+
+    /// Creates `url` and, when it lives under Application Support, keeps it
+    /// out of iCloud and Time Machine backups: a model directory is large and
+    /// re-downloadable, and nobody wants 400 MB of weights in their backup.
+    static func prepareDurableDirectory(_ url: URL, fileManager: FileManager = .default) throws {
+        try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
+        guard url.standardizedFileURL.pathComponents.contains("Application Support") else { return }
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        var url = url
+        try? url.setResourceValues(values)
+    }
+
+    /// Moves installs out of purgeable roots into the first root, once per
+    /// store. Moves on the same volume are renames, so this is cheap; a model
+    /// that already exists in the durable root wins and its stale purgeable
+    /// copy is removed. A failed move is left in place: the lookup still finds
+    /// it in the legacy root, and the next download writes the durable copy.
+    private func migrateLegacyInstallsIfNeeded() {
+        guard !didMigrateLegacyInstalls else { return }
+        didMigrateLegacyInstalls = true
+        guard let durable = cacheRoots.first, !Self.isPurgeable(durable) else { return }
+        for root in cacheRoots.dropFirst() where Self.isPurgeable(root) {
+            Self.moveInstalls(from: root, to: durable, fileManager: fileManager)
+        }
+    }
+
+    static func moveInstalls(from source: URL, to destination: URL, fileManager: FileManager) {
+        var moves: [(URL, URL)] = []
+        let legacy = source.appendingPathComponent("mlx-audio", isDirectory: true)
+        if let names = try? fileManager.contentsOfDirectory(atPath: legacy.path) {
+            moves += names.filter { !$0.hasPrefix(".") }.map {
+                (legacy.appendingPathComponent($0, isDirectory: true),
+                 destination.appendingPathComponent("mlx-audio/\($0)", isDirectory: true))
+            }
+        }
+        if let names = try? fileManager.contentsOfDirectory(atPath: source.path) {
+            moves += names.filter { $0.hasPrefix("models--") }.map {
+                (source.appendingPathComponent($0, isDirectory: true),
+                 destination.appendingPathComponent($0, isDirectory: true))
+            }
+        }
+        guard !moves.isEmpty else { return }
+        try? prepareDurableDirectory(destination, fileManager: fileManager)
+        for (from, to) in moves {
+            if fileManager.fileExists(atPath: to.path) {
+                try? fileManager.removeItem(at: from)
+                continue
+            }
+            do {
+                try fileManager.createDirectory(at: to.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try fileManager.moveItem(at: from, to: to)
+            } catch {
+                continue
+            }
+        }
     }
 
     func modelCacheRoots() -> [URL] {
@@ -853,6 +937,7 @@ extension TTSModelStore {
         hfToken: String?,
         progressHandler: (@MainActor @Sendable (TTSProgressUpdate) -> Void)?
     ) async throws -> URL {
+        try Self.prepareDurableDirectory(hubCache.cacheDirectory, fileManager: fileManager)
         if let baseURL = descriptor.modelURL, let files = descriptor.files {
             let modelDirectory = hubCache.cacheDirectory
                 .appendingPathComponent("mlx-audio", isDirectory: true)

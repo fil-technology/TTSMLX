@@ -6,6 +6,18 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-11-04
+
+### Fixed
+- Downloaded models no longer live where iOS can delete them. On iOS-family
+  systems the store's first cache root is now
+  `Library/Application Support/huggingface/hub` (marked excluded from backup)
+  instead of the runtime's `Library/Caches` default, which the system purges
+  under storage pressure without notice. Downloads, background downloads and
+  the runtime loader all use that root; installs already sitting in
+  `Library/Caches` are moved there on the store's first lookup. macOS is
+  unchanged and `HF_HOME` / `HF_HUB_CACHE` still win. Closes URGENT item 4.
+
 ## [0.11.0] - 2026-11-04
 
 ### Added
