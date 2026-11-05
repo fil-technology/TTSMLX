@@ -4,6 +4,72 @@ All notable changes to this project will be documented in this file.
 
 The format follows Keep a Changelog and the project uses Semantic Versioning.
 
+## [Unreleased]
+
+### Added
+- `TTSNarrationMark` on `TTSAudioBufferChunk.narrationMark`: the elements of
+  a `streamAndCacheNarration` stream say which text chunk they belong to,
+  and one element per chunk carries its word timings (the chunk itself when
+  it is handed over whole, a zero-length element after it when it was
+  streamed buffer by buffer). `TTSPlaybackController.play(stream:synthesizer:onWord:)`
+  builds its word timeline from these, placing each chunk where the audio
+  queued before it ends. `schedule(_:)` skips zero-length elements.
+
+### Fixed
+- A live stream never highlighted a word. `play(stream:synthesizer:onWord:)`
+  stops whatever was playing, so the session starts in `.stopped` and stays
+  there until the first buffer is queued; the word observer took that
+  `.stopped` for the end of playback and left before any word could fire.
+  It now leaves on `.stopped` only once the session has played or its
+  stream has ended.
+- A stream's highlights could come from another narration, or be missing.
+  The timeline was built from `chunkFinished` / `chunkTimings` events, which
+  every generation on the synthesizer emits: a chapter being prepared in the
+  background while another played put its words on the playing timeline,
+  its `streamingFinished` ended the timeline early, and chunks replayed from
+  the cache before the player subscribed were lost (shifting everything
+  after them). Marked streams no longer use the events.
+- `TTSPlaybackController` reported end-of-playback right after a seek or a
+  restart. Stopping the player node calls the completion handler of
+  everything that was queued; those calls arrived after the counters had
+  been reset and were counted against the audio queued next, so
+  `seek(to:)` into a narration (76 files queued, fewer re-queued) fired
+  `onPlaybackEnd` at once. A reader resuming a chapter part-way moved
+  straight to the next chapter. Completion handlers now carry the epoch of
+  the schedule they belong to and are ignored once it has been replaced.
+- Generation kept running after its consumer had gone. `synthesizeStream`,
+  `synthesizeLong` and `streamAndCacheNarration` generate in their own task,
+  and nothing told that task when the stream was dropped or the consuming
+  task was cancelled: a narration abandoned at its first sentence was still
+  generated to its last (seen from an app: 80 more sentence groups of an
+  11 480-character chapter), holding the generation gate so the next
+  request waited behind it. The stream now cancels its task when the
+  consumer leaves; `cancelAllInFlight` is no longer the only way to stop
+  one. Chunks finished before that stay on disk, as after a background
+  cancellation.
+- A cancelled generation could be taken for a finished one. Cancelling the
+  task that reads a stream ends its `for try await` loop without an error,
+  so the code after the loop ran on whatever had arrived: `synthesizeStream`
+  finished normally with part of a take, `streamAndCacheNarration` and
+  `prepareNarration` could record that part as a complete chunk (or, with
+  nothing yet, fail with "Chunk N produced no audio" instead of a
+  cancellation), and `synthesize` / `prepareForPlayback` could keep a
+  cut-off file. Each now checks for cancellation after the loop and throws
+  `CancellationError`.
+- Word highlights trailed the voice, by more the longer the take. Word
+  timings spread a take's characters evenly over its whole duration, but a
+  take starts and ends with silence (Kokoro: about 0.3 s and 0.8 s) and
+  stops at commas and full stops. Measured against speech-recognition word
+  times on ten Kokoro takes (414 words, up to 22 s each), highlights came a
+  median 0.72 s after the word, 81% of them more than 0.3 s late. Timings
+  are now placed around the take's real silences
+  (`TTSChunkInfo.wordTimings(forDuration:pauses:)`, fed by
+  `TTSSpeechPauseDetector` in `synthesizeLong`, `streamAndCacheNarration`
+  and `prepareNarration`): median 0.07 s, mean error 0.17 s, 12% more than
+  0.3 s late. A model whose pauses are not near-silent reports no pauses
+  and keeps the even spread. Narration bundles written before this keep
+  their old timings until they are regenerated.
+
 ## [0.16.1] - 2026-11-05
 
 ### Fixed

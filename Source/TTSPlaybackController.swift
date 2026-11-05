@@ -93,6 +93,22 @@ public final class TTSPlaybackController {
     private var connectedFormat: AVAudioFormat?
     private var scheduledBufferCount = 0
     private var completedBufferCount = 0
+    /// Identifies the current set of scheduled audio. Stopping the player
+    /// node calls the completion handler of everything that was queued, and
+    /// those calls land after the counters have been reset for whatever was
+    /// scheduled next. Counted against the new schedule they end it at once:
+    /// a seek into a narration reported end-of-playback, and the reader
+    /// skipped to the next chapter. Handlers from an earlier epoch are
+    /// ignored.
+    private var scheduleEpoch = 0
+    // Word timeline of the stream being played, built from the marks its
+    // elements carry (`TTSNarrationMark`) against the audio actually queued.
+    private var streamTimeline: [TTSWordTiming] = []
+    private var streamChunkStarts: [Int: TimeInterval] = [:]
+    private var streamQueuedSeconds: TimeInterval = 0
+    private var streamHasMarks = false
+    /// True once the stream being played has been read to its end.
+    private var streamDrained = false
     /// True while a streamed source is still producing buffers. Prevents
     /// `finishIfNeeded` from declaring playback finished when the queue merely
     /// drains between chunks (which would prematurely fire `onPlaybackEnd`,
@@ -197,6 +213,8 @@ public final class TTSPlaybackController {
     /// Schedule a single PCM buffer for playback. Starts the engine on the
     /// first buffer; subsequent buffers are appended to the queue.
     public func schedule(_ chunk: TTSAudioBufferChunk) throws {
+        // A narration stream sends word timings on elements with no audio.
+        guard chunk.buffer.frameLength > 0 else { return }
         try connectIfNeeded(format: chunk.buffer.format)
         scheduledBufferCount += 1
         // Log every Nth schedule call to avoid log spam on long streams.
@@ -211,11 +229,12 @@ public final class TTSPlaybackController {
             ? Double(chunk.buffer.frameLength) / Double(chunk.sampleRate)
             : 0
         let gate = backpressure
+        let epoch = scheduleEpoch
         playerNode.scheduleBuffer(chunk.buffer) { [weak self] in
             Task { @MainActor [weak self] in
-                guard let self else { return }
-                self.completedBufferCount += 1
                 gate?.release(bufferSeconds)
+                guard let self, self.scheduleEpoch == epoch else { return }
+                self.completedBufferCount += 1
                 self.finishIfNeeded()
             }
         }
@@ -270,6 +289,11 @@ public final class TTSPlaybackController {
         currentWord = nil
         highlightSourceText = ""
         seekFrameOffset = 0
+        streamTimeline = []
+        streamChunkStarts = [:]
+        streamQueuedSeconds = 0
+        streamHasMarks = false
+        streamDrained = false
         var consumed = 0
         // While draining, don't let a transient queue-drain between chunks be
         // mistaken for end-of-playback.
@@ -284,22 +308,46 @@ public final class TTSPlaybackController {
                     logger.info("play(stream:): superseded by token=\(self.sessionToken, privacy: .public); exiting")
                     return // a newer session's stop() owns resetting streamProducing
                 }
+                noteNarrationMark(of: chunk)
                 try schedule(chunk)
                 consumed += 1
             }
         } catch {
             streamProducing = false
+            streamDrained = true
             logger.error("play(stream:): stream THREW after \(consumed, privacy: .public) buffers: \(error.localizedDescription, privacy: .public)")
             throw error
         }
         // Stream fully produced: now end-of-queue genuinely means finished.
         streamProducing = false
+        streamDrained = true
+        if streamHasMarks { isDurationFinal = true }
         finishIfNeeded()
         if consumed == 0 {
             logger.warning("play(stream:): stream FINISHED WITH ZERO BUFFERS. Upstream synthesis produced no audio. Check synthesizeStream logs for the matching modelID.")
         } else {
             logger.info("play(stream:): stream drained, \(consumed, privacy: .public) buffers scheduled")
         }
+    }
+
+    /// Places the words of a marked stream element on the playback clock:
+    /// a chunk starts where the audio queued before it ends.
+    private func noteNarrationMark(of chunk: TTSAudioBufferChunk) {
+        defer {
+            if chunk.sampleRate > 0 {
+                streamQueuedSeconds += Double(chunk.buffer.frameLength) / Double(chunk.sampleRate)
+            }
+            if streamHasMarks { streamAccumulatedDuration = streamQueuedSeconds }
+        }
+        guard let mark = chunk.narrationMark else { return }
+        streamHasMarks = true
+        let start = streamChunkStarts[mark.chunkIndex] ?? streamQueuedSeconds
+        streamChunkStarts[mark.chunkIndex] = start
+        guard let timings = mark.wordTimings, !timings.isEmpty else { return }
+        let placed = timings.map {
+            TTSWordTiming(characterRange: $0.characterRange, offset: start + $0.offset, duration: $0.duration)
+        }
+        streamTimeline.append(contentsOf: highlightOptions.apply(to: placed, in: highlightSourceText))
     }
 
     /// Play a streaming synthesis result with **playback-driven** word
@@ -311,20 +359,21 @@ public final class TTSPlaybackController {
     /// gap accumulates and the highlight ends up pointing at words the
     /// listener hasn't reached yet (often: completely different text).
     ///
-    /// This overload solves that by subscribing to the synthesizer's
-    /// `events()` stream internally, building an absolute-time timeline as
-    /// `chunkFinished` + `chunkTimings` events arrive, and firing `onWord`
-    /// based on the player's actual `currentTime`. Behaviorally it's the
-    /// same model the prebaked-narration path already uses.
+    /// This overload solves that by building an absolute-time timeline and
+    /// firing `onWord` based on the player's actual `currentTime`.
+    /// Behaviorally it's the same model the prebaked-narration path uses.
     ///
-    /// Call this *immediately* after `streamAndCacheNarration(...)` /
-    /// `synthesizeLong(...)` returns: the events stream is established
-    /// here, so events emitted between those two calls are missed.
-    /// Worst-case effect is missed highlights for the first chunk if
-    /// generation completed before subscription — for live MLX generation
-    /// that gap is microseconds; for fully-cached replay the existing
-    /// `play(narration:onWord:)` path is the right tool and doesn't have
-    /// this race.
+    /// A `streamAndCacheNarration(...)` stream carries its word timings on
+    /// its own elements (`TTSNarrationMark`), and the timeline is built from
+    /// those: each chunk is placed where the audio queued before it ends, so
+    /// nothing depends on when this is called or on what else the
+    /// synthesizer is generating.
+    ///
+    /// A stream without marks (`synthesizeLong(...)`) falls back to the
+    /// synthesizer's `events()`: `chunkFinished` + `chunkTimings`. Those are
+    /// shared by everything the synthesizer generates and only arrive once
+    /// subscribed, so call this *immediately* after creating such a stream
+    /// and do not generate anything else on that synthesizer meanwhile.
     public func play(
         stream: AsyncThrowingStream<TTSAudioBufferChunk, Error>,
         synthesizer: TTSSpeechSynthesizer,
@@ -373,9 +422,13 @@ public final class TTSPlaybackController {
                     if Task.isCancelled { return }
                     switch event {
                     case let .chunkFinished(_, chunkIndex, duration):
+                        // A marked stream carries its own timings; events
+                        // may belong to something else being generated.
+                        if self?.streamHasMarks == true { continue }
                         chunkDurations[chunkIndex] = duration
                         self?.streamAccumulatedDuration = chunkDurations.values.reduce(0, +)
                     case let .chunkTimings(_, chunkIndex, timings):
+                        if self?.streamHasMarks == true { continue }
                         let priorTotal = chunkDurations
                             .filter { $0.key < chunkIndex }
                             .values.reduce(0, +)
@@ -410,6 +463,7 @@ public final class TTSPlaybackController {
                             }
                         }
                     case .streamingFinished:
+                        if self?.streamHasMarks == true { continue }
                         streamingFinished = true
                         self?.isDurationFinal = true
                         return
@@ -421,10 +475,21 @@ public final class TTSPlaybackController {
 
             defer { collector.cancel() }
 
+            var hasPlayed = false
             while !Task.isCancelled {
                 guard let self else { return }
                 let s = self.state
-                if s == .stopped { return }
+                // The session starts out `.stopped` (play(stream:) stops
+                // whatever came before) and stays so until the first buffer
+                // is queued, which for a live stream is after the first
+                // take has been generated. Leaving on that `.stopped` ended
+                // the observer before a single word could fire.
+                if s == .playing || s == .paused { hasPlayed = true }
+                if s == .stopped, hasPlayed || self.streamDrained { return }
+                if self.streamHasMarks {
+                    timeline = self.streamTimeline
+                    streamingFinished = self.streamDrained
+                }
                 // Only flush+return on idle when the upstream stream has
                 // actually finished. Mid-stream `.idle` is transient — the
                 // AVAudioPlayerNode briefly drains its queue between chunk
@@ -476,9 +541,9 @@ public final class TTSPlaybackController {
         currentFile = audioFile
         seekFrameOffset = 0
         scheduledBufferCount += 1
-        playerNode.scheduleFile(audioFile, at: nil) { [weak self] in
+        playerNode.scheduleFile(audioFile, at: nil) { [weak self, epoch = scheduleEpoch] in
             Task { @MainActor [weak self] in
-                guard let self else { return }
+                guard let self, self.scheduleEpoch == epoch else { return }
                 self.completedBufferCount += 1
                 self.finishIfNeeded()
             }
@@ -526,6 +591,7 @@ public final class TTSPlaybackController {
     public var isEngineRunning: Bool { engine.isRunning }
 
     public func stop() {
+        scheduleEpoch += 1
         playerNode.stop()
         engine.stop()
         streamProducing = false
@@ -600,9 +666,9 @@ public final class TTSPlaybackController {
             let rate = chunkFile.processingFormat.sampleRate
             if rate > 0 { startTime += Double(chunkFile.length) / rate }
             scheduledBufferCount += 1
-            playerNode.scheduleFile(chunkFile, at: nil) { [weak self] in
+            playerNode.scheduleFile(chunkFile, at: nil) { [weak self, epoch = scheduleEpoch] in
                 Task { @MainActor [weak self] in
-                    guard let self else { return }
+                    guard let self, self.scheduleEpoch == epoch else { return }
                     self.completedBufferCount += 1
                     self.finishIfNeeded()
                 }
@@ -737,6 +803,7 @@ public final class TTSPlaybackController {
         guard sampleRate > 0 else { return }
 
         let wasPlaying = (state == .playing)
+        scheduleEpoch += 1
         playerNode.stop()
         scheduledBufferCount = 0
         completedBufferCount = 0
@@ -753,9 +820,9 @@ public final class TTSPlaybackController {
             scheduledBufferCount += 1
             playerNode.scheduleSegment(
                 landing.file, startingFrame: startFrame, frameCount: remaining, at: nil
-            ) { [weak self] in
+            ) { [weak self, epoch = scheduleEpoch] in
                 Task { @MainActor [weak self] in
-                    guard let self else { return }
+                    guard let self, self.scheduleEpoch == epoch else { return }
                     self.completedBufferCount += 1
                     self.finishIfNeeded()
                 }
@@ -764,9 +831,9 @@ public final class TTSPlaybackController {
 
         for chunk in narrationChunks where chunk.startTime > landing.startTime {
             scheduledBufferCount += 1
-            playerNode.scheduleFile(chunk.file, at: nil) { [weak self] in
+            playerNode.scheduleFile(chunk.file, at: nil) { [weak self, epoch = scheduleEpoch] in
                 Task { @MainActor [weak self] in
-                    guard let self else { return }
+                    guard let self, self.scheduleEpoch == epoch else { return }
                     self.completedBufferCount += 1
                     self.finishIfNeeded()
                 }
@@ -806,6 +873,7 @@ public final class TTSPlaybackController {
         let wasPlaying = (state == .playing)
         // Resetting the player resets sampleTime to 0; we add seekFrameOffset
         // back via currentTime so observers see "position in file".
+        scheduleEpoch += 1
         playerNode.stop()
         scheduledBufferCount = 1
         completedBufferCount = 0
@@ -817,9 +885,9 @@ public final class TTSPlaybackController {
             startingFrame: targetFrame,
             frameCount: frameCount,
             at: nil
-        ) { [weak self] in
+        ) { [weak self, epoch = scheduleEpoch] in
             Task { @MainActor [weak self] in
-                guard let self else { return }
+                guard let self, self.scheduleEpoch == epoch else { return }
                 self.completedBufferCount += 1
                 self.finishIfNeeded()
             }

@@ -214,6 +214,32 @@ public struct TTSAudioFile: Sendable, Hashable {
     }
 }
 
+/// Where a buffer of a narration stream belongs in the text.
+///
+/// The word timings of a chunk travel with its audio, so whoever plays the
+/// stream can place each word against the audio it actually queued. The
+/// synthesizer's `chunkTimings` events say the same thing, but they are
+/// shared by everything one synthesizer generates: a player listening to
+/// them picks up the words of a chapter being prepared in the background,
+/// and misses those emitted before it subscribed.
+public struct TTSNarrationMark: Sendable, Hashable {
+    /// Index of the text chunk this audio belongs to.
+    public let chunkIndex: Int
+    /// The chunk's range in the narrated text (`Character` offsets).
+    public let characterRange: Range<Int>
+    /// Word timings of the whole chunk, in seconds from the start of its
+    /// audio, with ranges in the narrated text. Set on one element per
+    /// chunk: the first when the chunk is handed over whole, otherwise a
+    /// zero-length element that follows the chunk's audio.
+    public let wordTimings: [TTSWordTiming]?
+
+    public init(chunkIndex: Int, characterRange: Range<Int>, wordTimings: [TTSWordTiming]? = nil) {
+        self.chunkIndex = chunkIndex
+        self.characterRange = characterRange
+        self.wordTimings = wordTimings
+    }
+}
+
 #if canImport(AVFoundation)
 public struct TTSAudioBufferChunk: Sendable {
     public let buffer: AVAudioPCMBuffer
@@ -222,11 +248,25 @@ public struct TTSAudioBufferChunk: Sendable {
     /// ``TTSChunkJoin``). Play and persist it like any other buffer; skip it
     /// when measuring how long the *speech* in a chunk is.
     public let isPadding: Bool
+    /// Set on the elements of a narration stream
+    /// (``TTSSpeechSynthesizer/streamAndCacheNarration(_:using:options:cacheBundleAt:chunker:startCharacterOffset:backpressure:granularity:progressHandler:)``).
+    /// An element can carry a mark and no audio (`buffer.frameLength == 0`).
+    public let narrationMark: TTSNarrationMark?
 
-    public init(buffer: AVAudioPCMBuffer, sampleRate: Int, isPadding: Bool = false) {
+    public init(
+        buffer: AVAudioPCMBuffer,
+        sampleRate: Int,
+        isPadding: Bool = false,
+        narrationMark: TTSNarrationMark? = nil
+    ) {
         self.buffer = buffer
         self.sampleRate = sampleRate
         self.isPadding = isPadding
+        self.narrationMark = narrationMark
+    }
+
+    func marked(_ mark: TTSNarrationMark) -> TTSAudioBufferChunk {
+        TTSAudioBufferChunk(buffer: buffer, sampleRate: sampleRate, isPadding: isPadding, narrationMark: mark)
     }
 }
 #endif

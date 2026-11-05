@@ -91,6 +91,19 @@ final class TTSLifecycleCoordinator: @unchecked Sendable {
     }
 }
 
+extension AsyncThrowingStream.Continuation {
+    /// Stops `producer` once nobody is reading the stream: the consuming
+    /// task was cancelled, or the stream was dropped unread. Without this a
+    /// generation task runs to the end of its text for nobody, holding the
+    /// model while it does. A stream the producer finishes itself leaves
+    /// the producer alone.
+    func cancelWhenConsumerLeaves(_ producer: Task<Void, Never>) {
+        onTermination = { termination in
+            if case .cancelled = termination { producer.cancel() }
+        }
+    }
+}
+
 /// How `streamAndCacheNarration` hands generated audio downstream.
 ///
 /// `.buffer` yields every streaming buffer (~a quarter second) as soon as it
@@ -983,6 +996,11 @@ public actor TTSSpeechSynthesizer {
                     guard let shaped = shaper.push(buffer) else { continue }
                     await yieldShaped(shaped)
                 }
+                // A cancelled task ends the loop above without an error.
+                // What came out is then part of a take: say so rather than
+                // finishing as if it were whole.
+                try Task.checkCancellation()
+                if lifecycle.isShuttingDown { throw CancellationError() }
                 if let tail = shaper.finish() {
                     await yieldShaped(tail)
                 }
@@ -1020,6 +1038,7 @@ public actor TTSSpeechSynthesizer {
                 continuation.finish(throwing: wrapped)
             }
         }
+        continuation.cancelWhenConsumerLeaves(drainTask)
         trackTask(id: taskID, drainTask)
         return stream
     }
@@ -1087,6 +1106,7 @@ public actor TTSSpeechSynthesizer {
                     // Speech only (inserted pauses excluded) — what word
                     // timings are spread over.
                     var chunkSpeechSeconds: TimeInterval = 0
+                    var pauseDetector = TTSSpeechPauseDetector()
 
                     let chunkStream = try await synthesizer.synthesizeStream(
                         info.text,
@@ -1123,11 +1143,18 @@ public actor TTSSpeechSynthesizer {
                             let seconds = Double(pcmChunk.buffer.frameLength)
                                 / Double(pcmChunk.sampleRate)
                             chunkAudioSeconds += seconds
-                            if !pcmChunk.isPadding { chunkSpeechSeconds += seconds }
+                            if !pcmChunk.isPadding {
+                                chunkSpeechSeconds += seconds
+                                pauseDetector.append(pcmChunk.buffer)
+                            }
                         }
                         totalBufferCount += 1
                         continuation.yield(pcmChunk)
                     }
+                    // Cancellation ends the loop above without an error;
+                    // don't report a cut-off chunk as finished.
+                    try Task.checkCancellation()
+                    if lifecycle.isShuttingDown { throw CancellationError() }
                     let generationSeconds = Date().timeIntervalSince(chunkStartedAt)
                     synthesizer.info(
                         "synthesizeLong[\(modelID)]: chunk \(index + 1)/\(total) FINISHED "
@@ -1146,7 +1173,7 @@ public actor TTSSpeechSynthesizer {
                         duration: chunkAudioSeconds
                     ))
                     totalAudioSeconds += chunkAudioSeconds
-                    let timings = info.wordTimings(forDuration: chunkSpeechSeconds)
+                    let timings = info.wordTimings(forDuration: chunkSpeechSeconds, pauses: pauseDetector.pauses())
                     if !timings.isEmpty {
                         await synthesizer.emit(.chunkTimings(
                             modelID: modelID,
@@ -1181,6 +1208,7 @@ public actor TTSSpeechSynthesizer {
                 continuation.finish(throwing: error)
             }
         }
+        continuation.cancelWhenConsumerLeaves(drainTask)
         trackTask(id: taskID, drainTask)
 
         return stream
@@ -1246,6 +1274,9 @@ public actor TTSSpeechSynthesizer {
             try audioFile?.write(from: buffer)
         }
         audioFile = nil
+        // Cancellation ends the loop above without an error; a cut-off file
+        // is not the audio that was asked for.
+        try Task.checkCancellation()
 
         return TTSAudioFile(
             url: finalURL,
@@ -1556,12 +1587,6 @@ public actor TTSSpeechSynthesizer {
                         // Gate on look-ahead before handing the (whole-chunk)
                         // buffer downstream so cached replay can't race ahead of
                         // playback and pile the whole book into memory either.
-                        await backpressure?.reserve(entry.duration)
-                        continuation.yield(replayChunk)
-                        await synthesizer.emit(.chunkFinished(
-                            modelID: modelID, chunkIndex: index,
-                            duration: entry.duration
-                        ))
                         let liveTimings = entry.wordTimings.map { ser -> TTSWordTiming in
                             let base = info.characterRange.lowerBound
                             return TTSWordTiming(
@@ -1570,6 +1595,14 @@ public actor TTSSpeechSynthesizer {
                                 duration: ser.duration
                             )
                         }
+                        await backpressure?.reserve(entry.duration)
+                        continuation.yield(replayChunk.marked(TTSNarrationMark(
+                            chunkIndex: index, characterRange: info.characterRange, wordTimings: liveTimings
+                        )))
+                        await synthesizer.emit(.chunkFinished(
+                            modelID: modelID, chunkIndex: index,
+                            duration: entry.duration
+                        ))
                         if !liveTimings.isEmpty {
                             await synthesizer.emit(.chunkTimings(
                                 modelID: modelID, chunkIndex: index, timings: liveTimings
@@ -1625,6 +1658,7 @@ public actor TTSSpeechSynthesizer {
                 continuation.finish(throwing: error)
             }
         }
+        continuation.cancelWhenConsumerLeaves(drainTask)
         trackTask(id: taskID, drainTask)
         return stream
     }
@@ -1718,12 +1752,17 @@ public actor TTSSpeechSynthesizer {
             emitsTerminalDiagnostic: false, boundary: info.boundary, progressHandler: nil
         )
         var speechFrames: AVAudioFramePosition = 0
+        var pauseDetector = TTSSpeechPauseDetector()
+        var streamedFormat: AVAudioFormat?
         for try await pcm in chunkStream {
             try Task.checkCancellation()
             if lifecycle.isShuttingDown { throw CancellationError() }
             let buffer = pcm.buffer
             guard buffer.frameLength > 0 else { continue }
-            if !pcm.isPadding { speechFrames += AVAudioFramePosition(buffer.frameLength) }
+            if !pcm.isPadding {
+                speechFrames += AVAudioFramePosition(buffer.frameLength)
+                pauseDetector.append(buffer)
+            }
             if !didEmitChunkStart {
                 didEmitChunkStart = true
                 await synthesizer.emit(.chunkStarted(
@@ -1753,19 +1792,17 @@ public actor TTSSpeechSynthesizer {
                 ? Double(buffer.frameLength) / buffer.format.sampleRate
                 : 0
             await backpressure?.reserve(bufferSeconds)
-            continuation.yield(pcm)
+            continuation.yield(pcm.marked(TTSNarrationMark(
+                chunkIndex: index, characterRange: info.characterRange
+            )))
+            streamedFormat = buffer.format
         }
         audioFile = nil
-        if yieldWholeChunk, !heldBuffers.isEmpty {
-            let whole = Self.concatenate(heldBuffers) ?? heldBuffers
-            for pcm in whole {
-                let seconds = pcm.buffer.format.sampleRate > 0
-                    ? Double(pcm.buffer.frameLength) / pcm.buffer.format.sampleRate
-                    : 0
-                await backpressure?.reserve(seconds)
-                continuation.yield(pcm)
-            }
-        }
+        // Cancellation ends the loop above without an error. Whatever was
+        // collected is then part of a take; recording it in the manifest
+        // would replay a cut-off sentence as if it were complete.
+        try Task.checkCancellation()
+        if lifecycle.isShuttingDown { throw CancellationError() }
         guard chunkSampleRate > 0, frameCount > 0 else {
             throw TTSError.generationFailed(modelID: modelID, underlying: NSError(
                 domain: "streamAndCacheNarration", code: -1, userInfo: [
@@ -1773,11 +1810,40 @@ public actor TTSSpeechSynthesizer {
                 ]
             ))
         }
+        let liveTimings = info.wordTimings(
+            forDuration: TimeInterval(speechFrames) / chunkSampleRate,
+            pauses: pauseDetector.pauses()
+        )
+        // The timings go downstream with the audio they describe (see
+        // `TTSNarrationMark`): on the chunk itself when it is handed over
+        // whole, on a zero-length element after it when its buffers have
+        // already gone out.
+        let timedMark = TTSNarrationMark(
+            chunkIndex: index, characterRange: info.characterRange, wordTimings: liveTimings
+        )
+        if yieldWholeChunk, !heldBuffers.isEmpty {
+            let whole = Self.concatenate(heldBuffers) ?? heldBuffers
+            for (position, pcm) in whole.enumerated() {
+                let seconds = pcm.buffer.format.sampleRate > 0
+                    ? Double(pcm.buffer.frameLength) / pcm.buffer.format.sampleRate
+                    : 0
+                await backpressure?.reserve(seconds)
+                continuation.yield(pcm.marked(position == 0
+                    ? timedMark
+                    : TTSNarrationMark(chunkIndex: index, characterRange: info.characterRange)))
+            }
+        } else if let format = streamedFormat,
+                  let empty = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1) {
+            empty.frameLength = 0
+            continuation.yield(TTSAudioBufferChunk(
+                buffer: empty, sampleRate: Int(chunkSampleRate.rounded()),
+                isPadding: true, narrationMark: timedMark
+            ))
+        }
         let duration = TimeInterval(frameCount) / chunkSampleRate
         await synthesizer.emit(.chunkFinished(
             modelID: modelID, chunkIndex: index, duration: duration
         ))
-        let liveTimings = info.wordTimings(forDuration: TimeInterval(speechFrames) / chunkSampleRate)
         if !liveTimings.isEmpty {
             await synthesizer.emit(.chunkTimings(
                 modelID: modelID, chunkIndex: index, timings: liveTimings
@@ -1878,6 +1944,7 @@ public actor TTSSpeechSynthesizer {
             var audioFile: AVAudioFile?
             var frameCount: AVAudioFramePosition = 0
             var speechFrames: AVAudioFramePosition = 0
+            var pauseDetector = TTSSpeechPauseDetector()
             var chunkSampleRate: Double = 0
             do {
                 for try await chunk in stream {
@@ -1885,7 +1952,10 @@ public actor TTSSpeechSynthesizer {
                     if lifecycle.isShuttingDown { throw CancellationError() }
                     let buffer = chunk.buffer
                     guard buffer.frameLength > 0 else { continue }
-                    if !chunk.isPadding { speechFrames += AVAudioFramePosition(buffer.frameLength) }
+                    if !chunk.isPadding {
+                        speechFrames += AVAudioFramePosition(buffer.frameLength)
+                        pauseDetector.append(buffer)
+                    }
                     if audioFile == nil {
                         let format = buffer.format
                         chunkSampleRate = format.sampleRate
@@ -1897,6 +1967,10 @@ public actor TTSSpeechSynthesizer {
                     frameCount += AVAudioFramePosition(buffer.frameLength)
                 }
                 audioFile = nil
+                // Cancellation ends the loop above without an error; a
+                // cut-off take must not become a manifest entry.
+                try Task.checkCancellation()
+                if lifecycle.isShuttingDown { throw CancellationError() }
             } catch {
                 audioFile = nil
                 throw error
@@ -1912,7 +1986,10 @@ public actor TTSSpeechSynthesizer {
             }
 
             let duration = TimeInterval(frameCount) / chunkSampleRate
-            let liveTimings = info.wordTimings(forDuration: TimeInterval(speechFrames) / chunkSampleRate)
+            let liveTimings = info.wordTimings(
+                forDuration: TimeInterval(speechFrames) / chunkSampleRate,
+                pauses: pauseDetector.pauses()
+            )
             let serialized = liveTimings.map { TTSPreparedNarrationManifest.SerializableWordTiming($0) }
                 .map { timing -> TTSPreparedNarrationManifest.SerializableWordTiming in
                     // Re-anchor character ranges so they're relative to the
@@ -2013,6 +2090,9 @@ public actor TTSSpeechSynthesizer {
                 try audioFile?.write(from: buffer)
             }
             audioFile = nil
+            // Cancellation ends the loop above without an error; a cut-off
+            // clip must not be committed to the cache.
+            try Task.checkCancellation()
         } catch {
             await cache.discard(handle)
             throw error

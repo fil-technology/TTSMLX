@@ -95,6 +95,98 @@ struct TTSPlaybackControllerTests {
         #expect(controller.state == .idle)
     }
 
+    @Test("seeking inside a playing file does not report the end of playback")
+    func seekDoesNotEndPlayback() async throws {
+        // Stopping the player node to seek calls the completion handler of
+        // what was queued. Counted against the re-queued audio, that ended
+        // playback on the spot: resuming a narration part-way reported
+        // end-of-playback and the reader moved to the next chapter.
+        let url = try Self.makeSineFile(durationSeconds: 3.0)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let controller = TTSPlaybackController()
+        var ended = false
+        try controller.play(file: url) { ended = true }
+        try controller.seek(to: 1.0)
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(!ended)
+        #expect(controller.state == .playing)
+        controller.stop()
+    }
+
+    @Test("replacing what is playing does not end the new playback")
+    func restartDoesNotEndPlayback() async throws {
+        let url = try Self.makeSineFile(durationSeconds: 3.0)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let controller = TTSPlaybackController()
+        var firstEnded = false
+        var secondEnded = false
+        try controller.play(file: url) { firstEnded = true }
+        try controller.play(file: url) { secondEnded = true }
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(!firstEnded)
+        #expect(!secondEnded)
+        #expect(controller.state == .playing)
+        controller.stop()
+    }
+
+    @Test("a live stream fires its words against the audio that was queued")
+    func markedStreamFiresWords() async throws {
+        // Two bugs met here. The word observer left as soon as it saw the
+        // `.stopped` state every stream session starts in, so a live stream
+        // (first audio arrives after the first take is generated) never
+        // fired a word. And the timeline came from synthesizer-wide events,
+        // which a player can miss or get from another narration; the marks
+        // on the stream's own elements cannot be either.
+        let controller = TTSPlaybackController()
+        let synthesizer = TTSSpeechSynthesizer()
+        let (stream, continuation) = AsyncThrowingStream<TTSAudioBufferChunk, Error>.makeStream()
+        let feeder = Task {
+            // First audio arrives late, as it does when it is being generated.
+            try? await Task.sleep(for: .milliseconds(300))
+            // Chunk 0 handed over whole: timings ride on its audio.
+            continuation.yield(TTSAudioBufferChunk(
+                buffer: Self.makeToneBuffer(seconds: 0.4), sampleRate: 24_000,
+                narrationMark: TTSNarrationMark(chunkIndex: 0, characterRange: 0 ..< 7, wordTimings: [
+                    TTSWordTiming(characterRange: 0 ..< 3, offset: 0, duration: 0.2),
+                    TTSWordTiming(characterRange: 4 ..< 7, offset: 0.2, duration: 0.2),
+                ])))
+            // Chunk 1 streamed buffer by buffer: timings follow on an
+            // element with no audio.
+            for _ in 0 ..< 2 {
+                continuation.yield(TTSAudioBufferChunk(
+                    buffer: Self.makeToneBuffer(seconds: 0.2), sampleRate: 24_000,
+                    narrationMark: TTSNarrationMark(chunkIndex: 1, characterRange: 8 ..< 15)))
+            }
+            continuation.yield(TTSAudioBufferChunk(
+                buffer: Self.makeToneBuffer(seconds: 0), sampleRate: 24_000, isPadding: true,
+                narrationMark: TTSNarrationMark(chunkIndex: 1, characterRange: 8 ..< 15, wordTimings: [
+                    TTSWordTiming(characterRange: 8 ..< 11, offset: 0, duration: 0.2),
+                    TTSWordTiming(characterRange: 12 ..< 15, offset: 0.2, duration: 0.2),
+                ])))
+            continuation.finish()
+        }
+        var fired: [TTSWordTiming] = []
+        var ended = false
+        try await controller.play(
+            stream: stream, synthesizer: synthesizer,
+            onWord: { fired.append($0) },
+            onPlaybackEnd: { ended = true }
+        )
+        await feeder.value
+        for _ in 0 ..< 40 where !ended { try await Task.sleep(for: .milliseconds(50)) }
+        try await Task.sleep(for: .milliseconds(100))
+
+        #expect(ended)
+        #expect(fired.map(\.characterRange) == [0 ..< 3, 4 ..< 7, 8 ..< 11, 12 ..< 15])
+        // The second chunk starts where the first chunk's audio ends.
+        let offsets = fired.map(\.offset)
+        #expect(offsets.count == 4)
+        for (offset, expected) in zip(offsets, [0, 0.2, 0.4, 0.6]) {
+            #expect(abs(offset - expected) < 1e-6)
+        }
+        controller.stop()
+    }
+
     @Test("timePulse finishes once stop() is called")
     func timePulseFinishesOnStop() async throws {
         let url = try Self.makeSineFile(durationSeconds: 0.5)
@@ -124,6 +216,19 @@ struct TTSPlaybackControllerTests {
     /// Writes a short mono 16-bit PCM WAV file of `durationSeconds` to a
     /// temporary location and returns its URL. Used to exercise file-backed
     /// playback without needing the MLX runtime.
+    static func makeToneBuffer(seconds: Double, sampleRate: Double = 24_000) -> AVAudioPCMBuffer {
+        let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
+        let frames = AVAudioFrameCount(seconds * sampleRate)
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: max(frames, 1))!
+        buffer.frameLength = frames
+        if let samples = buffer.floatChannelData?[0] {
+            for frame in 0 ..< Int(frames) {
+                samples[frame] = 0.1 * Float(sin(2 * Double.pi * 440 * Double(frame) / sampleRate))
+            }
+        }
+        return buffer
+    }
+
     static func makeSineFile(
         durationSeconds: Double,
         sampleRate: Double = 22_050
