@@ -1,0 +1,32 @@
+[bench] preparing mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit (download if missing)
+[bench] model=mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit at /var/mobile/Containers/Data/Application/86AF9B13-7D9D-4FC4-9E6B-2DD677BF1C00/Library/Application Support/huggingface/hub/mlx-audio/mlx-community_Qwen3-TTS-12Hz-0.6B-Base-8bit sizeMB=1996
+[bench] loading mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit cold
+[bench] app scene phase: active
+Using cached model at: /var/mobile/Containers/Data/Application/86AF9B13-7D9D-4FC4-9E6B-2DD677BF1C00/Library/Application Support/huggingface/hub/mlx-audio/mlx-community_Qwen3-TTS-12Hz-0.6B-Base-8bit
+Loaded speech tokenizer decoder
+Loaded speaker encoder
+Loaded Qwen3-TTS model (base)
+[bench] running sentence/narration #-1 (cold) on mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit
+[bench] sentence/narration #-1 (cold) firstAudio=4.52s audio=4.4s wall=10.7s rtf=0.41x chunks=5 stalls=1 (3.5s) preroll=3.5s overruns=0 tail=0.1s peak=-6.9dBFS rms=-25.5dBFS mlxPeak=3490MB active=1927MB cache=513MB resident=2548MB cpu=0.74 thermal=nominal battery=15%
+[bench] reloading mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit warm
+Using cached model at: /var/mobile/Containers/Data/Application/86AF9B13-7D9D-4FC4-9E6B-2DD677BF1C00/Library/Application Support/huggingface/hub/mlx-audio/mlx-community_Qwen3-TTS-12Hz-0.6B-Base-8bit
+Loaded speech tokenizer decoder
+Loaded speaker encoder
+Loaded Qwen3-TTS model (base)
+[bench] load cold=2.85s coldFirstAudio=7.37s warm=1.95s active=1895MB resident=2017MB
+[bench] running sentence/narration #0 on mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit
+[bench] sentence/narration #0 firstAudio=3.96s audio=4.6s wall=8.0s rtf=0.57x chunks=5 stalls=1 (1.4s) preroll=1.4s overruns=0 tail=0.0s peak=-3.2dBFS rms=-15.8dBFS mlxPeak=3647MB active=1927MB cache=513MB resident=2583MB cpu=0.86 thermal=nominal battery=15%
+[bench] running sentence/narration #1 on mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit
+[bench] sentence/narration #1 firstAudio=3.87s audio=3.8s wall=6.3s rtf=0.60x chunks=4 stalls=1 (0.5s) preroll=0.5s overruns=0 tail=0.0s peak=-5.7dBFS rms=-21.1dBFS mlxPeak=3360MB active=1927MB cache=512MB resident=2824MB cpu=0.89 thermal=nominal battery=15%
+[bench] running sentence/narration #2 on mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit
+[bench] sentence/narration #2 firstAudio=3.24s audio=4.5s wall=6.7s rtf=0.67x chunks=5 stalls=1 (0.9s) preroll=0.9s overruns=0 tail=0.1s peak=-10.2dBFS rms=-27.5dBFS mlxPeak=3647MB active=1927MB cache=513MB resident=2725MB cpu=1.05 thermal=nominal battery=15%
+[bench] running sentence/stream #0 on mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit
+[bench] sentence/stream #0 firstAudio=1.82s audio=4.6s wall=7.1s rtf=0.65x chunks=7 stalls=3 (1.5s) preroll=1.5s overruns=0 tail=0.0s peak=-5.5dBFS rms=-22.9dBFS mlxPeak=2775MB active=1927MB cache=513MB resident=2584MB cpu=1.03 thermal=nominal battery=15%
+[bench] running sentence/stream #1 on mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit
+[bench] sentence/stream #1 firstAudio=1.57s audio=5.2s wall=7.7s rtf=0.67x chunks=8 stalls=4 (2.0s) preroll=2.0s overruns=0 tail=0.2s peak=-6.7dBFS rms=-23.2dBFS mlxPeak=2775MB active=1927MB cache=513MB resident=2596MB cpu=1.06 thermal=nominal battery=15%
+[bench] running sentence/stream #2 on mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit
+[bench] sentence/stream #2 firstAudio=1.63s audio=3.9s wall=5.7s rtf=0.68x chunks=6 stalls=3 (1.2s) preroll=1.2s overruns=0 tail=0.0s peak=-3.8dBFS rms=-18.2dBFS mlxPeak=2775MB active=1927MB cache=512MB resident=2785MB cpu=1.08 thermal=nominal battery=15%
+[bench] running paragraph/narration #0 on mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit
+Launched application with com.filtechnology.ttsmlx.demo.ios bundle identifier.
+Waiting for the application to terminate...
+App terminated due to signal 9.

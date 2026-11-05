@@ -55,7 +55,7 @@ struct TTSDeviceProfileTests {
         // Regression guard: a previous catalog hard-gated Pocket-TTS to
         // `.iPad` based on conservative paranoia (no measured OOM data).
         // ReadMeBook shipped Pocket-TTS on iPhone through 0.3 with no OOM
-        // reports. The right gate is `peakMemoryMB` (600 < 6144 = fits),
+        // reports. The right gate is `peakMemoryMB` (900 measured < 6144 = fits),
         // not a device class. If this test starts failing, someone
         // re-introduced the gate without a measured reason — push back.
         let pocket = TTSMLX.supportedModels.first { $0.id == "mlx-community/pocket-tts" }!

@@ -114,7 +114,8 @@ public actor TTSModelStore {
             throw TTSError.unsupportedModel(descriptor.id)
         }
 
-        if let installedLocation = modelCacheLocation(for: descriptor.id) {
+        if let installedLocation = modelCacheLocation(for: descriptor.id),
+           Self.isCompleteInstall(at: installedLocation, descriptor: descriptor, fileManager: fileManager) {
             let installed = TTSInstalledModel(
                 descriptor: descriptor,
                 location: installedLocation,
@@ -767,6 +768,46 @@ extension TTSModelStore {
         )
     }
 
+    /// Whether a model directory holds a finished download.
+    ///
+    /// A directory's mere existence used to count as installed, so a download
+    /// killed half-way (the phone locked, the app backgrounded) came back as
+    /// "already available" and the runtime then re-downloaded at load time,
+    /// inside the first synthesize call. Complete means: every file the
+    /// descriptor lists is present and non-empty; or, without a file list,
+    /// every file in the runtime's snapshot manifest that matches its default
+    /// patterns is; or, without either, a `config.json` plus a non-empty
+    /// `.safetensors` file (the runtime's own minimum).
+    static func isCompleteInstall(at location: URL, descriptor: TTSModelDescriptor, fileManager: FileManager = .default) -> Bool {
+        if fileManager.fileExists(atPath: location.appendingPathComponent(downloadInProgressMarker).path) {
+            return false
+        }
+        func present(_ relativePath: String) -> Bool {
+            let url = location.appendingPathComponent(relativePath)
+            guard let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize else { return false }
+            return size > 0
+        }
+        if let files = descriptor.files, !files.isEmpty {
+            return files.allSatisfy(present)
+        }
+        let manifestURL = location.appendingPathComponent(".mlx-audio-snapshot.json")
+        if let data = try? Data(contentsOf: manifestURL),
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let entries = object["files"] as? [[String: Any]] {
+            let patterns = ["*.safetensors", "*.json", "*.txt", "*.wav"]
+            let listed = entries.compactMap { $0["rfilename"] as? String }
+                .filter { path in patterns.contains { fnmatch($0, path, 0) == 0 } }
+            if !listed.isEmpty { return listed.allSatisfy(present) }
+        }
+        guard let contents = try? fileManager.contentsOfDirectory(at: location, includingPropertiesForKeys: [.fileSizeKey]) else {
+            return false
+        }
+        let hasWeights = contents.contains { url in
+            url.pathExtension == "safetensors" && ((try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0) > 0
+        }
+        return hasWeights && present("config.json")
+    }
+
     func modelCacheLocation(for modelID: String) -> URL? {
         migrateLegacyInstallsIfNeeded()
         let legacyKey = modelID.replacingOccurrences(of: "/", with: "_")
@@ -943,12 +984,15 @@ extension TTSModelStore {
                 .appendingPathComponent("mlx-audio", isDirectory: true)
                 .appendingPathComponent(descriptor.id.replacingOccurrences(of: "/", with: "_"), isDirectory: true)
 
+            try Self.markDownloadInProgress(at: modelDirectory, fileManager: fileManager)
             try await downloadDirect(
                 baseURL: baseURL,
                 files: files,
                 to: modelDirectory,
                 progressHandler: progressHandler
             )
+            await writeSnapshotManifest(descriptor: descriptor, modelDirectory: modelDirectory, hfToken: hfToken)
+            Self.clearDownloadInProgress(at: modelDirectory, fileManager: fileManager)
             return modelDirectory
         }
 
@@ -969,6 +1013,7 @@ extension TTSModelStore {
             .appendingPathComponent(descriptor.id.replacingOccurrences(of: "/", with: "_"), isDirectory: true)
 
         try fileManager.createDirectory(at: modelDirectory, withIntermediateDirectories: true)
+        try Self.markDownloadInProgress(at: modelDirectory, fileManager: fileManager)
 
         let requiredExtension = inferredRequiredExtension(for: descriptor.id)
         let allowedExtensions = [
@@ -997,7 +1042,68 @@ extension TTSModelStore {
                 ))
             }
         )
+        await writeSnapshotManifest(descriptor: descriptor, modelDirectory: modelDirectory, hfToken: hfToken)
+        Self.clearDownloadInProgress(at: modelDirectory, fileManager: fileManager)
         return modelDirectory
+    }
+
+    /// Marker written before a download starts and removed after it finishes.
+    /// A truncated `model.safetensors` is non-empty and passes every
+    /// size-based check (the runtime's included), so a download killed
+    /// part-way (the phone locked during the 2 GB Qwen3 fetch) was otherwise
+    /// taken for an install and crashed the first load. Installs made before
+    /// this marker existed carry none and are trusted as before.
+    static let downloadInProgressMarker = ".ttsmlx-download-in-progress"
+
+    static func markDownloadInProgress(at directory: URL, fileManager: FileManager) throws {
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        fileManager.createFile(atPath: directory.appendingPathComponent(downloadInProgressMarker).path, contents: Data())
+    }
+
+    static func clearDownloadInProgress(at directory: URL, fileManager: FileManager) {
+        try? fileManager.removeItem(at: directory.appendingPathComponent(downloadInProgressMarker))
+    }
+
+    /// Records the snapshot the runtime expects next to the files.
+    ///
+    /// `ModelUtils.resolveOrDownloadModel` treats a cached directory as complete
+    /// only when `.mlx-audio-snapshot.json` lists the repository and every
+    /// listed file matching the loader's patterns is present. Loaders with
+    /// patterns beyond the defaults (VibeVoice `voices/*`, Voxtral
+    /// `voice_embedding/*`) otherwise fetch the listing again at every load
+    /// and re-download what they think is missing. The listing comes from the
+    /// hub when reachable; a direct download falls back to the descriptor's
+    /// own file list, which is exactly what is on disk.
+    func writeSnapshotManifest(descriptor: TTSModelDescriptor, modelDirectory: URL, hfToken: String?) async {
+        let manifestURL = modelDirectory.appendingPathComponent(".mlx-audio-snapshot.json")
+        guard !fileManager.fileExists(atPath: manifestURL.path) else { return }
+        var revision = "main"
+        var files: [[String: Any]] = []
+        if let repoID = Repo.ID(rawValue: descriptor.id) {
+            let client: HubClient
+            if let hfToken, !hfToken.isEmpty {
+                client = HubClient(host: HubClient.defaultHost, bearerToken: hfToken, cache: hubCache)
+            } else {
+                client = HubClient(cache: hubCache)
+            }
+            if let model = try? await client.getModel(repoID, revision: "main", filesMetadata: true),
+               let sha = model.sha, let siblings = model.siblings {
+                revision = sha
+                files = siblings.map { sibling in
+                    var entry: [String: Any] = ["rfilename": sibling.relativeFilename]
+                    if let size = sibling.size { entry["size"] = size }
+                    return entry
+                }
+            }
+        }
+        if files.isEmpty {
+            guard let listed = descriptor.files, !listed.isEmpty else { return }
+            files = listed.map { ["rfilename": $0] }
+        }
+        let manifest: [String: Any] = ["revision": revision, "files": files]
+        if let data = try? JSONSerialization.data(withJSONObject: manifest) {
+            try? data.write(to: manifestURL, options: .atomic)
+        }
     }
 
     /// Raw-content URL for one file of a direct (`modelURL` + `files`)

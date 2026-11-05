@@ -4,6 +4,15 @@ struct TabRootView: View {
     @State private var model = DemoModel()
 
     var body: some View {
+        tabs
+            // Synthesis must not be interrupted by auto-lock: a backgrounded app
+            // loses Metal compute. Keep the screen on while the demo generates.
+            .onChange(of: model.isSynthesizing || model.isStreaming, initial: true) { _, busy in
+                KeepAwake.set(busy)
+            }
+    }
+
+    private var tabs: some View {
         TabView {
             ReaderView(model: model)
                 .tabItem {

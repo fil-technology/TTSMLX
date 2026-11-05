@@ -21,3 +21,6 @@ DerivedData/
 Packages/
 Tests/.moss-integration
 Tests/.moss-device
+
+# Benchmark harness audio (float32 WAV, large); compact AAC samples live in Benchmarks/samples
+Benchmarks/results/audio/

@@ -227,6 +227,10 @@ public actor TTSSpeechSynthesizer {
     /// Ming let it reach several GB otherwise). Set together with
     /// `runtimeCacheLimitMB`, which bounds it during a request.
     let releasesRuntimeBuffersAfterEachRequest: Bool
+    /// Cache cap waiting to be applied at the first model load. Applied there
+    /// rather than in `init` because touching the MLX allocator brings up
+    /// Metal, which aborts a process without a metallib (plain `swift test`).
+    private var pendingRuntimeCacheLimitMB: Int?
     /// Chatterbox conditionings computed by `prepareVoice`, keyed by handle.
     private var preparedConditionings: [UUID: ChatterboxModel.RefAudioConditioning] = [:]
     /// LRU order of resident model ids (front = least-recently-used). Only
@@ -243,6 +247,17 @@ public actor TTSSpeechSynthesizer {
     private struct ModelVariant: Hashable {
         let voice: String?
         let language: String?
+    }
+
+    /// Whether a new voice or language needs a fresh instance of the model.
+    /// Marvis (MimiAdapter and FlowLM caches) keeps residual state between
+    /// calls, so it does. Every other loader takes voice and language as
+    /// per-call parameters: reloading their weights on each switch wasted a
+    /// second or two per voice change, made `warmUp` useless for the first
+    /// voiced call, and on a phone the reload of Qwen3-TTS straight after its
+    /// cold load ended the process.
+    nonisolated static func reloadsOnVariantChange(_ modelID: String) -> Bool {
+        modelID.lowercased().contains("marvis")
     }
 
     /// Shared shutdown coordinator. Owned by this synthesizer, observed by
@@ -273,16 +288,19 @@ public actor TTSSpeechSynthesizer {
         modelStore: TTSModelStore = TTSModelStore(),
         diagnosticHandler: TTSDiagnosticHandler? = nil,
         maxResidentModels: Int = 1,
-        runtimeCacheLimitMB: Int? = nil,
+        runtimeCacheLimitMB: Int? = 512,
         releasesRuntimeBuffersAfterEachRequest: Bool = false
     ) {
         self.modelStore = modelStore
         self.diagnosticHandler = diagnosticHandler
         self.maxResidentModels = max(1, maxResidentModels)
         self.releasesRuntimeBuffersAfterEachRequest = releasesRuntimeBuffersAfterEachRequest
-        if let runtimeCacheLimitMB {
-            MLX.Memory.cacheLimit = max(0, runtimeCacheLimitMB) << 20
-        }
+        // Bounds MLX's buffer cache during a request. Uncapped (`nil`), the
+        // cache keeps every freed buffer: one long-form Kokoro run on macOS
+        // reached 24 GB resident and an iPhone is jetsammed long before that.
+        // 512 MB keeps the footprint near the weight size on every model
+        // measured in Docs/benchmarks.md; pass `nil` for MLX's own default.
+        self.pendingRuntimeCacheLimitMB = runtimeCacheLimitMB
         // Three observers cover the three ways iOS signals "you're about to
         // lose GPU access": application-level `willResignActive` (still the
         // most reliable on UIApplication-based apps), the scene equivalent
@@ -2051,8 +2069,9 @@ public actor TTSSpeechSynthesizer {
         // state (see note on `lastVariantByModel`).
         if let cached = loadedModels[model.id] {
             applyModelSpecificProfile(options.generationProfile, to: cached.model)
-            if lastVariantByModel[model.id] == requestedVariant {
+            if lastVariantByModel[model.id] == requestedVariant || !Self.reloadsOnVariantChange(model.id) {
                 info("prepareModel: CACHE HIT for \(model.id) sampleRate=\(cached.model.sampleRate) variant=\(requestedVariant.voice ?? "auto").\(requestedVariant.language ?? "auto")")
+                lastVariantByModel[model.id] = requestedVariant
                 emit(.modelLoadServedFromCache(modelID: model.id))
                 touchResidency(model.id)
                 return cached
@@ -2163,6 +2182,11 @@ public actor TTSSpeechSynthesizer {
             // Hoisted: referencing the actor-owned store inside the closure
             // makes it non-Sendable under region isolation; the cache itself is.
             let cache = modelStore.hubCache
+            if let limit = pendingRuntimeCacheLimitMB {
+                MLX.Memory.cacheLimit = max(0, limit) << 20
+                pendingRuntimeCacheLimitMB = nil
+                log("prepareModel: MLX cache limit \(limit) MB")
+            }
             loaded = try await MLX.withError {
                 try await MLXTTSModelLoader.load(descriptor: model, hfToken: options.hfToken, cache: cache)
             }

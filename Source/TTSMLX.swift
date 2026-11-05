@@ -36,9 +36,21 @@ public enum TTSMLX {
         .sniffle: "<sniffle>", .groan: "<groan>", .yawn: "<yawn>", .gasp: "<gasp>",
     ]
 
+    /// Pocket TTS preset voices bundled with the checkpoint. The model is
+    /// CC-BY-4.0, but each preset carries the licence of the corpus it was
+    /// cloned from (kyutai/tts-voices): `alba`, `azelma`, `eponine` and
+    /// `fantine` CC-BY-4.0, `javert` and `marius` CC0, `cosette` (Expresso)
+    /// and `jean` (EARS) CC-BY-NC-4.0, so the last two are not for commercial
+    /// use and sit at the end of the list.
     static let pocketTTSVoices: [TTSVoice] = [
-        TTSVoice("alba", displayName: "Alba", language: .english), TTSVoice("marius", displayName: "Marius", language: .english),
-        TTSVoice("javert", displayName: "Javert", language: .english), TTSVoice("jean", displayName: "Jean", language: .english),
+        TTSVoice("alba", displayName: "Alba", language: .english, gender: .female, summary: "CC-BY-4.0 voice"),
+        TTSVoice("marius", displayName: "Marius", language: .english, gender: .male, summary: "CC0 voice"),
+        TTSVoice("javert", displayName: "Javert", language: .english, gender: .male, summary: "CC0 voice"),
+        TTSVoice("azelma", displayName: "Azelma", language: .english, gender: .female, summary: "CC-BY-4.0 voice (VCTK)"),
+        TTSVoice("eponine", displayName: "Eponine", language: .english, gender: .female, summary: "CC-BY-4.0 voice (VCTK)"),
+        TTSVoice("fantine", displayName: "Fantine", language: .english, gender: .female, summary: "CC-BY-4.0 voice (VCTK)"),
+        TTSVoice("cosette", displayName: "Cosette", language: .english, gender: .female, summary: "CC-BY-NC-4.0 voice (Expresso): non-commercial only"),
+        TTSVoice("jean", displayName: "Jean", language: .english, gender: .male, summary: "CC-BY-NC-4.0 voice (EARS): non-commercial only"),
     ]
 
     static let mingVoices: [TTSVoice] = [
@@ -170,6 +182,53 @@ public enum TTSMLX {
     static let kokoroFiles: [String] = ["config.json", "kokoro-v1_0.safetensors"]
         + kokoroVoiceNames.map { "voices/\($0).safetensors" }
 
+    /// VibeVoice Realtime preset voices: the `voices/*.safetensors` caches
+    /// shipped with the checkpoint. The prefix is Microsoft's language code
+    /// (`in` is Indian English, `sp` Spanish, `jp` Japanese, `kr` Korean).
+    /// Upstream trains for English; the other languages are marked
+    /// experimental and "may produce unpredictable results".
+    static let vibeVoiceVoices: [TTSVoice] = [
+        TTSVoice("en-Carter_man", displayName: "Carter", language: .english, gender: .male),
+        TTSVoice("en-Davis_man", displayName: "Davis", language: .english, gender: .male),
+        TTSVoice("en-Emma_woman", displayName: "Emma", language: .english, gender: .female),
+        TTSVoice("en-Frank_man", displayName: "Frank", language: .english, gender: .male),
+        TTSVoice("en-Grace_woman", displayName: "Grace", language: .english, gender: .female),
+        TTSVoice("en-Mike_man", displayName: "Mike", language: .english, gender: .male),
+        TTSVoice("in-Samuel_man", displayName: "Samuel (Indian English)", language: .english, gender: .male),
+        TTSVoice("de-Spk0_man", displayName: "German 0", language: .german, gender: .male),
+        TTSVoice("de-Spk1_woman", displayName: "German 1", language: .german, gender: .female),
+        TTSVoice("fr-Spk0_man", displayName: "French 0", language: .french, gender: .male),
+        TTSVoice("fr-Spk1_woman", displayName: "French 1", language: .french, gender: .female),
+        TTSVoice("it-Spk0_woman", displayName: "Italian 0", language: .italian, gender: .female),
+        TTSVoice("it-Spk1_man", displayName: "Italian 1", language: .italian, gender: .male),
+        TTSVoice("jp-Spk0_man", displayName: "Japanese 0", language: .japanese, gender: .male),
+        TTSVoice("jp-Spk1_woman", displayName: "Japanese 1", language: .japanese, gender: .female),
+        TTSVoice("kr-Spk0_woman", displayName: "Korean 0", language: .korean, gender: .female),
+        TTSVoice("kr-Spk1_man", displayName: "Korean 1", language: .korean, gender: .male),
+        TTSVoice("nl-Spk0_man", displayName: "Dutch 0", language: .dutch, gender: .male),
+        TTSVoice("nl-Spk1_woman", displayName: "Dutch 1", language: .dutch, gender: .female),
+        TTSVoice("pl-Spk0_man", displayName: "Polish 0", language: .polish, gender: .male),
+        TTSVoice("pl-Spk1_woman", displayName: "Polish 1", language: .polish, gender: .female),
+        TTSVoice("pt-Spk0_woman", displayName: "Portuguese 0", language: .portuguese, gender: .female),
+        TTSVoice("pt-Spk1_man", displayName: "Portuguese 1", language: .portuguese, gender: .male),
+        TTSVoice("sp-Spk0_woman", displayName: "Spanish 0", language: .spanish, gender: .female),
+        TTSVoice("sp-Spk1_man", displayName: "Spanish 1", language: .spanish, gender: .male),
+    ]
+
+    static let vibeVoiceLanguages: [TTSLanguage] = [
+        .english, .german, .french, .italian, .japanese, .korean, .dutch, .polish, .portuguese, .spanish,
+    ]
+
+    static let vibeVoiceFiles: [String] = ["config.json", "model.safetensors", "model.safetensors.index.json", "preprocessor_config.json"]
+        + vibeVoiceVoices.map { "voices/\($0.identifier).safetensors" }
+
+    /// VoxCPM2 covers 30 languages without a language tag; these are the ones
+    /// the model card names first.
+    static let voxCPM2Languages: [TTSLanguage] = [
+        .chinese, .english, .japanese, .korean, .german, .french, .spanish, .italian, .portuguese, .russian,
+        .dutch, .polish, .turkish, .arabic, .hindi,
+    ]
+
     /// MeloTTS English accents (the checkpoint's speaker ids).
     static let meloTTSVoices: [TTSVoice] = [
         TTSVoice("EN-US", displayName: "American", language: .english), TTSVoice("EN-BR", displayName: "British", language: .english),
@@ -212,12 +271,11 @@ public enum TTSMLX {
                     supportsLanguageList: true,
                     supportedLanguages: [.english],
                     defaultGenerationProfile: .fast,
-                    // Pocket TTS peaks ~600MB resident during generation. That
-                    // fits comfortably on modern iPhones (6–8GB RAM) so the
-                    // `physicalMemoryMB` check is the right gate; the previous
-                    // hard `minimumDeviceClass: .iPad` was overly conservative
-                    // and regressed iPhone users who ran Pocket TTS fine in 0.3.
-                    peakMemoryMB: 600,
+                    // Measured resident peak with the 512 MB cache cap: 0.82 GB
+                    // on the iPhone 17 and 0.87 GB on the M1 Pro over the
+                    // long-form fixture (Docs/benchmarks.md). Fits every modern
+                    // iPhone, so `physicalMemoryMB` is the right gate.
+                    peakMemoryMB: 900,
                     minimumDeviceClass: .iPhone,
                     sampleRate: 24_000,
                     maxCharactersPerTake: 400
@@ -241,7 +299,10 @@ public enum TTSMLX {
                 ]
             ),
             modelURL: URL(string: "https://huggingface.co/mlx-community/pocket-tts"),
-            license: .ccBy4(credit: "Kyutai (Pocket-TTS)")
+            license: TTSModelLicense(
+                name: "CC-BY-4.0", tier: .attributionRequired,
+                url: URL(string: "https://creativecommons.org/licenses/by/4.0/"),
+                note: "Credit Kyutai (Pocket-TTS) and link the licence. The `cosette` and `jean` presets are CC-BY-NC-4.0 (non-commercial); the other six are CC-BY-4.0 or CC0.")
         ),
         validatedEntry(
             descriptor: .init(
@@ -339,13 +400,13 @@ public enum TTSMLX {
                     supportsLanguageList: true,
                     supportedLanguages: Self.qwen3TTSLanguages,
                     defaultGenerationProfile: .highQuality,
-                    // Qwen3-TTS 0.6B at 8-bit peaks ~800MB resident. That fits
-                    // comfortably on any modern iPhone (6–8GB RAM); the
-                    // `physicalMemoryMB` check is the right gate. The previous
-                    // hard `minimumDeviceClass: .iPad` had no documented
-                    // non-memory reason and inherited the same conservative
-                    // paranoia that regressed Pocket TTS for iPhone users.
-                    peakMemoryMB: 800,
+                    // Measured (Docs/benchmarks.md): MLX peak 4.2 GB and 3.1 GB
+                    // resident on the M1 Pro; on the iPhone 17 (8 GB) a 12-word
+                    // sentence peaked at 3.6 GB and iOS killed the process on
+                    // the 51-word paragraph, at 0.6x realtime. The gate stays
+                    // `.iPhone` for apps that already ship it, but phones should
+                    // prefer the 4-bit build; the matrix and README say so.
+                    peakMemoryMB: 4_200,
                     minimumDeviceClass: .iPhone,
                     sampleRate: 24_000
                 )
@@ -371,7 +432,7 @@ public enum TTSMLX {
             summary: "Smaller-footprint 4-bit build of the multilingual Qwen3 TTS 0.6B — lower download/RAM than the 8-bit default.",
             supportStage: .implemented,
             supportedLanguages: Self.qwen3TTSLanguages,
-            runtimeNotes: "Routes to the qwen3_tts loader (same architecture as the validated 0.6B-8bit). Pending on-device validation + memory profiling.",
+            runtimeNotes: "Routes to the qwen3_tts loader (same architecture as the validated 0.6B-8bit). Measured on the iPhone 17: MLX peak 3.4 GB on a sentence, killed by iOS (signal 9) on the second trial, 0.8x realtime; not a phone model either, see Docs/benchmarks.md.",
             modelURL: URL(string: "https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-0.6B-Base-4bit"),
             descriptor: .init(
                 id: "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-4bit",
@@ -385,7 +446,12 @@ public enum TTSMLX {
                     supportsLanguageList: true,
                     supportedLanguages: Self.qwen3TTSLanguages,
                     defaultGenerationProfile: .balanced,
-                    peakMemoryMB: 700,
+                    // Measured on the iPhone 17: MLX peak 3.4 GB on a 12-word
+                    // sentence and killed by iOS on the second trial, like the
+                    // 8-bit build. The transient allocation is the speech
+                    // tokenizer's decode, not the LM, so quantisation does not
+                    // help; chunked codec decoding in the runtime would.
+                    peakMemoryMB: 3_400,
                     minimumDeviceClass: .iPhone,
                     sampleRate: 24_000
                 )
@@ -563,9 +629,11 @@ public enum TTSMLX {
                 (`af_heart` is the default); the language follows the voice prefix. The \
                 English G2P weights (`beshkenadze/kitten-tts-g2p`, 9 MB) are fetched at first \
                 load and prefetched by the background downloader; other languages fetch their \
-                IPA lexicon on first use. Loads and synthesizes end to end on macOS, 1.5 s to \
-                first audio and roughly realtime in a debug build. peakMemoryMB is an \
-                estimate from the weight size, not a measurement; pending on-device validation.
+                IPA lexicon on first use. Benchmarked (Docs/benchmarks.md): on the iPhone 17 \
+                9.7x realtime, 0.5 s to first audio, resident peak 2.0 GB; on the M1 Pro 11x. \
+                peakMemoryMB is that measured resident peak: the decoder's attention buffers \
+                grow with the square of the take length, so a whole paragraph as one take \
+                costs far more than chunked narration (1.7 GB MLX peak vs 2.3 GB).
                 """,
             modelURL: URL(string: "https://huggingface.co/mlx-community/Kokoro-82M-bf16"),
             projectURL: URL(string: "https://huggingface.co/hexgrad/Kokoro-82M"),
@@ -581,7 +649,7 @@ public enum TTSMLX {
                     supportsLanguageList: true,
                     supportedLanguages: Self.kokoroLanguages,
                     defaultGenerationProfile: .balanced,
-                    peakMemoryMB: 500,
+                    peakMemoryMB: 2_000,
                     minimumDeviceClass: .iPhone,
                     features: [.speed],
                     sampleRate: 24_000,
@@ -761,7 +829,7 @@ public enum TTSMLX {
                 the first audio of a chunk arrives after roughly twice the chunk's duration; \
                 S3Gen and the vocoder add about 1 s warm. Memory on macOS: MLX peak active \
                 2.5 GB for a two-sentence chunk, but the MLX buffer cache grows to 7 GB over a \
-                run unless the app caps it (`MLX.Memory.cacheLimit`; 512 MB held the \
+                run unless capped (the synthesizer caps it at 512 MB by default since 0.16.0; 512 MB held the \
                 process footprint at 3.2 GB) or calls `releaseRuntimeBuffers()` between \
                 utterances. Pending on-device validation. fp16 (3 GB) and 8-bit (0.7 GB) \
                 checkpoints exist but have not been run here.
@@ -824,7 +892,7 @@ public enum TTSMLX {
                 in a debug build with the MLX cache capped (25 tokens = 1 s of audio) and \
                 S3Gen's 10 steps add about 2.5 s per chunk. Memory on macOS: MLX peak active \
                 2.5 GB (3.0 GB with a reference clip); the MLX buffer cache grows to 14 GB per \
-                run unless capped (`MLX.Memory.cacheLimit`; 512 MB held the process at 3.3 GB). \
+                run unless capped (the synthesizer caps it at 512 MB by default since 0.16.0; that held the process at 3.3 GB). \
                 Pending on-device validation. fp16 (2.6 GB) and 8-bit (0.9 GB) siblings exist; \
                 the `Chatterbox-TTS-*` repos are the older English-only v1 weights without a \
                 bundled voice.
@@ -889,7 +957,7 @@ public enum TTSMLX {
                 8-10 s of audio takes 25-50 s warm in a debug build (0.2-0.35x realtime), and a \
                 streaming request delivers everything at the end. Memory on macOS: MLX peak \
                 4.2 GB (active 2.85 GB); the buffer cache grows to 2 GB per run unless capped \
-                (`MLX.Memory.cacheLimit`; 512 MB held the process at 4.6-4.9 GB). bf16 weights, \
+                (the synthesizer caps it at 512 MB by default since 0.16.0; that held the process at 4.6-4.9 GB). bf16 weights, \
                 3 GB download; plan on an 8 GB device. Keep to one event tag per sentence: \
                 two tags inside one ~24-word fragment made the model loop (27 s of audio for \
                 a 20-word sentence), while the same tags in separate sentences behave. Pending \
@@ -1096,12 +1164,42 @@ public enum TTSMLX {
         .init(
             id: "mlx-community/VibeVoice-Realtime-0.5B-8bit",
             displayName: "VibeVoice Realtime 0.5B",
-            summary: "Microsoft VibeVoice Realtime (Qwen2.5-0.5B + diffusion head, 8-bit): #27 on the board. 25 preset voices, streaming. MIT.",
+            summary: "Microsoft VibeVoice Realtime (Qwen2.5-0.5B + diffusion head, 8-bit): #27 on the board. 25 preset voices, chunked streaming output. MIT.",
             supportStage: .implemented,
-            supportedLanguages: [.english],
-            runtimeNotes: "Routes to the vibevoice_streaming loader. Not validated here.",
+            supportedLanguages: vibeVoiceLanguages,
+            runtimeNotes: """
+                Routes to the vibevoice_streaming loader (runtime 0.1.8-tts.5). Voices are the \
+                `voices/*.safetensors` caches in the checkpoint (`en-Carter_man` is the default); \
+                the realtime variant deliberately ships no acoustic encoder, so there is no \
+                cloning. The runtime yields audio every `streamingInterval` seconds while the \
+                token loop runs, so first audio arrives before the take completes. The text \
+                tokenizer is fetched from `Qwen/Qwen2.5-0.5B` (a few MB) at first load. Upstream \
+                is English-first; the nine other languages are experimental presets. Microsoft \
+                describes the model as intended for research; the licence itself is MIT. \
+                Benchmark numbers: see Docs/benchmarks.md.
+                """,
             modelURL: URL(string: "https://huggingface.co/mlx-community/VibeVoice-Realtime-0.5B-8bit"),
             projectURL: URL(string: "https://github.com/microsoft/VibeVoice"),
+            descriptor: .init(
+                id: "mlx-community/VibeVoice-Realtime-0.5B-8bit",
+                displayName: "VibeVoice Realtime 0.5B",
+                summary: "25 preset voices, audio streamed while it generates.",
+                supportedLanguages: vibeVoiceLanguages,
+                suggestedVoices: vibeVoiceVoices,
+                capabilities: .init(
+                    isRuntimeSupported: true,
+                    supportsReferenceAudio: false,
+                    supportsLanguageList: true,
+                    supportedLanguages: vibeVoiceLanguages,
+                    defaultGenerationProfile: .balanced,
+                    peakMemoryMB: 2_000,
+                    minimumDeviceClass: .iPhone,
+                    sampleRate: 24_000,
+                    maxCharactersPerTake: 400
+                ),
+                modelURL: URL(string: "https://huggingface.co/mlx-community/VibeVoice-Realtime-0.5B-8bit"),
+                files: vibeVoiceFiles
+            ),
             license: .mit
         ),
         .init(
@@ -1118,12 +1216,43 @@ public enum TTSMLX {
         .init(
             id: "mlx-community/VoxCPM2-4bit",
             displayName: "VoxCPM2",
-            summary: "OpenBMB VoxCPM2 (MiniCPM-4 + local diffusion, 48 kHz, 4-bit): #36 on the board. 30 languages, cloning, voice design, streaming. Apache-2.0.",
+            summary: "OpenBMB VoxCPM2 (MiniCPM-4 + local diffusion, 48 kHz, 4-bit): #36 on the board. 30 languages, cloning, voice design. Apache-2.0.",
             supportStage: .implemented,
-            supportedLanguages: [.chinese, .english, .japanese, .korean, .german, .french, .spanish, .italian, .portuguese, .russian],
-            runtimeNotes: "Routes to the voxcpm2 loader. Not validated here.",
+            supportedLanguages: voxCPM2Languages,
+            runtimeNotes: """
+                Routes to the voxcpm2 loader (runtime 0.1.8-tts.5). 2 B parameters with only the \
+                language model quantised (2.3 GB on disk). No preset voices: pass a reference clip \
+                (optionally with its transcript) to clone, or nothing for a zero-shot voice. A \
+                parenthesised description at the start of the text steers the voice; there is no \
+                language tag. The Swift port generates a take whole and yields it as one chunk, \
+                so first audio equals the take's generation time even on the stream path. \
+                Benchmark numbers: see Docs/benchmarks.md.
+                """,
             modelURL: URL(string: "https://huggingface.co/mlx-community/VoxCPM2-4bit"),
             projectURL: URL(string: "https://github.com/OpenBMB/VoxCPM"),
+            descriptor: .init(
+                id: "mlx-community/VoxCPM2-4bit",
+                displayName: "VoxCPM2",
+                summary: "Thirty languages at 48 kHz with cloning and voice design; no preset voices.",
+                supportedLanguages: voxCPM2Languages,
+                capabilities: .init(
+                    isRuntimeSupported: true,
+                    supportsReferenceAudio: true,
+                    supportsLanguageList: true,
+                    supportedLanguages: voxCPM2Languages,
+                    defaultGenerationProfile: .balanced,
+                    supportsStreaming: false,
+                    // Measured on the M1 Pro: MLX peak 6.4 GB, resident 3.7 GB
+                    // with the cache cap, 0.6x realtime in Release.
+                    peakMemoryMB: 6_500,
+                    minimumDeviceClass: .mac,
+                    features: [.referenceTranscript, .voiceDesign],
+                    sampleRate: 48_000,
+                    maxCharactersPerTake: 300
+                ),
+                modelURL: URL(string: "https://huggingface.co/mlx-community/VoxCPM2-4bit"),
+                files: ["config.json", "model.safetensors", "special_tokens_map.json", "tokenizer.json", "tokenizer_config.json"]
+            ),
             license: .apache2
         ),
         .init(

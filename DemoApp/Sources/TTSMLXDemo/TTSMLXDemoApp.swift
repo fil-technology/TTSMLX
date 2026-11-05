@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import TTSMLX
 
@@ -39,17 +40,158 @@ struct TTSMLXDemoApp: App {
         // runner (URGENT item 3): Xcode cannot host package tests on a device,
         // so the measurement runs inside the app and prints to the console.
         if ProcessInfo.processInfo.arguments.contains("--moss-validation") {
+            RunStatus.shared.begin(title: "MOSS-TTS-Nano validation")
             Task.detached { await MossDeviceValidation.run() }
+        }
+        // `--benchmark` runs the shared harness (`TTSBenchmarkRunner`) on this
+        // device for the models in `--models a,b` and exits. See Tools/bench.sh.
+        if ProcessInfo.processInfo.arguments.contains("--benchmark") {
+            RunStatus.shared.begin(title: "Benchmark")
+            Task.detached { await DeviceBenchmark.run() }
         }
     }
 
     var body: some Scene {
         WindowGroup {
-            TabRootView()
-                #if os(macOS)
-                .frame(minWidth: 860, minHeight: 680)
-                #endif
+            if RunStatus.shared.isActive {
+                RunStatusView()
+            } else {
+                TabRootView()
+                    #if os(macOS)
+                    .frame(minWidth: 860, minHeight: 680)
+                    #endif
+            }
         }
+    }
+}
+
+/// What an unattended run (benchmark or validation) is doing right now, for
+/// the screen of the device it runs on. Also keeps the device awake: a locked
+/// phone backgrounds the app, iOS then refuses Metal compute and the run dies.
+@MainActor @Observable
+final class RunStatus {
+    static let shared = RunStatus()
+
+    private(set) var isActive = false
+    private(set) var title = ""
+    /// The last "doing now" line: preparing, loading, running fixture #n.
+    private(set) var stage = "Starting…"
+    private(set) var currentModel = ""
+    private(set) var completedModels: [String] = []
+    private(set) var lines: [String] = []
+    private(set) var startedAt = Date()
+    private(set) var finished = false
+    private(set) var failures = 0
+
+    func begin(title: String) {
+        self.title = title
+        isActive = true
+        startedAt = Date()
+        // Too early for the idle timer (no window yet); RunStatusView asserts it.
+    }
+
+    func record(_ line: String) {
+        lines.append(line)
+        if lines.count > 400 { lines.removeFirst(lines.count - 400) }
+        let body = line.replacingOccurrences(of: "[bench] ", with: "").replacingOccurrences(of: "[moss-device] ", with: "")
+        if body.hasPrefix("preparing ") || body.hasPrefix("loading ") || body.hasPrefix("reloading ")
+            || body.hasPrefix("running ") || body.hasPrefix("downloading ") || body.hasPrefix("trial=") {
+            stage = body
+        }
+        if body.hasPrefix("preparing "), let model = body.split(separator: " ").dropFirst().first {
+            currentModel = String(model)
+        }
+        if body.hasPrefix("finished "), let model = body.split(separator: " ").dropFirst().first {
+            completedModels.append(String(model))
+        }
+        if body.hasPrefix("FAILED") { failures += 1 }
+        if body.hasPrefix("DONE") {
+            finished = true
+            stage = failures == 0 ? "Done" : "Done with \(failures) failure(s)"
+            KeepAwake.set(false)
+        }
+    }
+}
+
+enum KeepAwake {
+    /// Disables the idle timer while something that must not be interrupted
+    /// runs (an unattended benchmark, or synthesis in the demo tabs).
+    @MainActor static func set(_ awake: Bool) {
+        #if os(iOS)
+        UIApplication.shared.isIdleTimerDisabled = awake
+        #endif
+    }
+}
+
+struct RunStatusView: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var now = Date()
+    private let status = RunStatus.shared
+    private let clock = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(status.title).font(.title2.bold())
+                Spacer()
+                Text(elapsed).font(.body.monospacedDigit()).foregroundStyle(.secondary)
+            }
+            HStack(spacing: 8) {
+                if status.finished {
+                    Image(systemName: status.failures == 0 ? "checkmark.circle.fill" : "xmark.octagon.fill")
+                        .foregroundStyle(status.failures == 0 ? .green : .red)
+                } else {
+                    ProgressView()
+                }
+                Text(status.stage).font(.headline)
+            }
+            if !status.currentModel.isEmpty {
+                Text("Model: \(status.currentModel)").font(.subheadline).foregroundStyle(.secondary)
+            }
+            if !status.completedModels.isEmpty {
+                Text("Finished: \(status.completedModels.map { $0.split(separator: "/").last.map(String.init) ?? $0 }.joined(separator: ", "))")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            Text("Keep this app in front and the phone unlocked: leaving it cancels generation and iOS may kill the run. The screen stays on by itself. Reports: Documents/benchmarks.")
+                .font(.footnote).foregroundStyle(.tertiary)
+            Divider()
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 2) {
+                        ForEach(Array(status.lines.enumerated()), id: \.offset) { index, line in
+                            Text(line.replacingOccurrences(of: "[bench] ", with: ""))
+                                .font(.system(size: 11, design: .monospaced))
+                                .textSelection(.enabled)
+                                .id(index)
+                        }
+                    }
+                }
+                .onChange(of: status.lines.count) { _, count in
+                    if count > 0 { proxy.scrollTo(count - 1, anchor: .bottom) }
+                }
+            }
+        }
+        .padding()
+        .onAppear { KeepAwake.set(true) }
+        .onReceive(clock) {
+            now = $0
+            // Set at launch the flag does not stick (no window yet) and iOS
+            // can reset it; re-assert it every tick while the run is active.
+            KeepAwake.set(!status.finished)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // Evidence for a cancelled trial: the app left the foreground.
+            // Printed synchronously so it reaches the console before a
+            // suspension stops the process.
+            let line = "[bench] app scene phase: \(phase)"
+            print(line)
+            RunStatus.shared.record(line)
+        }
+    }
+
+    private var elapsed: String {
+        let seconds = Int(now.timeIntervalSince(status.startedAt))
+        return String(format: "%02d:%02d", seconds / 60, seconds % 60)
     }
 }
 
@@ -68,6 +210,80 @@ import os
 ///
 /// The lines are also written to `Documents/moss-validation.txt` in the app
 /// container in case the console session drops.
+/// On-device driver for the shared benchmark harness. Launch arguments
+/// (devicectl rejects environment variables, so everything is an argument):
+///
+///     --benchmark --models mlx-community/Kokoro-82M-bf16,mlx-community/pocket-tts
+///     [--trials 3] [--profile fast|balanced|highQuality]
+///     [--fixtures sentence,paragraph,longForm] [--modes narration,stream]
+///
+/// Reports are written to `Documents/benchmarks/` (JSON plus WAV samples under
+/// `audio/`) and every line is printed with a `[bench]` prefix so
+/// `devicectl device process launch --console` shows it.
+enum DeviceBenchmark {
+    static func argument(_ name: String) -> String? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: name), index + 1 < arguments.count else { return nil }
+        return arguments[index + 1]
+    }
+
+    static func list(_ name: String) -> [String]? {
+        argument(name)?.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
+
+    static func run() async {
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let output = documents.appendingPathComponent("benchmarks", isDirectory: true)
+        let logURL = output.appendingPathComponent("benchmark.log")
+        try? FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        try? FileManager.default.removeItem(at: logURL)
+        let log: @Sendable (String) -> Void = { line in
+            print(line)
+            Task { @MainActor in RunStatus.shared.record(line) }
+            if let handle = try? FileHandle(forWritingTo: logURL) {
+                handle.seekToEndOfFile()
+                handle.write(Data((line + "\n").utf8))
+                try? handle.close()
+            } else {
+                try? (line + "\n").write(to: logURL, atomically: true, encoding: .utf8)
+            }
+        }
+        let models = list("--models") ?? TTSMLX.defaultModels.map(\.id)
+        let trials = Int(argument("--trials") ?? "") ?? 3
+        let profile = argument("--profile").flatMap(TTSGenerationProfile.init(rawValue:))
+        let fixtures = list("--fixtures").map { ids in TTSBenchmarkFixture.standard.filter { ids.contains($0.id) } }
+            ?? TTSBenchmarkFixture.standard
+        let modes = list("--modes")?.compactMap(TTSBenchmarkMode.init(rawValue:)) ?? TTSBenchmarkMode.allCases
+        let store = TTSModelStore()
+        var failures = 0
+        for modelID in models {
+            do {
+                var configuration = TTSBenchmarkConfiguration(
+                    modelID: modelID, fixtures: fixtures, trials: trials, modes: modes, profile: profile)
+                configuration.audioOutputDirectory = output
+                    .appendingPathComponent("audio", isDirectory: true)
+                    .appendingPathComponent(TTSBenchmarkEnvironment.current().device, isDirectory: true)
+                // A jetsam leaves no chance to write; keep the trials so far.
+                let partialURL = output.appendingPathComponent("\(modelID.replacingOccurrences(of: "/", with: "_"))-partial.json")
+                configuration.partialReportHandler = { report in
+                    try? report.jsonData().write(to: partialURL, options: .atomic)
+                }
+                let report = try await TTSBenchmarkRunner.run(configuration, store: store, log: log)
+                let url = try report.write(into: output)
+                try? FileManager.default.removeItem(at: partialURL)
+                log("[bench] wrote \(url.lastPathComponent)")
+            } catch {
+                failures += 1
+                log("[bench] FAILED \(modelID): \(error)")
+            }
+        }
+        log("[bench] DONE failures=\(failures)")
+        // Leave the summary on screen for a moment before the process exits.
+        try? await Task.sleep(for: .seconds(5))
+        exit(failures == 0 ? 0 : 2)
+    }
+}
+
 enum MossDeviceValidation {
     static let modelID = "mlx-community/MOSS-TTS-Nano-100M"
     static let passages = [
@@ -95,6 +311,7 @@ enum MossDeviceValidation {
         var lines: [String] = []
         func log(_ line: String) {
             print(line)
+            Task { @MainActor in RunStatus.shared.record(line) }
             lines.append(line)
             let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent("moss-validation.txt")

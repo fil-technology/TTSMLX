@@ -1,0 +1,80 @@
+{
+  "environment": {
+    "buildConfiguration": "release",
+    "device": "iPhone18,3",
+    "osVersion": "Version 27.2 (Build 24B119)",
+    "physicalMemoryMB": 7672,
+    "processName": "TTSMLXDemo"
+  },
+  "finishedAt": "2026-11-05T10:57:07Z",
+  "load": {
+    "coldFirstAudioSeconds": 4.581337928771973,
+    "coldLoadSeconds": 1.4616799354553223,
+    "mlxActiveAfterLoadMB": 1627.7714881896973,
+    "residentAfterLoadMB": 1767.9405822753906,
+    "warmLoadSeconds": 1.2889560461044312
+  },
+  "modelID": "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-4bit",
+  "modelLocation": "/var/mobile/Containers/Data/Application/6230355F-F225-4293-8960-6322BD3AA578/Library/Application Support/huggingface/hub/mlx-audio/mlx-community_Qwen3-TTS-12Hz-0.6B-Base-4bit",
+  "modelRevision": "0d6bb6fe33f92d47a507e23b9148940e8366ab5b",
+  "modelSizeMB": 1716,
+  "notes": [
+    "partial: iOS killed the process (signal 9) on the second sentence trial; no scene change was logged"
+  ],
+  "runtimeCacheLimitMB": 512,
+  "startedAt": "2026-11-05T10:56:20Z",
+  "streamingInterval": 1,
+  "trials": [
+    {
+      "audioSeconds": 4.81,
+      "batteryLevel": 0.15000000596046448,
+      "characters": 58,
+      "chunkCount": 5,
+      "cpuUtilization": 0.7767829320887774,
+      "firstAudioSeconds": 3.1196579933166504,
+      "fixtureID": "sentence",
+      "includesLoad": true,
+      "index": -1,
+      "longestTrailingSilenceSeconds": 0.03716666666666667,
+      "mlxActiveMB": 1659.8771057128906,
+      "mlxCacheMB": 512.7755556106567,
+      "mlxPeakMB": 3379.918168067932,
+      "mode": "narration",
+      "overrunChunks": 0,
+      "peakDBFS": -8.632504,
+      "residentMB": 2287.3624572753906,
+      "rmsDBFS": -24.364166,
+      "stallCount": 1,
+      "stallFreePrerollSeconds": 0.11362407970428468,
+      "stallSeconds": 0.11362407970428468,
+      "thermalState": "nominal",
+      "wallSeconds": 6.020073056221008
+    },
+    {
+      "audioSeconds": 5.21,
+      "batteryLevel": 0.15000000596046448,
+      "characters": 58,
+      "chunkCount": 5,
+      "cpuUtilization": 0.9000555009043898,
+      "firstAudioSeconds": 2.049036979675293,
+      "fixtureID": "sentence",
+      "includesLoad": false,
+      "index": 0,
+      "longestTrailingSilenceSeconds": 0.16845833333333332,
+      "mlxActiveMB": 1659.7714042663574,
+      "mlxCacheMB": 512.9327583312988,
+      "mlxPeakMB": 3379.7946405410767,
+      "mode": "narration",
+      "overrunChunks": 0,
+      "peakDBFS": -4.134287,
+      "residentMB": 2275.2218322753906,
+      "rmsDBFS": -28.619972,
+      "stallCount": 1,
+      "stallFreePrerollSeconds": 1.636898024559021,
+      "stallSeconds": 1.636898024559021,
+      "thermalState": "nominal",
+      "wallSeconds": 6.7685370445251465
+    }
+  ],
+  "voice": "en-us-1"
+}
