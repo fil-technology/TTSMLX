@@ -6,6 +6,66 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+- Benchmark harness: `TTSBenchmarkRunner` runs a model through fixed fixtures
+  (`sentence`, `paragraph`, `longForm`) on the narration and stream paths and
+  reports cold and warm load, first audio, realtime factor, playback stalls,
+  end-of-audio overruns, MLX peak and resident memory, CPU utilization,
+  thermal state and battery, as a `TTSBenchmarkReport` (JSON plus text lines).
+  The same code runs on macOS through the test target (`Tools/bench.sh mac`)
+  and on a phone through the demo app's `--benchmark` argument
+  (`Tools/bench.sh device`, `pull`). `Tools/render-benchmarks.py` turns the
+  reports into `Docs/benchmarks.md`.
+- Catalog descriptors for `mlx-community/VibeVoice-Realtime-0.5B-8bit` (25
+  preset voices, chunked streaming output) and `mlx-community/VoxCPM2-4bit`
+  (30 languages at 48 kHz, cloning, Mac only until measured on a phone), so
+  both load through `TTSSpeechSynthesizer` instead of being discovery-only.
+- `Docs/model-research.md`: the audited catalog of the Priority A models
+  (Qwen3-TTS 0.6B, VibeVoice Realtime, CosyVoice 3, Pocket TTS, Chatterbox
+  Turbo, Kokoro, Supertonic 3, VoxCPM2) with licences, streaming semantics,
+  existing ports and the integration cost of the two without a port.
+
+### Changed
+- Demo app: an unattended run (`--benchmark`, `--moss-validation`) shows a
+  status screen (elapsed time, what it is doing now, finished models, the
+  log) and keeps the screen awake, because a locked phone backgrounds the
+  app and iOS refuses Metal compute. The demo tabs keep the screen awake
+  while synthesizing too. Scene-phase changes are logged so a cancelled
+  trial can be traced to the app leaving the foreground.
+- Pocket TTS lists all eight bundled presets with the licence of each voice;
+  `cosette` and `jean` are CC-BY-NC-4.0 (non-commercial) and sit last. The
+  entry's licence note says so.
+- `TTSSpeechSynthesizer(runtimeCacheLimitMB:)` now defaults to 512 MB
+  instead of leaving MLX's buffer cache uncapped: one long-form Kokoro run on
+  macOS reached 24 GB resident (and filled the disk through swap) with no
+  cap, while 512 MB keeps every measured model near its weight size. The cap
+  is applied at the first model load rather than in `init`, so creating a
+  synthesizer still does not bring up Metal (plain `swift test` keeps
+  working). Pass `nil` to get MLX's own default back.
+
+### Fixed
+- A consumer whose `Package.resolved` still records `ml-explore/mlx-swift`
+  at a fork revision (what the old mirror produced) fails to resolve once
+  the mirror is gone: "Couldn't check out revision 21a3aec…", because
+  upstream has no such commit. The demo project hit this. Delete that
+  `Package.resolved` (and the project's `SourcePackages` checkouts) and let
+  SwiftPM re-resolve; it then records `fil-technology/mlx-swift` on its own.
+  Documented in README under the fork dependency notes.
+- `TTSModelStore.ensureDownloaded` no longer reports a half-downloaded
+  directory as installed. A download killed part-way (the phone locked, the
+  app backgrounded) left a directory that counted as "already available", and
+  the runtime then re-downloaded at load time inside the first synthesize
+  call. Installed now means every listed file (descriptor file list, else the
+  snapshot manifest, else `config.json` plus non-empty weights) is present
+  and no `.ttsmlx-download-in-progress` marker is left: the marker is written
+  before a download starts and removed after it finishes, because a
+  truncated weights file is non-empty and fools every size-based check (it
+  crashed the first Qwen3 load on the phone).
+- `TTSModelStore` writes the runtime's `.mlx-audio-snapshot.json` manifest
+  after a download. Loaders whose file patterns go beyond the defaults
+  (VibeVoice `voices/*`, Voxtral `voice_embedding/*`) otherwise fetched the
+  repository listing on every load and re-downloaded files already on disk.
+
 ### Removed
 - `URGENT.md`: every pre-release blocker it tracked is resolved (last one in
   0.15.0). The history stays in this changelog.

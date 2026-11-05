@@ -28,47 +28,58 @@ See [Docs/0.5-migration.md](Docs/0.5-migration.md) for the consumer-app upgrade 
 
 ## Supported Models
 
-For every model on the public tts-bench leaderboard — what runs today, what
-arrives with the planned runtime migration, and what is blocked and why — see
-[Docs/model-support.md](Docs/model-support.md).
+Every model with a descriptor in `TTSMLX.modelCatalog`, where it is gated to
+run, and whether this repository has measured it there. The gate is the
+catalog's `minimumDeviceClass` plus `peakMemoryMB`: *iPhone* means any
+iPhone, iPad or Mac with enough memory, *Mac* means Mac only. *Validated*
+entries are in `TTSMLX.supportedModels` and eligible for
+`recommendedModel(for:)`; *implemented* entries synthesize end to end but an
+app has to pick them explicitly. Full detail, including where each model was
+measured, is in [Docs/compatibility.md](Docs/compatibility.md); numbers are in
+[Docs/benchmarks.md](Docs/benchmarks.md); the licence tier of every entry is
+in the catalog (`TTSModelDescriptor.license`).
 
-These models are included in the built-in `TTSMLX.supportedModels` catalog:
+| Model | Stage | Runs on | Languages | Voices and controls | Licence |
+|---|---|---|---|---|---|
+| `Marvis-AI/marvis-tts-250m-v0.2-MLX-8bit` | validated | iPhone | en | default voice, streaming | Apache-2.0 |
+| `mlx-community/pocket-tts` | validated | iPhone | en | 8 presets (two non-commercial), streaming | CC-BY-4.0 |
+| `mlx-community/Soprano-80M-bf16` | validated | iPhone | en | one voice, streaming | Apache-2.0 |
+| `mlx-community/VyvoTTS-EN-Beta-4bit` | validated | iPhone | en | one voice | unknown |
+| `mlx-community/orpheus-3b-0.1-ft-bf16` | validated | Mac | en | 8 presets, event tags | Apache-2.0 |
+| `mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit` | validated | iPhone | 15 | default voice, cloning | Apache-2.0 |
+| `mlx-community/MOSS-TTS-Nano-100M` | validated | iPhone | 19 | 7 presets, cloning, streaming | Apache-2.0 |
+| `mlx-community/Qwen3-TTS-12Hz-0.6B-Base-4bit` | implemented | iPhone | 15 | as 8-bit, smaller | Apache-2.0 |
+| `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-4bit` | implemented | iPhone (6 GB+) | 15 | as 0.6B, better prosody | Apache-2.0 |
+| `mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-4bit` | implemented | iPhone (6 GB+) | 15 | 9 presets, instruction | Apache-2.0 |
+| `mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-4bit` | implemented | iPhone | 15 | 9 presets, instruction | Apache-2.0 |
+| `mlx-community/Soprano-80M-4bit` | implemented | iPhone | en | one voice, streaming | Apache-2.0 |
+| `mlx-community/Soprano-1.1-80M-bf16` | implemented | iPhone | en | one voice, streaming | Apache-2.0 |
+| `mlx-community/Kokoro-82M-bf16` | implemented | iPhone | 8 | 54 presets, speed | Apache-2.0 |
+| `gradium/phonon-31m-en` | implemented | iPhone | en | one voice | Apache-2.0 |
+| `mlx-community/MeloTTS-English-MLX` | implemented | iPhone | en | 5 accents, speed | MIT |
+| `mlx-community/chatterbox-turbo-4bit` | implemented | iPhone | en | default voice, cloning, event tags | MIT |
+| `mlx-community/chatterbox-4bit` | implemented | iPhone | 7 listed (23 upstream) | cloning, expressiveness, event tags | MIT |
+| `mlx-community/Ming-3.0-tts-0.5B-bf16` | implemented | iPhone | 7 | 8 presets, instruction, emotion, speed, voice design, cloning | MIT |
+| `mlx-community/VibeVoice-Realtime-0.5B-8bit` | implemented | iPhone | en (+9 experimental) | 25 presets, streaming | MIT |
+| `mlx-community/OmniVoice` | implemented | Mac | 6 | voice design, instruction, cloning | CC-BY-NC (non-commercial) |
+| `mlx-community/Voxtral-4B-TTS-2603-mlx-4bit` | implemented | iPhone | 9 | 20 presets | CC-BY-NC-4.0 (non-commercial) |
+| `mlx-community/VoxCPM2-4bit` | implemented | Mac | 15 listed (30 upstream) | cloning, voice design, 48 kHz | Apache-2.0 |
 
-- [Marvis-AI/marvis-tts-250m-v0.2-MLX-8bit](https://huggingface.co/Marvis-AI/marvis-tts-250m-v0.2-MLX-8bit) - best default choice for a balanced quality/size tradeoff.
-- [mlx-community/pocket-tts](https://huggingface.co/mlx-community/pocket-tts) - smallest and simplest option when startup speed and low memory matter most.
-- [mlx-community/Soprano-80M-bf16](https://huggingface.co/mlx-community/Soprano-80M-bf16) - compact model that is still easy to run locally on Apple Silicon.
-- [mlx-community/VyvoTTS-EN-Beta-4bit](https://huggingface.co/mlx-community/VyvoTTS-EN-Beta-4bit) - English Qwen3-based option when you want a smaller alternative to full Qwen3-TTS.
-- [mlx-community/orpheus-3b-0.1-ft-bf16](https://huggingface.co/mlx-community/orpheus-3b-0.1-ft-bf16) - larger multi-voice LlamaTTS model with expressive built-in speakers.
-- [mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit](https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit) - strongest general-purpose option here when you want better quality, multilingual support, and voice-cloning style inputs.
-
-### Additional variants (implemented, pending on-device validation)
-
-These route to a backend loader that already ships, so they synthesize end to
-end and carry full descriptors you can select today — they are staged
-`.implemented` rather than `.validated` only because they haven't been
-run + memory-profiled on a physical iPhone yet (their `peakMemoryMB` values are
-conservative estimates). They appear in `TTSMLX.implementedModels`, not in
-`TTSMLX.supportedModels` / `recommendedModel(for:)`, so they are never
-auto-selected until promoted. To use one, pass its descriptor explicitly.
-
-- [Qwen3-TTS-12Hz-0.6B-Base-4bit](https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-0.6B-Base-4bit) - smaller-footprint 4-bit build of the multilingual default.
-- [Qwen3-TTS-12Hz-1.7B-Base-4bit](https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-1.7B-Base-4bit) - higher-quality multilingual (1.7B); best on 6GB+ iPhones.
-- [Qwen3-TTS-12Hz-1.7B-CustomVoice-4bit](https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-4bit) - multilingual with custom-voice / reference-audio conditioning for voice design and cloning.
-- [Soprano-80M-4bit](https://huggingface.co/mlx-community/Soprano-80M-4bit) - tiny (~60MB) English model; fastest start and lowest memory.
-
-All Qwen3-TTS entries advertise 15 languages (English, Spanish, French, German,
-Italian, Portuguese, Dutch, Polish, Turkish, Russian, Japanese, Korean,
-Chinese, Arabic, Hindi).
-
-For a fuller support matrix, including non-runnable tracked models such as `MOSS-TTS-Nano`, see [Docs/ModelSupport.md](Docs/ModelSupport.md) or inspect `TTSMLX.modelCatalog` at runtime.
+Which models an app may ship commercially: `TTSMLX.models(maximumTier: .attributionRequired)`.
+The leaderboard-wide view, including models the runtime routes to but
+TTSMLX has not synthesized with, is [Docs/model-support.md](Docs/model-support.md);
+the research behind the Priority A candidates (licences, streaming
+semantics, existing ports) is [Docs/model-research.md](Docs/model-research.md).
 
 Quick picking guide:
 
-- Start with `Marvis` if you want the safest default.
-- Use `Pocket TTS` for fast, lightweight local generation.
-- Use `Orpheus` when you want more built-in English voice choices.
-- Use `Qwen3-TTS` when voice options, multilingual output, or cloning features matter more than model size.
-- Try `VyvoTTS` if you want a smaller English Qwen3-style model.
+- Fast English on a phone: `Kokoro` (fastest, 54 voices) or `Pocket TTS` (smallest, streams per 80 ms frame).
+- Multilingual on a phone: `MOSS-TTS-Nano` (10 languages, streams) or `Qwen3-TTS 0.6B`.
+- Conversational on a Mac: `VibeVoice Realtime` (audio while it generates) or `MOSS-TTS-Nano`.
+- Expressive on a Mac: `Chatterbox` (cloning, emotion), `Ming` (instruction, emotion, voice design).
+- Long-form narration: `Kokoro`, `Pocket TTS`, `Qwen3-TTS` through `synthesizeLong` or `prepareNarration`.
+- The measured basis for these picks is in [Docs/benchmarks.md](Docs/benchmarks.md).
+
 Current upstream note:
 
 - As of `0.10.0`, `TTSMLX` runs on upstream `Blaizzy/mlx-audio-swift` v0.1.8 through the thin fork `fil-technology/mlx-audio-swift @ 0.1.8-tts.5` (38 TTS families; the fork only adds `TTSModelRegistry`, MOSS-TTS-Nano bundled voices and the regular-Chatterbox text-pipeline fixes), and on `fil-technology/mlx-swift @ 0.33.100` (upstream 0.33.0 whose `mlx` C++ submodule points at `mlx @ v0.33.0-tts-bg-safe.1`, the iOS background-safe Metal patch). `mlx-swift-lm` is no longer a dependency. See `Docs/mlx-swift-bg-safe-fork.md` and `Docs/model-support.md`.
@@ -76,6 +87,42 @@ Current upstream note:
 - `Kitten TTS` stays discovery-only: the runtime's loader needs `voices.safetensors`, and the mlx-community checkpoint ships `voices.npz`.
 - `MOSS-TTS-Nano` runs on upstream's port plus the fork's bundled voices; reference-audio cloning now works through upstream's codec encoder.
 - Upstream additions outside the TTS wrapper scope, such as `Cohere Transcribe ASR`, `Qwen2-Audio-7B-Instruct`, `Moshi STS`, and Distil-Whisper documentation updates, are not exposed through `TTSMLX` yet.
+
+## Benchmarks
+
+`Docs/benchmarks.md` holds the numbers this repository measured itself, per
+device and build: cold and warm load, first audio, realtime factor, playback
+stalls, MLX peak and resident memory, CPU and thermal state, for three fixed
+fixtures (a sentence, a news paragraph, a 275-word narration) on both the
+narration path (`synthesizeLong`) and the model's own streaming path
+(`synthesizeStream`). `Docs/model-research.md` is the audited catalog behind
+them: licences, streaming semantics, existing ports and what each candidate
+would cost to integrate.
+
+The harness is part of the framework (`TTSBenchmarkRunner`), so an app can
+run it on its own devices:
+
+```swift
+let report = try await TTSBenchmarkRunner.run(
+    .init(modelID: "mlx-community/Kokoro-82M-bf16", trials: 3))
+print(report.textLines().joined(separator: "\n"))
+try report.write(into: reportsDirectory)   // JSON
+```
+
+From the repo, `Tools/bench.sh mac [models…]` runs it on this Mac through
+the test target and `DEVICE=<name> Tools/bench.sh device [models…]` on a
+connected iPhone through the demo app, then `Tools/bench.sh pull` copies the
+reports back; `python3 Tools/render-benchmarks.py` rewrites
+`Docs/benchmarks.md` from `Benchmarks/results/*.json`.
+
+On the phone the demo app shows a status screen for the whole run (elapsed
+time, what it is doing now, finished models, the scrolling log) and keeps the
+screen awake until the run ends: a locked phone backgrounds the app and iOS
+refuses Metal compute, which cancels generation. The same keep-awake applies
+while the demo tabs synthesize. The log also streams to the Mac console
+(`devicectl … --console`) and is written to `Documents/benchmarks/benchmark.log`
+in the app container. A trial cancelled by the app going inactive is retried
+twice and noted in the report instead of failing the model.
 
 ## Model Catalog
 
@@ -157,6 +204,17 @@ In Xcode: **File ▸ Packages ▸ Reset Package Caches**, then **Update to Lates
 Package Versions**. Confirm your `Package.resolved` then shows
 `fil-technology/mlx-audio-swift` at `0.1.8-tts.5` and `mlx-swift` at
 `0.33.100` from `fil-technology/mlx-swift`.
+
+### If resolution fails with "Couldn't check out revision"
+
+A `Package.resolved` written while the old mirror was in effect records
+`ml-explore/mlx-swift` at a revision that only exists in
+`fil-technology/mlx-swift`. Without the mirror, SwiftPM clones upstream and
+cannot find it. Delete the app's `Package.resolved` (for an Xcode project,
+`<project>.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`)
+and its `SourcePackages` checkouts under DerivedData, then resolve again:
+nothing in the graph names upstream any more, so the fresh file records the
+fork.
 
 ## Licences
 

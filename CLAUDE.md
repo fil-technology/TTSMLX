@@ -11,9 +11,16 @@ the start of every session, before acting on whatever they asked for.
 ## Build and test
 
 - `swift build` — framework. Needs the Swift 6.3 toolchain or newer (Xcode 26.3+): `mlx-swift` 0.33 requires it. CI runs on `macos-26`.
-- `swift test` — full suite (currently 257 tests across 38 suites; should always be green on `main`).
+- `swift test` — full suite (currently 263 tests across 41 suites; should always be green on `main`).
 - `xcodebuild -project DemoApp/TTSMLXDemo.xcodeproj -scheme TTSMLXDemo-macOS -configuration Debug build` — demo app, macOS target. iOS target also exists.
 - After any change to `mlx-audio-swift` (local path dependency), wipe `~/Library/Developer/Xcode/DerivedData/TTSMLXDemo-*` and reset SwiftPM package caches in Xcode — incremental builds do not pick up local-path package source changes reliably.
+
+## Benchmarks
+
+- `Tools/bench.sh mac [models…]` runs the shared harness (`Source/TTSBenchmark.swift`) on this Mac through `xcodebuild test` (plain `swift test` has no Metal library); `DEVICE=<udid> Tools/bench.sh device [models…]` runs it on a phone through the demo app's `--benchmark` argument, `Tools/bench.sh pull` copies the reports back. Reports go to `Benchmarks/results/*.json`; `python3 Tools/render-benchmarks.py` rewrites `Docs/benchmarks.md`.
+- Always run with the MLX cache capped (the harness default, 512 MB): uncapped, one long-form run on macOS reached 24 GB resident and filled the disk through swap.
+- Do not run benchmarks while another build or test run is going; the numbers are wall-clock.
+- On a phone the demo app shows `RunStatusView` (stage, log, elapsed) and disables the idle timer for the run; a cancelled trial means the app went inactive (lock, shade, call) and is retried twice. Watch the Mac side through the `devicectl … --console` stream (`[bench]` lines).
 
 ## Versioning and releases
 
