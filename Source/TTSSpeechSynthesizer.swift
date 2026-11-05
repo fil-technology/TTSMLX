@@ -249,6 +249,17 @@ public actor TTSSpeechSynthesizer {
         let language: String?
     }
 
+    /// Whether a new voice or language needs a fresh instance of the model.
+    /// Marvis (MimiAdapter and FlowLM caches) keeps residual state between
+    /// calls, so it does. Every other loader takes voice and language as
+    /// per-call parameters: reloading their weights on each switch wasted a
+    /// second or two per voice change, made `warmUp` useless for the first
+    /// voiced call, and on a phone the reload of Qwen3-TTS straight after its
+    /// cold load ended the process.
+    nonisolated static func reloadsOnVariantChange(_ modelID: String) -> Bool {
+        modelID.lowercased().contains("marvis")
+    }
+
     /// Shared shutdown coordinator. Owned by this synthesizer, observed by
     /// the notification block and read synchronously by every drain Task
     /// before submitting MLX work. See ``TTSLifecycleCoordinator``.
@@ -2058,8 +2069,9 @@ public actor TTSSpeechSynthesizer {
         // state (see note on `lastVariantByModel`).
         if let cached = loadedModels[model.id] {
             applyModelSpecificProfile(options.generationProfile, to: cached.model)
-            if lastVariantByModel[model.id] == requestedVariant {
+            if lastVariantByModel[model.id] == requestedVariant || !Self.reloadsOnVariantChange(model.id) {
                 info("prepareModel: CACHE HIT for \(model.id) sampleRate=\(cached.model.sampleRate) variant=\(requestedVariant.voice ?? "auto").\(requestedVariant.language ?? "auto")")
+                lastVariantByModel[model.id] = requestedVariant
                 emit(.modelLoadServedFromCache(modelID: model.id))
                 touchResidency(model.id)
                 return cached

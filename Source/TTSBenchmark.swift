@@ -113,6 +113,9 @@ public struct TTSBenchmarkConfiguration: Sendable {
     /// Uncapped, the cache grows with every request (tens of GB over a
     /// long-form run on macOS) and the numbers stop describing any real app.
     public var runtimeCacheLimitMB: Int?
+    /// Called after every trial with the report so far, so a run the OS kills
+    /// (a jetsam on a phone) still leaves the trials it completed on disk.
+    public var partialReportHandler: (@Sendable (TTSBenchmarkReport) -> Void)?
 
     public init(
         modelID: String,
@@ -386,10 +389,11 @@ public enum TTSBenchmarkRunner {
         let synthesizer = TTSSpeechSynthesizer(modelStore: store, runtimeCacheLimitMB: configuration.runtimeCacheLimitMB)
 
         log("[bench] preparing \(descriptor.id) (download if missing)")
+        let lastReported = TTSBenchmarkProbe.Counter()
         let installed = try await store.ensureDownloaded(descriptor, hfToken: configuration.hfToken) { update in
             if update.stage == .downloadingModel, let fraction = update.fractionCompleted {
-                let percent = Int(fraction * 100)
-                if percent % 20 == 0 { log("[bench] downloading \(percent)%") }
+                let step = Int(fraction * 10) * 10
+                if lastReported.advance(to: step) { log("[bench] downloading \(step)%") }
             }
         }
         let revision = TTSBenchmarkProbe.snapshotRevision(at: installed.location)
@@ -463,6 +467,14 @@ public enum TTSBenchmarkRunner {
                         audioOutput: index == 0 ? configuration.audioOutputDirectory : nil,
                         notes: &notes, log: log)
                     trials.append(trial)
+                    configuration.partialReportHandler?(TTSBenchmarkReport(
+                        modelID: descriptor.id, modelRevision: revision,
+                        modelSizeMB: Int(installed.sizeBytes / 1_000_000), modelLocation: installed.location.path,
+                        environment: .current(), profile: configuration.profile, voice: voice?.identifier,
+                        streamingInterval: configuration.streamingInterval,
+                        runtimeCacheLimitMB: configuration.runtimeCacheLimitMB,
+                        startedAt: startedAt, finishedAt: Date(), load: load, trials: trials,
+                        notes: notes + ["partial: run still in progress"]))
                 }
             }
         }
@@ -610,6 +622,19 @@ public enum TTSBenchmarkRunner {
 // MARK: - Probes
 
 enum TTSBenchmarkProbe {
+    /// Monotonic step reporter for progress callbacks that fire many times
+    /// per percent.
+    final class Counter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = -1
+        func advance(to step: Int) -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            guard step > value else { return false }
+            value = step
+            return true
+        }
+    }
+
     static func sysctlString(_ name: String) -> String? {
         var size = 0
         guard sysctlbyname(name, nil, &size, nil, 0) == 0, size > 0 else { return nil }

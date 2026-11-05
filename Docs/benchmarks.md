@@ -11,6 +11,7 @@ Fixtures: `sentence` (12 words), `paragraph` (51 words), `longForm` (275 words, 
 | Model | Revision | Size | Cold: load / first audio | Warm load | Resident after load | sentence/stream first audio | paragraph/narration first audio | paragraph RTF | longForm RTF | longForm stalls | longForm pre-roll | MLX peak | Resident peak | CPU | Thermal |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | Kokoro-82M-bf16 | `a71e4d38` | 361 MB | 0.19s / 2.03s | 0.07s | 747 MB | 0.38s | 0.47s | 11.29x | 11.45x | 0 (0 overruns) | 0.0s | 2565 MB | 1984 MB | 0.68 | fair/nominal |
+| Qwen3-TTS-12Hz-0.6B-Base-4bit | `0d6bb6fe` | 1711 MB | 1.42s / 2.77s | 0.39s | 1784 MB | 0.48s | 0.84s | 2.34x | 2.38x | 0 (0 overruns) | 0.0s | 3946 MB | 2853 MB | 0.94 | nominal |
 | Qwen3-TTS-12Hz-0.6B-Base-8bit | `50f45ef0` | 1996 MB | 0.94s / 2.30s | 0.36s | 2041 MB | 0.48s | 1.00s | 2.07x | 2.28x | 0 (0 overruns) | 0.0s | 4213 MB | 3100 MB | 0.82 | fair/nominal |
 | VibeVoice-Realtime-0.5B-8bit | `ae6a233e` | 1220 MB | 1.06s / 3.17s | 0.54s | 1240 MB | 0.62s | 1.33s | 1.49x | 1.63x | 0 (0 overruns) | 0.0s | 1521 MB | 1851 MB | 1.12 | fair |
 | VoxCPM2-4bit | `dc9e5c18` | 2302 MB | 1.13s / 7.51s | 0.39s | 2325 MB | – | 8.30s | 0.62x | 0.66x | 19 (0 overruns) | 50.8s | 6408 MB | 3693 MB | 0.51 | fair |
@@ -25,8 +26,12 @@ Fixtures: `sentence` (12 words), `paragraph` (51 words), `longForm` (275 words, 
 | Model | Revision | Size | Cold: load / first audio | Warm load | Resident after load | sentence/stream first audio | paragraph/narration first audio | paragraph RTF | longForm RTF | longForm stalls | longForm pre-roll | MLX peak | Resident peak | CPU | Thermal |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | Kokoro-82M-bf16 | `a71e4d38` | 361 MB | 0.05s / 9.30s | 0.05s | 526 MB | 0.49s | 0.54s | 9.68x | 8.79x | 0 (0 overruns) | 0.0s | 2300 MB | 1957 MB | 0.53 | fair/nominal |
+| Qwen3-TTS-12Hz-0.6B-Base-4bit | `0d6bb6fe` | 1716 MB | 1.46s / 4.58s | 1.29s | 1768 MB | – | – | – | – | – | – | 3380 MB | 2275 MB | 0.90 | nominal |
+| VibeVoice-Realtime-0.5B-8bit | `ae6a233e` | 1220 MB | 2.41s / 5.60s | 1.20s | 1169 MB | 0.97s | 2.09s | 0.94x | 1.07x | 5 (0 overruns) | 0.0s | 1521 MB | 1866 MB | 1.36 | nominal |
 | chatterbox-turbo-4bit | `c6381772` | 416 MB | 0.44s / 4.24s | 0.30s | 1042 MB | 1.24s | 1.27s | 2.93x | 2.55x | 3 (0 overruns) | 0.7s | 2139 MB | 2409 MB | 0.88 | fair/serious |
 | pocket-tts | `cbf71d5f` | 240 MB | 0.20s / 0.91s | 0.03s | 603 MB | 0.28s | 0.50s | 4.19x | 4.02x | 0 (0 overruns) | 0.0s | 566 MB | 819 MB | 0.20 | fair/serious |
+
+- Qwen3-TTS-12Hz-0.6B-Base-4bit: partial: iOS killed the process (signal 9) on the second sentence trial; no scene change was logged
 
 ## MacBook Pro 14-inch 2021 (Apple M1 Pro) — macOS 27.0 (26A428), debug build, 32 GB
 
@@ -86,6 +91,30 @@ debug numbers.
   Release, 6.4 GB MLX peak, 51 s of pre-roll for the long-form fixture. It
   stays Mac-only and suits offline rendering (`prepareNarration`), where its
   48 kHz output and 30 languages are the point.
+- **VibeVoice Realtime is a Mac model in practice.** On the iPhone 17 it
+  runs at 0.9–1.1x realtime with stalls on every fixture (1.0 s to first
+  audio, 1.3 s pre-roll for a paragraph); on the M1 Pro it is 1.6x with no
+  stalls. The catalog keeps the iPhone gate (it fits in 1.9 GB) but the
+  recommendation table above does not put it on a phone.
+- **`warmUp` used to be undone by the first voiced call.** The synthesizer
+  reloaded weights whenever the voice or language differed from the last
+  call (a guard for Marvis's stateful adapter), so warm-up followed by any
+  call with a voice paid a second load; on the phone that double load of
+  Qwen3-TTS ended the process. The reload is now Marvis-only.
+
+- **Qwen3-TTS 0.6B at 8-bit does not belong on a phone.** On the iPhone 17
+  a 12-word sentence ran at 0.6x realtime with 3.2–4 s to first audio
+  (1.6 s on the stream path) and an MLX peak of 3.6 GB; the 51-word
+  paragraph was killed by iOS (signal 9, no scene change logged, so not a
+  lock). The catalog's 800 MB estimate was wrong by a factor of five; it now
+  says 4 200 MB. The gate stays `.iPhone` so apps that ship it keep working.
+- **The 4-bit build dies the same way.** Qwen3-TTS 0.6B 4-bit on the iPhone
+  17: 1.6 GB active after load, MLX peak 3.4 GB on a 12-word sentence, 0.8x
+  realtime, killed on the second trial (partial report kept). The transient
+  is the speech-tokenizer decode, not the language model, so quantisation
+  does not help; the runtime would need chunked codec decoding (as the fork
+  did for MOSS) before Qwen3 is a phone model. Kokoro survived at a 2.3 GB
+  peak, so the practical ceiling on an 8 GB iPhone sits near 3 GB.
 
 ## Default engines by use case
 
@@ -94,15 +123,12 @@ for a sentence unless noted.
 
 | Use case | Default | Why | Alternative |
 |---|---|---|---|
-| Fast English TTS on iPhone | Kokoro-82M | 9.7x realtime on the iPhone 17, 0.5 s first audio, no stalls, 54 voices, Apache-2.0 | Pocket TTS when memory is tighter (870 MB vs 2.0 GB resident) or per-frame streaming matters |
-| Multilingual TTS on iPhone | MOSS-TTS-Nano | validated on the iPhone 17 at 1.3x realtime with 19 languages and streaming (0.12.0) | Qwen3-TTS 0.6B 8-bit once its phone numbers land (2.2x on the Mac, 3.1 GB resident) |
+| Fast English TTS on iPhone | Kokoro-82M | 9.7x realtime on the iPhone 17, 0.5 s first audio, no stalls, 54 voices, Apache-2.0 | Pocket TTS: 0.28 s first audio and 4.2x on the iPhone 17 at 0.8 GB resident (vs 2.0 GB), per-frame streaming, but one language and CC-BY credit |
+| Multilingual TTS on iPhone | MOSS-TTS-Nano | validated on the iPhone 17 at 1.3x realtime with 19 languages and streaming (0.12.0) | none of the Qwen3-TTS 0.6B builds: both are killed by iOS on the iPhone 17 (codec decode peaks above 3 GB) |
 | Fast conversational TTS on Mac | Pocket TTS | 0.28 s first audio, streams per frame, 4–7x realtime, 870 MB | VibeVoice Realtime for a choice of 25 voices (0.62 s, 1.6x) |
 | High-quality expressive TTS on Mac | Chatterbox Turbo | cloning from a clip, event tags, 2.2–2.5x realtime, 1.9 s to first audio | Ming-3.0 for instruction, emotion and voice design (validated, not in this pass) |
 | Long-form narration | Kokoro-82M (English), Qwen3-TTS 0.6B (multilingual) | 11x and 2.3x realtime with zero stalls over 275 words; both work through `prepareNarration` for background playback | VoxCPM2 for offline 48 kHz rendering on a Mac |
-| Agent streaming speech | Pocket TTS | lowest first audio and true per-frame output; turns are sentence-sized so the lack of incremental text input costs little | CosyVoice 3 once ported: the only candidate with genuine bistream text input (`Docs/model-research.md`) |
-
-Numbers for Pocket TTS, VibeVoice Realtime and Qwen3-TTS on the iPhone are
-added when the phone pass completes.
+| Agent streaming speech | Pocket TTS | 0.28 s first audio on both the Mac and the iPhone 17 with true per-frame output; turns are sentence-sized so the lack of incremental text input costs little | CosyVoice 3 once ported: the only candidate with genuine bistream text input (`Docs/model-research.md`) |
 
 ## Per-trial detail
 

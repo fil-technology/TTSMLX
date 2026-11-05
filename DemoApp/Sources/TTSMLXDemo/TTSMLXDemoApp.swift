@@ -181,7 +181,11 @@ struct RunStatusView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             // Evidence for a cancelled trial: the app left the foreground.
-            RunStatus.shared.record("[bench] app scene phase: \(phase)")
+            // Printed synchronously so it reaches the console before a
+            // suspension stops the process.
+            let line = "[bench] app scene phase: \(phase)"
+            print(line)
+            RunStatus.shared.record(line)
         }
     }
 
@@ -259,8 +263,14 @@ enum DeviceBenchmark {
                 configuration.audioOutputDirectory = output
                     .appendingPathComponent("audio", isDirectory: true)
                     .appendingPathComponent(TTSBenchmarkEnvironment.current().device, isDirectory: true)
+                // A jetsam leaves no chance to write; keep the trials so far.
+                let partialURL = output.appendingPathComponent("\(modelID.replacingOccurrences(of: "/", with: "_"))-partial.json")
+                configuration.partialReportHandler = { report in
+                    try? report.jsonData().write(to: partialURL, options: .atomic)
+                }
                 let report = try await TTSBenchmarkRunner.run(configuration, store: store, log: log)
                 let url = try report.write(into: output)
+                try? FileManager.default.removeItem(at: partialURL)
                 log("[bench] wrote \(url.lastPathComponent)")
             } catch {
                 failures += 1

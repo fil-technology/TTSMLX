@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format follows Keep a Changelog and the project uses Semantic Versioning.
 
-## [Unreleased]
+## [0.16.0] - 2026-11-05
 
 ### Added
 - Benchmark harness: `TTSBenchmarkRunner` runs a model through fixed fixtures
@@ -26,6 +26,16 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
   existing ports and the integration cost of the two without a port.
 
 ### Changed
+- `Qwen3-TTS-12Hz-0.6B-Base-8bit` now declares the measured
+  `peakMemoryMB` 4 200 (was an 800 estimate): on the iPhone 17 a sentence
+  peaks at 3.6 GB of MLX memory and the paragraph fixture is killed by iOS.
+  The `.iPhone` gate is unchanged so apps that ship it are not cut off, but
+  4 GB phones are now excluded by the memory check. The 4-bit build dies the
+  same way (MLX peak 3.4 GB, the codec decode, not the LM) and now declares
+  3 400 MB; the docs call both Mac models until the runtime decodes the
+  codec in chunks.
+- Kokoro (2 000 MB, measured 2.0 GB resident on the iPhone 17), Pocket TTS
+  (900 MB) and VoxCPM2 (6 500 MB) carry measured peaks as well.
 - Demo app: an unattended run (`--benchmark`, `--moss-validation`) shows a
   status screen (elapsed time, what it is doing now, finished models, the
   log) and keeps the screen awake, because a locked phone backgrounds the
@@ -44,6 +54,12 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
   working). Pass `nil` to get MLX's own default back.
 
 ### Fixed
+- A voice or language change no longer reloads the model's weights, except
+  on Marvis, whose Mimi adapter keeps state between calls. Every other
+  loader takes voice and language per call, so the reload only cost one to
+  two seconds per switch, defeated `warmUp` for the first voiced call, and
+  on the iPhone the reload of Qwen3-TTS right after its cold load ended the
+  process.
 - A consumer whose `Package.resolved` still records `ml-explore/mlx-swift`
   at a fork revision (what the old mirror produced) fails to resolve once
   the mirror is gone: "Couldn't check out revision 21a3aec…", because

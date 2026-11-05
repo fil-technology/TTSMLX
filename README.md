@@ -46,9 +46,9 @@ in the catalog (`TTSModelDescriptor.license`).
 | `mlx-community/Soprano-80M-bf16` | validated | iPhone | en | one voice, streaming | Apache-2.0 |
 | `mlx-community/VyvoTTS-EN-Beta-4bit` | validated | iPhone | en | one voice | unknown |
 | `mlx-community/orpheus-3b-0.1-ft-bf16` | validated | Mac | en | 8 presets, event tags | Apache-2.0 |
-| `mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit` | validated | iPhone | 15 | default voice, cloning | Apache-2.0 |
+| `mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit` | validated | iPhone by gate; measured: Mac only (iOS killed it at paragraph length on an iPhone 17) | 15 | default voice, cloning | Apache-2.0 |
 | `mlx-community/MOSS-TTS-Nano-100M` | validated | iPhone | 19 | 7 presets, cloning, streaming | Apache-2.0 |
-| `mlx-community/Qwen3-TTS-12Hz-0.6B-Base-4bit` | implemented | iPhone | 15 | as 8-bit, smaller | Apache-2.0 |
+| `mlx-community/Qwen3-TTS-12Hz-0.6B-Base-4bit` | implemented | iPhone by gate; measured: Mac only (same 3.4 GB codec peak, killed on an iPhone 17) | 15 | as 8-bit, smaller | Apache-2.0 |
 | `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-4bit` | implemented | iPhone (6 GB+) | 15 | as 0.6B, better prosody | Apache-2.0 |
 | `mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-4bit` | implemented | iPhone (6 GB+) | 15 | 9 presets, instruction | Apache-2.0 |
 | `mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-4bit` | implemented | iPhone | 15 | 9 presets, instruction | Apache-2.0 |
@@ -60,7 +60,7 @@ in the catalog (`TTSModelDescriptor.license`).
 | `mlx-community/chatterbox-turbo-4bit` | implemented | iPhone | en | default voice, cloning, event tags | MIT |
 | `mlx-community/chatterbox-4bit` | implemented | iPhone | 7 listed (23 upstream) | cloning, expressiveness, event tags | MIT |
 | `mlx-community/Ming-3.0-tts-0.5B-bf16` | implemented | iPhone | 7 | 8 presets, instruction, emotion, speed, voice design, cloning | MIT |
-| `mlx-community/VibeVoice-Realtime-0.5B-8bit` | implemented | iPhone | en (+9 experimental) | 25 presets, streaming | MIT |
+| `mlx-community/VibeVoice-Realtime-0.5B-8bit` | implemented | iPhone by gate; measured: Mac for live playback (1x realtime with stalls on an iPhone 17) | en (+9 experimental) | 25 presets, streaming | MIT |
 | `mlx-community/OmniVoice` | implemented | Mac | 6 | voice design, instruction, cloning | CC-BY-NC (non-commercial) |
 | `mlx-community/Voxtral-4B-TTS-2603-mlx-4bit` | implemented | iPhone | 9 | 20 presets | CC-BY-NC-4.0 (non-commercial) |
 | `mlx-community/VoxCPM2-4bit` | implemented | Mac | 15 listed (30 upstream) | cloning, voice design, 48 kHz | Apache-2.0 |
@@ -74,7 +74,7 @@ semantics, existing ports) is [Docs/model-research.md](Docs/model-research.md).
 Quick picking guide:
 
 - Fast English on a phone: `Kokoro` (fastest, 54 voices) or `Pocket TTS` (smallest, streams per 80 ms frame).
-- Multilingual on a phone: `MOSS-TTS-Nano` (10 languages, streams) or `Qwen3-TTS 0.6B`.
+- Multilingual on a phone: `MOSS-TTS-Nano` (19 languages, streams). Qwen3-TTS 0.6B is a Mac model: both quantisations peak above 3 GB in the codec decode and iOS kills them on an iPhone 17.
 - Conversational on a Mac: `VibeVoice Realtime` (audio while it generates) or `MOSS-TTS-Nano`.
 - Expressive on a Mac: `Chatterbox` (cloning, emotion), `Ming` (instruction, emotion, voice design).
 - Long-form narration: `Kokoro`, `Pocket TTS`, `Qwen3-TTS` through `synthesizeLong` or `prepareNarration`.

@@ -31,8 +31,8 @@ iPhone 17 (8 GB) on iOS 27.2. Numbers: `Docs/benchmarks.md`.
 | `mlx-community/Soprano-80M-bf16` | validated | iPhone | 220 | yes (end to end, re-validated in 0.10.0) | – | commercial |
 | `mlx-community/VyvoTTS-EN-Beta-4bit` | validated | iPhone | 500 | yes (end to end, 0.3) | – | unknown |
 | `mlx-community/orpheus-3b-0.1-ft-bf16` | validated | Mac | 6000 | yes (end to end, 0.3) | – (gated) | commercial |
-| `mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit` | validated | iPhone | 800 | yes, benchmarks.md | yes, benchmarks.md | commercial |
-| `mlx-community/Qwen3-TTS-12Hz-0.6B-Base-4bit` | implemented | iPhone | 700 | – | – | commercial |
+| `mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit` | validated | iPhone | 4200 | yes, benchmarks.md | **killed by iOS** on the iPhone 17 at paragraph length (MLX peak 3.6 GB on a sentence, 0.6x realtime); not a phone model at 8-bit | commercial |
+| `mlx-community/Qwen3-TTS-12Hz-0.6B-Base-4bit` | implemented | iPhone | 3400 | yes, benchmarks.md | **killed by iOS** on the iPhone 17 on the second sentence trial (MLX peak 3.4 GB, 0.8x realtime) | commercial |
 | `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-4bit` | implemented | iPhone | 2800 | – | – | commercial |
 | `mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-4bit` | implemented | iPhone | 2800 | – | – | commercial |
 | `mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-4bit` | implemented | iPhone | 1200 | yes (0.11.0, end to end) | – | commercial |
@@ -69,3 +69,9 @@ cannot be selected; `Docs/model-support.md` says why for each.
 - **Mac-only gates** (`Orpheus`, `OmniVoice`, `VoxCPM2`) come from measured
   or estimated peaks above what iOS grants a foreground app; they are not
   Metal or API limits, so a smaller quantisation could lift them.
+- **What an iPhone 17 (8 GB) tolerates, measured:** Kokoro at an MLX peak of
+  2.3 GB ran for minutes; Qwen3-TTS 0.6B at 3.4–3.6 GB (both 8-bit and
+  4-bit, the transient is the codec decode, not the LM) was killed by iOS
+  within a few trials with no scene change logged. Treat an MLX peak above
+  roughly 3 GB as not shippable on 8 GB phones until the runtime decodes the
+  codec in chunks.

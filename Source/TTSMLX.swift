@@ -400,13 +400,13 @@ public enum TTSMLX {
                     supportsLanguageList: true,
                     supportedLanguages: Self.qwen3TTSLanguages,
                     defaultGenerationProfile: .highQuality,
-                    // Qwen3-TTS 0.6B at 8-bit peaks ~800MB resident. That fits
-                    // comfortably on any modern iPhone (6–8GB RAM); the
-                    // `physicalMemoryMB` check is the right gate. The previous
-                    // hard `minimumDeviceClass: .iPad` had no documented
-                    // non-memory reason and inherited the same conservative
-                    // paranoia that regressed Pocket TTS for iPhone users.
-                    peakMemoryMB: 800,
+                    // Measured (Docs/benchmarks.md): MLX peak 4.2 GB and 3.1 GB
+                    // resident on the M1 Pro; on the iPhone 17 (8 GB) a 12-word
+                    // sentence peaked at 3.6 GB and iOS killed the process on
+                    // the 51-word paragraph, at 0.6x realtime. The gate stays
+                    // `.iPhone` for apps that already ship it, but phones should
+                    // prefer the 4-bit build; the matrix and README say so.
+                    peakMemoryMB: 4_200,
                     minimumDeviceClass: .iPhone,
                     sampleRate: 24_000
                 )
@@ -432,7 +432,7 @@ public enum TTSMLX {
             summary: "Smaller-footprint 4-bit build of the multilingual Qwen3 TTS 0.6B — lower download/RAM than the 8-bit default.",
             supportStage: .implemented,
             supportedLanguages: Self.qwen3TTSLanguages,
-            runtimeNotes: "Routes to the qwen3_tts loader (same architecture as the validated 0.6B-8bit). Pending on-device validation + memory profiling.",
+            runtimeNotes: "Routes to the qwen3_tts loader (same architecture as the validated 0.6B-8bit). Measured on the iPhone 17: MLX peak 3.4 GB on a sentence, killed by iOS (signal 9) on the second trial, 0.8x realtime; not a phone model either, see Docs/benchmarks.md.",
             modelURL: URL(string: "https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-0.6B-Base-4bit"),
             descriptor: .init(
                 id: "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-4bit",
@@ -446,7 +446,12 @@ public enum TTSMLX {
                     supportsLanguageList: true,
                     supportedLanguages: Self.qwen3TTSLanguages,
                     defaultGenerationProfile: .balanced,
-                    peakMemoryMB: 700,
+                    // Measured on the iPhone 17: MLX peak 3.4 GB on a 12-word
+                    // sentence and killed by iOS on the second trial, like the
+                    // 8-bit build. The transient allocation is the speech
+                    // tokenizer's decode, not the LM, so quantisation does not
+                    // help; chunked codec decoding in the runtime would.
+                    peakMemoryMB: 3_400,
                     minimumDeviceClass: .iPhone,
                     sampleRate: 24_000
                 )

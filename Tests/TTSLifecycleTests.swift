@@ -119,3 +119,15 @@ extension TTSSpeechSynthesizer {
         _markWarmedInternal(id)
     }
 }
+
+@Suite("Voice switches reuse the loaded model")
+struct TTSVariantReloadTests {
+    @Test("only Marvis reloads on a voice or language change")
+    func onlyMarvisReloads() {
+        #expect(TTSSpeechSynthesizer.reloadsOnVariantChange("Marvis-AI/marvis-tts-250m-v0.2-MLX-8bit"))
+        for id in ["mlx-community/Kokoro-82M-bf16", "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit",
+                   "mlx-community/VibeVoice-Realtime-0.5B-8bit", "mlx-community/pocket-tts"] {
+            #expect(!TTSSpeechSynthesizer.reloadsOnVariantChange(id), "\(id) should keep its loaded instance")
+        }
+    }
+}
