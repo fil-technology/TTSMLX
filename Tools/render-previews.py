@@ -130,7 +130,7 @@ dl{{display:grid;grid-template-columns:max-content 1fr;gap:2px 14px;font-size:14
 .none{{color:var(--muted);font-size:14px}}
 </style></head><body>
 <h1>TTSMLX model previews</h1>
-<p class="lead">One short clip per model and voice, generated on an Apple-silicon Mac with <code>Tools/previews</code> at the catalog's default generation profile. Same sentence everywhere so the voices compare directly. Full support matrix: <code>Docs/model-support.md</code>.</p>
+<p class="lead">One short clip per model and voice, generated on an Apple-silicon Mac with <code>Tools/previews</code> at the catalog's default generation profile. Clips marked “benchmark” come from the harness runs in <a href="https://github.com/fil-technology/TTSMLX/blob/main/Docs/benchmarks.md">Docs/benchmarks.md</a>, some recorded on an iPhone 17; the same paragraph on every model. Same sentence everywhere so the voices compare directly. Full support matrix: <code>Docs/model-support.md</code>.</p>
 {''.join(cards)}
 </body></html>
 """
