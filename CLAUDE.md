@@ -11,7 +11,7 @@ the start of every session, before acting on whatever they asked for.
 ## Build and test
 
 - `swift build` — framework. Needs the Swift 6.3 toolchain or newer (Xcode 26.3+): `mlx-swift` 0.33 requires it. CI runs on `macos-26`.
-- `swift test` — full suite (currently 265 tests across 42 suites; should always be green on `main`).
+- `swift test` — full suite (currently 268 tests across 44 suites; should always be green on `main`).
 - `xcodebuild -project DemoApp/TTSMLXDemo.xcodeproj -scheme TTSMLXDemo-macOS -configuration Debug build` — demo app, macOS target. iOS target also exists.
 - After any change to `mlx-audio-swift` (local path dependency), wipe `~/Library/Developer/Xcode/DerivedData/TTSMLXDemo-*` and reset SwiftPM package caches in Xcode — incremental builds do not pick up local-path package source changes reliably. The same holds for TTSMLX's own `Source/` when building the demo app: wipe `DerivedData/TTSMLXDemo-*/Build` (keep `SourcePackages`) before a device build that must carry fresh framework code; a stale build shipped a harness without its retry logic once.
 - If the demo project fails to resolve with "Couldn't check out revision", delete its ignored `project.xcworkspace/xcshareddata/swiftpm/Package.resolved` and `DerivedData/TTSMLXDemo-*/SourcePackages`; a resolved file from the mirror days pins `ml-explore/mlx-swift` at a fork revision.

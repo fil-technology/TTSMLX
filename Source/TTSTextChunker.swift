@@ -378,3 +378,17 @@ public struct TTSTextChunker: Sendable, Hashable {
         return (lo, hi)
     }
 }
+
+extension TTSTextChunker {
+    /// The same chunker with both limits capped at `limit`, a model's
+    /// `maxCharactersPerTake`. The narration paths apply it so a model that
+    /// degrades on long takes (MOSS-TTS-Nano runs away past about 140
+    /// characters) never receives more than it handles, whatever chunker the
+    /// caller passed. `nil` or a non-positive limit leaves the chunker as is.
+    public func limited(to limit: Int?) -> TTSTextChunker {
+        guard let limit, limit > 0 else { return self }
+        return TTSTextChunker(
+            firstChunkCharacterLimit: min(firstChunkCharacterLimit, limit),
+            followupChunkCharacterLimit: min(followupChunkCharacterLimit, limit))
+    }
+}

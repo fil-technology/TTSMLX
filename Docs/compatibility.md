@@ -41,7 +41,7 @@ iPhone 17 (8 GB) on iOS 27.2. Numbers: `Docs/benchmarks.md`.
 | `mlx-community/Kokoro-82M-bf16` | implemented | iPhone | 2000 | yes, benchmarks.md | yes, benchmarks.md | commercial |
 | `gradium/phonon-31m-en` | implemented | iPhone | 300 | yes (0.10.x, end to end) | – | commercial |
 | `mlx-community/MeloTTS-English-MLX` | implemented | iPhone | 1000 | yes (0.10.x, end to end) | – | commercial |
-| `mlx-community/MOSS-TTS-Nano-100M` | validated | iPhone | 1300 | yes (0.12.0 validation) | yes (0.12.0 validation, iPhone 17) | commercial |
+| `mlx-community/MOSS-TTS-Nano-100M` | validated | iPhone | 1900 | yes, benchmarks.md | yes, benchmarks.md (0.16.1 bounds; before them a runaway take peaked at 3 GB and iOS killed the app) | commercial |
 | `mlx-community/chatterbox-turbo-4bit` | implemented | iPhone | 2500 | yes, benchmarks.md | yes, benchmarks.md | commercial |
 | `mlx-community/chatterbox-4bit` | implemented | iPhone | 3000 | yes (0.10.2, end to end) | – | commercial |
 | `mlx-community/Ming-3.0-tts-0.5B-bf16` | implemented | iPhone | 4500 | yes (0.11.0 validation) | – | commercial |

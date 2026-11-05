@@ -11,6 +11,7 @@ Fixtures: `sentence` (12 words), `paragraph` (51 words), `longForm` (275 words, 
 | Model | Revision | Size | Cold: load / first audio | Warm load | Resident after load | sentence/stream first audio | paragraph/narration first audio | paragraph RTF | longForm RTF | longForm stalls | longForm pre-roll | MLX peak | Resident peak | CPU | Thermal |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | Kokoro-82M-bf16 | `a71e4d38` | 361 MB | 0.19s / 2.03s | 0.07s | 747 MB | 0.38s | 0.47s | 11.29x | 11.45x | 0 (0 overruns) | 0.0s | 2565 MB | 1984 MB | 0.68 | fair/nominal |
+| MOSS-TTS-Nano-100M | `229a9c51` | 285 MB | 0.07s / 1.24s | 0.03s | 389 MB | 2.49s | 1.44s | 3.35x | 2.31x | 3 (1 overruns) | 0.8s | 1863 MB | 1483 MB | 0.88 | nominal |
 | Qwen3-TTS-12Hz-0.6B-Base-4bit | `0d6bb6fe` | 1711 MB | 1.42s / 2.77s | 0.39s | 1784 MB | 0.48s | 0.84s | 2.34x | 2.38x | 0 (0 overruns) | 0.0s | 3946 MB | 2853 MB | 0.94 | nominal |
 | Qwen3-TTS-12Hz-0.6B-Base-8bit | `50f45ef0` | 1996 MB | 0.94s / 2.30s | 0.36s | 2041 MB | 0.48s | 1.00s | 2.07x | 2.28x | 0 (0 overruns) | 0.0s | 4213 MB | 3100 MB | 0.82 | fair/nominal |
 | VibeVoice-Realtime-0.5B-8bit | `ae6a233e` | 1220 MB | 1.06s / 3.17s | 0.54s | 1240 MB | 0.62s | 1.33s | 1.49x | 1.63x | 0 (0 overruns) | 0.0s | 1521 MB | 1851 MB | 1.12 | fair |
@@ -26,11 +27,15 @@ Fixtures: `sentence` (12 words), `paragraph` (51 words), `longForm` (275 words, 
 | Model | Revision | Size | Cold: load / first audio | Warm load | Resident after load | sentence/stream first audio | paragraph/narration first audio | paragraph RTF | longForm RTF | longForm stalls | longForm pre-roll | MLX peak | Resident peak | CPU | Thermal |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | Kokoro-82M-bf16 | `a71e4d38` | 361 MB | 0.05s / 9.30s | 0.05s | 526 MB | 0.49s | 0.54s | 9.68x | 8.79x | 0 (0 overruns) | 0.0s | 2300 MB | 1957 MB | 0.53 | fair/nominal |
+| MOSS-TTS-Nano-100M | `?` | 272 MB | 0.21s / 0.42s | 0.12s | 656 MB | 0.86s | 0.96s | 4.48x | 4.01x | 1 (6 overruns) | 0.0s | 1842 MB | 1476 MB | 0.85 | fair/serious |
 | Qwen3-TTS-12Hz-0.6B-Base-4bit | `0d6bb6fe` | 1716 MB | 1.46s / 4.58s | 1.29s | 1768 MB | – | – | – | – | – | – | 3380 MB | 2275 MB | 0.90 | nominal |
 | VibeVoice-Realtime-0.5B-8bit | `ae6a233e` | 1220 MB | 2.41s / 5.60s | 1.20s | 1169 MB | 0.97s | 2.09s | 0.94x | 1.07x | 5 (0 overruns) | 0.0s | 1521 MB | 1866 MB | 1.36 | nominal |
 | chatterbox-turbo-4bit | `c6381772` | 416 MB | 0.44s / 4.24s | 0.30s | 1042 MB | 1.24s | 1.27s | 2.93x | 2.55x | 3 (0 overruns) | 0.7s | 2139 MB | 2409 MB | 0.88 | fair/serious |
 | pocket-tts | `cbf71d5f` | 240 MB | 0.20s / 0.91s | 0.03s | 603 MB | 0.28s | 0.50s | 4.19x | 4.02x | 0 (0 overruns) | 0.0s | 566 MB | 819 MB | 0.20 | fair/serious |
 
+- MOSS-TTS-Nano-100M: sentence/narration #0 was cancelled (app inactive?), retry 1
+- MOSS-TTS-Nano-100M: sentence/narration #0 was cancelled (app inactive?), retry 2
+- MOSS-TTS-Nano-100M: reconstructed from benchmark.log: the run completed but its JSON failed to encode (a cancelled cold trial analysed to -inf before 0.16.1 clamped it); characters per trial unknown
 - Qwen3-TTS-12Hz-0.6B-Base-4bit: partial: iOS killed the process (signal 9) on the second sentence trial; no scene change was logged
 
 ## MacBook Pro 14-inch 2021 (Apple M1 Pro) — macOS 27.0 (26A428), debug build, 32 GB
@@ -115,6 +120,31 @@ debug numbers.
   does not help; the runtime would need chunked codec decoding (as the fork
   did for MOSS) before Qwen3 is a phone model. Kokoro survived at a 2.3 GB
   peak, so the practical ceiling on an 8 GB iPhone sits near 3 GB.
+
+- **MOSS-TTS-Nano runs away on short takes, and that was the phone killer
+  for it too.** Before 0.16.1 a 12-word sentence came out as 13–14 s in
+  two of three trials (the model misses its end-of-audio and runs to its
+  375-frame budget); the codec decode of such a 30 s chunk peaks at
+  3–3.5 GB, over the phone's ceiling. The synthesizer now bounds MOSS's
+  frames to 1.6x the speech the text needs plus two seconds, and the
+  narration paths cap MOSS takes at 140 characters (`maxCharactersPerTake`
+  is honoured by `synthesizeLong` now, which it was not). Result on the
+  M1 Pro: sentence 3.5–4.8 s, long-form overruns 9 → 1 with the tail capped
+  at 12 s, MLX peak 3.5 GB → 1.85 GB, at the cost of some throughput
+  (long-form 3.5x → 2.3x, more takes). MOSS's own `synthesizeStream` path
+  yields a take whole (5–6 s to first audio for a paragraph), so the
+  narration path is the one to use for MOSS. On the iPhone 17 with the
+  bounds: 4.0–4.5x realtime, 1.0 s to first audio on the narration path,
+  MLX peak 1.8 GB, resident 1.5 GB, six bounded overruns over the long-form
+  fixture (8 s tails), and the run completed; before them the same phone
+  killed the app at the long-form fixture with a 3.0 GB peak.
+- **One unexplained kill remains.** A MOSS rerun on the phone was killed
+  by iOS (signal 9) ten seconds after launch, right after a cold load at
+  430 MB resident with 2.9 GB available and the scene still active, so
+  neither memory nor a lock explains it. The device's own
+  `JetsamEvent`/crash report (Settings → Privacy & Security → Analytics
+  Data) is the next place to look; the harness keeps partial reports so a
+  kill costs only the current trial.
 
 ## Default engines by use case
 

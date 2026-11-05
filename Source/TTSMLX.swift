@@ -774,10 +774,16 @@ public enum TTSMLX {
                 MLX peak 1.0-1.2 GB, process footprint up to 1.2 GB, no end-of-audio miss in \
                 42 chunks; the model landed in Application Support. On an M-series Mac the \
                 same run is 0.85x realtime with first audio in 4-6 s and MLX peak 1.6 GB. \
-                Known behaviour: at the model's own sampling defaults it can miss end-of-audio \
-                and fill the 375-frame budget with silence (seen once in five runs on an \
-                earlier port, not in 84 chunks here); the text chunker bounds the damage to one \
-                chunk.
+                Known behaviour: it misses end-of-audio on short takes more often than the \
+                validation above suggested (two of three 12-word sentences in the 0.16.0 \
+                benchmark ran to the 375-frame budget), and the codec decode of such a 30 s \
+                chunk peaks at 3-3.5 GB, which is more than iOS grants an app on an 8 GB phone. \
+                Since 0.16.1 the synthesizer bounds the frames to what the text can need and the \
+                narration paths cap MOSS takes at 140 characters, so a miss costs at most a few \
+                seconds of silence and the MLX peak stays under 1.9 GB (Docs/benchmarks.md: \
+                about 4x realtime on the iPhone 17 and 3.3x on the M1 Pro in Release, first \
+                audio around 1 s on the narration path). Its own streaming path yields a take \
+                whole; use the narration path.
                 """,
             modelURL: URL(string: "https://huggingface.co/mlx-community/MOSS-TTS-Nano-100M"),
             projectURL: URL(string: "https://github.com/OpenMOSS/MOSS-TTS-Nano"),
@@ -799,10 +805,10 @@ public enum TTSMLX {
                     // Measured on macOS via MLX.GPU.peakMemory across a
                     // ~17s generation at the default chunk budget (1.36-1.53GB
                     // observed). Rounded up; re-measure on device.
-                    peakMemoryMB: 1_300,
+                    peakMemoryMB: 1_900,
                     minimumDeviceClass: .iPhone,
                     sampleRate: 48_000,
-                    maxCharactersPerTake: 220
+                    maxCharactersPerTake: 140
                 ),
                 modelURL: URL(string: "https://huggingface.co/mlx-community/MOSS-TTS-Nano-100M")
             ),
