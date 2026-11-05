@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 
 The format follows Keep a Changelog and the project uses Semantic Versioning.
 
+## [0.16.1] - 2026-11-05
+
+### Fixed
+- MOSS-TTS-Nano runaway takes. On a short take the model sometimes misses
+  its end-of-audio and runs to the 375-frame budget: a 12-word sentence
+  came out as 13–14 s with a 20 s silent tail in two of three trials, and
+  the codec decode of that 30 s chunk peaked at 3–3.5 GB, which is more
+  than iOS grants this app on an 8 GB iPhone (about 2.5 GB available on
+  top of 0.8 GB resident), so the process was killed. The synthesizer now
+  bounds MOSS's frames to 1.6x the speech the text can need plus two
+  seconds (`maxTokens`, only when the caller did not set it), and the
+  catalog shortens MOSS takes to 140 characters so the bound stays well
+  under the model's 375-frame budget on every take. The narration paths
+  (`synthesizeLong`, `streamAndCacheNarration`, `prepareNarration`) now cap
+  the chunker at the model's `maxCharactersPerTake` (`TTSTextChunker
+  .limited(to:)`), which they did not before; cached MOSS narrations are
+  re-chunked, so their bundles regenerate.
+- Benchmark trials record `os_proc_available_memory` on iOS, so a kill can
+  be told apart from a lock; the cold trial is retried after a cancellation
+  like every other, and a silent trial no longer breaks the JSON report.
+- MOSS-TTS-Nano declares its measured peak, 1 900 MB (MLX peak 1.85 GB on
+  both devices with the bounds), instead of 1 300.
+
 ## [0.16.0] - 2026-11-05
 
 ### Added

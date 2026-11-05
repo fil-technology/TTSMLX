@@ -72,7 +72,7 @@ struct TTSBenchmarkTests {
                 firstAudioSeconds: firstAudio, audioSeconds: rtf * 10, wallSeconds: 10, chunkCount: 1,
                 stallCount: cold ? 1 : 0, stallSeconds: 0, stallFreePrerollSeconds: 0, overrunChunks: 0, longestTrailingSilenceSeconds: 0,
                 peakDBFS: -3, rmsDBFS: -20, mlxPeakMB: 100, mlxActiveMB: 50, mlxCacheMB: 10, residentMB: 300,
-                cpuUtilization: 1, thermalState: "nominal", batteryLevel: nil)
+                cpuUtilization: 1, thermalState: "nominal", batteryLevel: nil, availableMemoryMB: nil)
         }
         let report = TTSBenchmarkReport(
             modelID: "m", modelRevision: "abc", modelSizeMB: 1, modelLocation: "/tmp",
@@ -88,5 +88,21 @@ struct TTSBenchmarkTests {
         #expect(report.textLines().contains { $0.contains("(cold)") })
         #expect(TTSBenchmarkReport.median([3, 1, 2]) == 2)
         #expect(TTSBenchmarkReport.median([]) == 0)
+    }
+
+    @Test("a report with a silent trial still encodes")
+    func silentTrialEncodes() throws {
+        let silent = TTSBenchmarkTrial(
+            fixtureID: "sentence", mode: .narration, index: 0, includesLoad: false, characters: 1,
+            firstAudioSeconds: 0, audioSeconds: 0, wallSeconds: 1, chunkCount: 0, stallCount: 0, stallSeconds: 0,
+            stallFreePrerollSeconds: 0, overrunChunks: 0, longestTrailingSilenceSeconds: 0,
+            peakDBFS: -.infinity, rmsDBFS: -.infinity, mlxPeakMB: 0, mlxActiveMB: 0, mlxCacheMB: 0, residentMB: 0,
+            cpuUtilization: 0, thermalState: "nominal", batteryLevel: nil, availableMemoryMB: nil)
+        let report = TTSBenchmarkReport(
+            modelID: "m", modelRevision: nil, modelSizeMB: 0, modelLocation: "", environment: .current(),
+            profile: nil, voice: nil, streamingInterval: 1, runtimeCacheLimitMB: nil,
+            startedAt: Date(), finishedAt: Date(), load: nil, trials: [silent], notes: [])
+        let data = try report.jsonData()
+        #expect(String(decoding: data, as: UTF8.self).contains("\"-inf\""))
     }
 }

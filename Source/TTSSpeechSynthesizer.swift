@@ -772,6 +772,7 @@ public actor TTSSpeechSynthesizer {
             emit(.controlsIgnored(modelID: model.id, controls: resolved.ignored))
         }
         let resolvedText = resolved.text, resolvedVoice = resolved.voice
+        Self.applyRunawayBudget(&parameters, model: loadedModel, text: resolvedText, options: options)
 
         if let progressHandler {
             await progressHandler(.init(
@@ -905,7 +906,7 @@ public actor TTSSpeechSynthesizer {
                 try Task.checkCancellation()
                 if lifecycle.isShuttingDown { throw CancellationError() }
                 let loadedModel = loadedBox.model
-                let parameters = Self.makeParameters(for: loadedModel, options: capturedOptions)
+                var parameters = Self.makeParameters(for: loadedModel, options: capturedOptions)
                 let prepared = await synthesizer.preparedConditioning(for: capturedOptions)
                 let referenceURL = Self.referenceURL(for: capturedOptions, model: loadedModel, prepared: prepared)
                 let referenceAudio = try referenceURL.map {
@@ -914,6 +915,7 @@ public actor TTSSpeechSynthesizer {
                 let resolved = Self.applyControls(
                     capturedOptions, text: capturedPrompt, descriptor: model, to: loadedModel,
                     hasReference: referenceAudio != nil)
+                Self.applyRunawayBudget(&parameters, model: loadedModel, text: resolved.text, options: capturedOptions)
                 if !resolved.ignored.isEmpty {
                     await synthesizer.emit(.controlsIgnored(modelID: model.id, controls: resolved.ignored))
                 }
@@ -1045,7 +1047,7 @@ public actor TTSSpeechSynthesizer {
         // Use chunkInfos against the ORIGINAL text so emitted character ranges
         // map directly to what the caller passed in (matches their highlight
         // overlay coordinates).
-        let chunkInfos = chunker.chunkInfos(for: text)
+        let chunkInfos = chunker.limited(to: model.capabilities.maxCharactersPerTake).chunkInfos(for: text)
         guard !chunkInfos.isEmpty else {
             info("synthesizeLong: REJECTED text produced zero chunks (likely whitespace/punctuation only)")
             throw TTSError.emptyText
@@ -1433,7 +1435,7 @@ public actor TTSSpeechSynthesizer {
             info("streamAndCacheNarration: REJECTED empty text")
             throw TTSError.emptyText
         }
-        let chunkInfos = chunker.chunkInfos(for: text)
+        let chunkInfos = chunker.limited(to: model.capabilities.maxCharactersPerTake).chunkInfos(for: text)
         guard !chunkInfos.isEmpty else {
             info("streamAndCacheNarration: REJECTED text produced zero chunks")
             throw TTSError.emptyText
@@ -1837,7 +1839,7 @@ public actor TTSSpeechSynthesizer {
     ) async throws -> TTSPreparedNarration {
         let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { throw TTSError.emptyText }
-        let chunkInfos = chunker.chunkInfos(for: text)
+        let chunkInfos = chunker.limited(to: model.capabilities.maxCharactersPerTake).chunkInfos(for: text)
         guard !chunkInfos.isEmpty else { throw TTSError.emptyText }
 
         let fileManager = FileManager.default
@@ -2207,6 +2209,7 @@ public actor TTSSpeechSynthesizer {
 }
 
 private extension TTSSpeechSynthesizer {
+
     /// Runtime models receive a bare sample array and assume it is at their own
     /// rate (Chatterbox conditions at 24 kHz, Ming at 44.1 kHz, MOSS at 48 kHz),
     /// so the clip is resampled to `sampleRate` here; passing it through at its
@@ -2331,6 +2334,34 @@ private extension TTSSpeechSynthesizer {
 // MARK: - Per-loader language identifiers
 
 extension TTSSpeechSynthesizer {
+    /// MOSS-TTS-Nano sometimes misses its end-of-audio on a short take and
+    /// runs to the 375-frame budget (30 s): the take ends in 20 s of silence
+    /// and the codec decode of that chunk peaks at 3–3.5 GB, which iOS does
+    /// not grant an app on an 8 GB phone. Bound the frames to what the text
+    /// can need (see `mossFrameBudget`), never above the model's own budget,
+    /// and only when the caller did not set `maxTokens`.
+    nonisolated static func runawayFrameBudget(for model: any SpeechGenerationModel, text: String) -> Int? {
+        guard model is MossTTSNanoModel else { return nil }
+        return mossFrameBudget(words: text.split(whereSeparator: \.isWhitespace).count)
+    }
+
+    /// Frames (12.5 per second) MOSS may generate for `words` words: 1.6x the
+    /// speech at 150 words per minute plus two seconds. A 23-word take (the
+    /// catalog's 140-character limit) gets 16 s; the peak memory of the
+    /// codec decode grows with the square of the frames, so this also keeps
+    /// the take under 1 GB instead of 3.5 GB at the 375-frame budget.
+    nonisolated static func mossFrameBudget(words: Int) -> Int {
+        let expectedSeconds = Double(max(1, words)) / 2.5
+        let frames = Int((expectedSeconds * 1.6 + 2) * 12.5)
+        return min(375, max(25, frames))
+    }
+
+    nonisolated static func applyRunawayBudget(
+        _ parameters: inout GenerateParameters, model: any SpeechGenerationModel, text: String, options: TTSSynthesisOptions
+    ) {
+        guard options.maxTokens == nil, let budget = runawayFrameBudget(for: model, text: text) else { return }
+        parameters.maxTokens = budget
+    }
     /// Kokoro's text processor keys its lexicons by ISO code (`fr`, `ja`,
     /// `cmn`, `en-us`), while `TTSLanguage` identifiers are English names
     /// (`"French"`) that other loaders (Qwen3-TTS) take verbatim. Map names to

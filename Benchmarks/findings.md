@@ -67,6 +67,31 @@ debug numbers.
   did for MOSS) before Qwen3 is a phone model. Kokoro survived at a 2.3 GB
   peak, so the practical ceiling on an 8 GB iPhone sits near 3 GB.
 
+- **MOSS-TTS-Nano runs away on short takes, and that was the phone killer
+  for it too.** Before 0.16.1 a 12-word sentence came out as 13–14 s in
+  two of three trials (the model misses its end-of-audio and runs to its
+  375-frame budget); the codec decode of such a 30 s chunk peaks at
+  3–3.5 GB, over the phone's ceiling. The synthesizer now bounds MOSS's
+  frames to 1.6x the speech the text needs plus two seconds, and the
+  narration paths cap MOSS takes at 140 characters (`maxCharactersPerTake`
+  is honoured by `synthesizeLong` now, which it was not). Result on the
+  M1 Pro: sentence 3.5–4.8 s, long-form overruns 9 → 1 with the tail capped
+  at 12 s, MLX peak 3.5 GB → 1.85 GB, at the cost of some throughput
+  (long-form 3.5x → 2.3x, more takes). MOSS's own `synthesizeStream` path
+  yields a take whole (5–6 s to first audio for a paragraph), so the
+  narration path is the one to use for MOSS. On the iPhone 17 with the
+  bounds: 4.0–4.5x realtime, 1.0 s to first audio on the narration path,
+  MLX peak 1.8 GB, resident 1.5 GB, six bounded overruns over the long-form
+  fixture (8 s tails), and the run completed; before them the same phone
+  killed the app at the long-form fixture with a 3.0 GB peak.
+- **One unexplained kill remains.** A MOSS rerun on the phone was killed
+  by iOS (signal 9) ten seconds after launch, right after a cold load at
+  430 MB resident with 2.9 GB available and the scene still active, so
+  neither memory nor a lock explains it. The device's own
+  `JetsamEvent`/crash report (Settings → Privacy & Security → Analytics
+  Data) is the next place to look; the harness keeps partial reports so a
+  kill costs only the current trial.
+
 ## Default engines by use case
 
 Based on the Release tables; "first audio" is the warm stream-path number

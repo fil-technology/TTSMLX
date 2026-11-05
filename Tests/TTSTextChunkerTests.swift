@@ -234,3 +234,19 @@ struct TTSTextChunkerTests {
         #expect(chunker.chunks(for: text) == chunker.chunkInfos(for: text).map(\.text))
     }
 }
+
+@Suite("Chunker take limit")
+struct TTSTextChunkerLimitTests {
+    @Test("limited(to:) caps both limits and ignores nil or non-positive values")
+    func limited() {
+        let chunker = TTSTextChunker(firstChunkCharacterLimit: 80, followupChunkCharacterLimit: 220)
+        let capped = chunker.limited(to: 140)
+        #expect(capped.firstChunkCharacterLimit == 80)
+        #expect(capped.followupChunkCharacterLimit == 140)
+        #expect(chunker.limited(to: nil) == chunker)
+        #expect(chunker.limited(to: 0) == chunker)
+        #expect(chunker.limited(to: 50).firstChunkCharacterLimit == 50)
+        let long = String(repeating: "Seven words make a short sentence here. ", count: 12)
+        #expect(capped.chunks(for: long).allSatisfy { $0.count <= 140 })
+    }
+}

@@ -3,6 +3,9 @@ import Foundation
 #if canImport(UIKit)
 import UIKit
 #endif
+#if os(iOS) || os(tvOS) || os(visionOS)
+import os
+#endif
 
 // MARK: - Fixtures
 
@@ -220,6 +223,10 @@ public struct TTSBenchmarkTrial: Sendable, Codable, Hashable {
     public let thermalState: String
     /// iOS only; `nil` on macOS or when unavailable.
     public let batteryLevel: Double?
+    /// iOS only: what `os_proc_available_memory` says the process may still
+    /// allocate before jetsam, at the end of the trial. Falling values across
+    /// trials mean the system, not the model, is closing in.
+    public let availableMemoryMB: Double?
 }
 
 public struct TTSBenchmarkLoad: Sendable, Codable, Hashable {
@@ -324,7 +331,8 @@ public struct TTSBenchmarkReport: Sendable, Codable {
                 trial.chunkCount, trial.stallCount, trial.stallSeconds, trial.stallFreePrerollSeconds, trial.overrunChunks,
                 trial.longestTrailingSilenceSeconds, trial.peakDBFS, trial.rmsDBFS, trial.mlxPeakMB,
                 trial.mlxActiveMB, trial.mlxCacheMB, trial.residentMB, trial.cpuUtilization, trial.thermalState,
-                trial.batteryLevel.map { String(format: " battery=%.0f%%", $0 * 100) } ?? ""))
+                (trial.batteryLevel.map { String(format: " battery=%.0f%%", $0 * 100) } ?? "")
+                    + (trial.availableMemoryMB.map { String(format: " available=%.0fMB", $0) } ?? "")))
         }
         for summary in summaries {
             lines.append(String(
@@ -341,6 +349,7 @@ public struct TTSBenchmarkReport: Sendable, Codable {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
+        encoder.nonConformingFloatEncodingStrategy = .convertToString(positiveInfinity: "inf", negativeInfinity: "-inf", nan: "nan")
         return try encoder.encode(self)
     }
 
@@ -429,11 +438,19 @@ public enum TTSBenchmarkRunner {
             // and compiles the Metal kernels; measure it as its own trial.
             let coldFixture = configuration.fixtures.first { $0.id == TTSBenchmarkFixture.sentence.id }
                 ?? configuration.fixtures.first ?? .sentence
-            let coldTrial = try await runTrial(
+            let coldTrial = try await runTrialRetryingCancellation(
                 fixture: coldFixture, mode: .narration, index: -1, includesLoad: true,
                 descriptor: descriptor, options: options(mode: .narration, fixture: coldFixture),
-                synthesizer: synthesizer, audioOutput: nil, log: log)
+                synthesizer: synthesizer, audioOutput: nil, notes: &notes, log: log)
             trials.append(coldTrial)
+            configuration.partialReportHandler?(TTSBenchmarkReport(
+                modelID: descriptor.id, modelRevision: revision,
+                modelSizeMB: Int(installed.sizeBytes / 1_000_000), modelLocation: installed.location.path,
+                environment: .current(), profile: configuration.profile, voice: voice?.identifier,
+                streamingInterval: configuration.streamingInterval,
+                runtimeCacheLimitMB: configuration.runtimeCacheLimitMB,
+                startedAt: startedAt, finishedAt: Date(), load: nil, trials: trials,
+                notes: notes + ["partial: run still in progress"]))
             await synthesizer.unload(descriptor.id)
             log("[bench] reloading \(descriptor.id) warm")
             let warmStart = Date()
@@ -602,14 +619,17 @@ public enum TTSBenchmarkRunner {
             audioSeconds: Double(samples.count) / sampleRate, wallSeconds: wall,
             chunkCount: chunks, stallCount: stalls, stallSeconds: stallSeconds,
             stallFreePrerollSeconds: preroll, overrunChunks: overruns, longestTrailingSilenceSeconds: longestTail,
-            peakDBFS: analysis.peakDBFS, rmsDBFS: analysis.rmsDBFS,
+            // Silence (a cancelled take) analyses to -inf, which JSON cannot carry.
+            peakDBFS: analysis.peakDBFS.isFinite ? analysis.peakDBFS : -120,
+            rmsDBFS: analysis.rmsDBFS.isFinite ? analysis.rmsDBFS : -120,
             mlxPeakMB: Double(memory.peakBytes) / 1_048_576,
             mlxActiveMB: Double(memory.activeBytes) / 1_048_576,
             mlxCacheMB: Double(memory.cacheBytes) / 1_048_576,
             residentMB: TTSBenchmarkProbe.residentMB(),
             cpuUtilization: wall > 0 ? cpu / wall : 0,
             thermalState: TTSBenchmarkProbe.thermalState(),
-            batteryLevel: battery)
+            batteryLevel: battery,
+            availableMemoryMB: TTSBenchmarkProbe.availableMemoryMB())
         let report = TTSBenchmarkReport(
             modelID: descriptor.id, modelRevision: nil, modelSizeMB: 0, modelLocation: "",
             environment: .current(), profile: nil, voice: nil, streamingInterval: 0, runtimeCacheLimitMB: nil,
@@ -680,6 +700,14 @@ enum TTSBenchmarkProbe {
             let level = UIDevice.current.batteryLevel
             return level >= 0 ? Double(level) : nil
         }
+        #else
+        return nil
+        #endif
+    }
+
+    static func availableMemoryMB() -> Double? {
+        #if os(iOS) || os(tvOS) || os(visionOS)
+        return Double(os_proc_available_memory()) / 1_048_576
         #else
         return nil
         #endif

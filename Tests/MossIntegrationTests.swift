@@ -221,3 +221,15 @@ struct MossIntegrationTests {
         }
     }
 }
+
+@Suite("MOSS runaway frame budget")
+struct MossRunawayBudgetTests {
+    @Test("budget scales with the words, floors at 25 frames and caps at the model's 375")
+    func budget() {
+        #expect(TTSSpeechSynthesizer.mossFrameBudget(words: 5) == 65)
+        #expect(TTSSpeechSynthesizer.mossFrameBudget(words: 1) == 33)
+        #expect(TTSSpeechSynthesizer.mossFrameBudget(words: 0) == 33)
+        #expect(TTSSpeechSynthesizer.mossFrameBudget(words: 23) == 209)
+        #expect(TTSSpeechSynthesizer.mossFrameBudget(words: 60) == 375)
+    }
+}
