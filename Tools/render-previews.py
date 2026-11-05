@@ -141,7 +141,7 @@ md = "\n".join([
     "",
     f"Playable page (same clips, inline players): [{PAGE}]({PAGE})",
     "",
-    "Clips are mono MP3 files under `Docs/previews/audio`, generated with `Tools/previews` + `Tools/render-previews.py` on an Apple-silicon Mac at each model's default generation profile. Each link opens in the browser's native player. Languages, voices and features come straight from the catalog in `Source/TTSMLX.swift`.",
+    "Clips are mono MP3 files under `Docs/previews/audio`, generated with `Tools/previews` + `Tools/render-previews.py` on an Apple-silicon Mac at each model's default generation profile. Clips labelled “benchmark” are the same 51-word paragraph on every model, taken from the harness runs in `Docs/benchmarks.md`; those labelled “recorded on iPhone 17” were synthesised on the phone. Each link opens in the browser's native player. Languages, voices and features come straight from the catalog in `Source/TTSMLX.swift`.",
     "",
     "| Model | Status | Licence | Languages | Voices | Features | Peak memory | Clips |",
     "|---|---|---|---|---|---|---|---|",
@@ -155,7 +155,7 @@ text = readme.read_text()
 start, end = "<!-- PREVIEWS:START -->", "<!-- PREVIEWS:END -->"
 block = "\n".join([
     start,
-    "Hear every catalogued model before you pick one: [Docs/model-previews.md](Docs/model-previews.md) lists languages, voices, features and a short clip per voice (same sentence for all), and the [playable page](%s) has inline players." % PAGE,
+    "Hear every catalogued model before you pick one: [Docs/model-previews.md](Docs/model-previews.md) lists languages, voices, features and a short clip per voice (the same sentence on every model, plus the benchmark paragraph on the measured ones, several recorded on an iPhone 17), and the [playable page](%s) has inline players." % PAGE,
     end,
 ])
 if start in text and end in text:
