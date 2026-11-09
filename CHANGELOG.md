@@ -4,9 +4,40 @@ All notable changes to this project will be documented in this file.
 
 The format follows Keep a Changelog and the project uses Semantic Versioning.
 
-## [Unreleased]
+## [0.17.0] - 2026-11-09
+
+### Changed
+- Runtime pin `fil-technology/mlx-audio-swift` 0.1.8-tts.5 → **0.1.8-tts.6**.
+- VoxCPM2 descriptor: `supportsStreaming` true, features add `instruction`,
+  `emotion`, `speed`; catalog peak 6 500 → 3 500 MB (streaming decode); the
+  Mac gate stays (2.9 GB resident).
+- `Tools/bench.sh mac` defaults to Release and puts DerivedData on the work
+  volume; `Tools/previews` rebuilds the manifest from committed samples.
 
 ### Added
+- **VoxCPM2, full feature set** (runtime fork 0.1.8-tts.6, `Docs/voxcpm2.md`,
+  `Docs/voxcpm2-integration.md`): voice design from `voice` / `instruction` /
+  `emotion` / `speed` (compiled into the parenthesised description the model
+  reads; a text that already starts with "(" is sent as written), reference
+  cloning from a clip, controllable cloning (clip + style text),
+  high-fidelity continuation from a clip and its exact transcript
+  (`referenceText`, which the port used to drop), per-patch streaming (first
+  audio 0.4 s instead of the whole take; MLX peak 6.4 GB → 3.4 GB), all 30
+  languages, reproducible takes with `seed`, and the new options
+  `TTSSynthesisOptions.diffusionSteps` and `guidanceScale` (profiles fast /
+  balanced / high quality map to 6 / 10 / 16 steps). Validated end to end on
+  the M1 Pro with Whisper large-v3-turbo scoring (English, Russian, Hebrew,
+  German, French, Spanish, Italian at WER 0.00; Ukrainian as the
+  unsupported-language experiment): `Tests/VoxCPM2ValidationTests.swift`,
+  report in `Benchmarks/validation/`.
+- `TTSVoiceProfile` (designed / cloned / high-fidelity recipes with language,
+  delivery, generation defaults, seed, model id and revision, consent),
+  `TTSVoiceDesign` (structured controls that compile into a description) and
+  `TTSVoiceProfileStore` (local JSON store; cloned profiles need consent).
+- `TTSLanguage` constants for Hebrew, Ukrainian, Finnish, Norwegian,
+  Indonesian, Malay, Vietnamese, Thai, Tagalog, Burmese, Khmer, Lao, Swahili.
+- Demo app: Delivery section (description / instruction, emotion, speed) and
+  seed, diffusion steps and guidance scale fields, shown per model feature.
 - `mlx-community/VoxCPM1.5-4bit` (VoxCPM 1.5, `.implemented`): the 0.8 B
   predecessor of VoxCPM2 on the fork's `voxcpm` loader. English and Chinese
   at 44.1 kHz, cloning from a reference clip with its transcript, no preset

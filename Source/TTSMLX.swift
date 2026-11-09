@@ -222,11 +222,13 @@ public enum TTSMLX {
     static let vibeVoiceFiles: [String] = ["config.json", "model.safetensors", "model.safetensors.index.json", "preprocessor_config.json"]
         + vibeVoiceVoices.map { "voices/\($0.identifier).safetensors" }
 
-    /// VoxCPM2 covers 30 languages without a language tag; these are the ones
-    /// the model card names first.
+    /// The 30 languages the VoxCPM2 model card lists, in no particular order.
+    /// There is no language tag; the model reads the script. Ukrainian is not
+    /// among them (tested as an unsupported-language experiment only).
     static let voxCPM2Languages: [TTSLanguage] = [
-        .chinese, .english, .japanese, .korean, .german, .french, .spanish, .italian, .portuguese, .russian,
-        .dutch, .polish, .turkish, .arabic, .hindi,
+        .english, .chinese, .japanese, .korean, .german, .french, .spanish, .italian, .portuguese, .russian,
+        .dutch, .polish, .turkish, .arabic, .hindi, .hebrew, .greek, .danish, .swedish, .norwegian, .finnish,
+        .indonesian, .malay, .vietnamese, .thai, .tagalog, .burmese, .khmer, .lao, .swahili,
     ]
 
     /// MeloTTS English accents (the checkpoint's speaker ids).
@@ -1226,13 +1228,17 @@ public enum TTSMLX {
             supportStage: .implemented,
             supportedLanguages: voxCPM2Languages,
             runtimeNotes: """
-                Routes to the voxcpm2 loader (runtime 0.1.8-tts.5). 2 B parameters with only the \
-                language model quantised (2.3 GB on disk). No preset voices: pass a reference clip \
-                (optionally with its transcript) to clone, or nothing for a zero-shot voice. A \
-                parenthesised description at the start of the text steers the voice; there is no \
-                language tag. The Swift port generates a take whole and yields it as one chunk, \
-                so first audio equals the take's generation time even on the stream path. \
-                Benchmark numbers: see Docs/benchmarks.md.
+                Routes to the voxcpm2 loader (runtime 0.1.8-tts.6). 2 B parameters with only the \
+                language model quantised (2.3 GB on disk). No preset voices. A clip alone is an \
+                isolated timbre reference (controllable cloning: add a style description); a clip \
+                with its exact transcript (`referenceText`) is a continuation prompt (high-fidelity \
+                cloning); nothing gives a sampled voice. `voice`, `instruction`, `emotion` and \
+                `speed` compile into the parenthesised description VoxCPM2 reads at the front of \
+                the text (voice design); a text that already starts with "(" is sent as written. \
+                `diffusionSteps` (default 10) and `guidanceScale` (default 2.0) are per call; \
+                `seed` reproduces a take. The stream path yields one 160 ms patch at a time, \
+                decoded with a window of the previous patches. No language tag: the model reads \
+                the script. Benchmark numbers: Docs/benchmarks.md.
                 """,
             modelURL: URL(string: "https://huggingface.co/mlx-community/VoxCPM2-4bit"),
             projectURL: URL(string: "https://github.com/OpenBMB/VoxCPM"),
@@ -1247,12 +1253,15 @@ public enum TTSMLX {
                     supportsLanguageList: true,
                     supportedLanguages: voxCPM2Languages,
                     defaultGenerationProfile: .balanced,
-                    supportsStreaming: false,
-                    // Measured on the M1 Pro: MLX peak 6.4 GB, resident 3.7 GB
-                    // with the cache cap, 0.6x realtime in Release.
-                    peakMemoryMB: 6_500,
+                    supportsStreaming: true,
+                    // Measured on the M1 Pro (Release, runtime 0.1.8-tts.6): MLX
+                    // peak 3.1–3.4 GB with the per-patch streaming decode (6.4 GB
+                    // when the whole take was decoded at once), resident 2.9 GB
+                    // with the cache cap, 0.50–0.55x realtime. Mac: the weights
+                    // alone are 2.3 GB.
+                    peakMemoryMB: 3_500,
                     minimumDeviceClass: .mac,
-                    features: [.referenceTranscript, .voiceDesign],
+                    features: [.referenceTranscript, .voiceDesign, .instruction, .emotion, .speed],
                     sampleRate: 48_000,
                     maxCharactersPerTake: 300
                 ),
@@ -1268,7 +1277,7 @@ public enum TTSMLX {
             supportStage: .implemented,
             supportedLanguages: [.english, .chinese],
             runtimeNotes: """
-                Routes to the voxcpm loader (runtime 0.1.8-tts.5), the VoxCPM 1 / 1.5 \
+                Routes to the voxcpm loader (runtime 0.1.8-tts.6), the VoxCPM 1 / 1.5 \
                 architecture; VoxCPM2 is a separate entry. 0.8 B parameters with the \
                 language model quantised (620 MB on disk). No preset voices and no voice \
                 design: pass a reference clip with its exact transcript to clone, or nothing \

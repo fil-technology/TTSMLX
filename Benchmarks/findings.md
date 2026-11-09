@@ -84,6 +84,20 @@ debug numbers.
   MLX peak 1.8 GB, resident 1.5 GB, six bounded overruns over the long-form
   fixture (8 s tails), and the run completed; before them the same phone
   killed the app at the long-form fixture with a 3.0 GB peak.
+- **VoxCPM2 streams now, and that halved its memory.** With runtime
+  0.1.8-tts.6 the Swift port decodes one 160 ms patch per LM step (with a
+  window of the previous three for the causal decoder) instead of the whole
+  take: first audio 0.4 s on the M1 Pro on both paths (was the whole take,
+  about 8 s for a paragraph), MLX peak 6.4 GB → 3.1–3.4 GB, resident 2.9 GB.
+  The windowed re-decode costs throughput: 0.50–0.55x realtime against
+  0.62x before, so VoxCPM2 is still an offline or pre-rendered model on this
+  Mac, now with a usable first-audio time. The remaining gap to a phone is
+  the 2.3 GB of weights plus the 2.9 GB working set.
+- **A streamed slice is not a copy.** The first streaming build handed the
+  consumer a view into the decoded window; once the window moved on MLX
+  recycled the buffer and one take (seed 43) came out as non-finite samples
+  from the fifth patch. The fix copies each chunk; the validation test now
+  scans every take for non-finite samples.
 - **VoxCPM 1.5 is the fast VoxCPM, and still not a phone model.** On the
   M1 Pro in Release the 4-bit build runs at 1.2x realtime on every fixture
   with 3.2 s to first audio (narration path; no streaming), against 0.62x

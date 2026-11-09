@@ -240,6 +240,19 @@ public struct TTSLanguage: Sendable, Hashable, Codable, ExpressibleByStringLiter
     public static let danish: Self = "Danish"
     public static let swedish: Self = "Swedish"
     public static let greek: Self = "Greek"
+    public static let hebrew: Self = "Hebrew"
+    public static let ukrainian: Self = "Ukrainian"
+    public static let finnish: Self = "Finnish"
+    public static let norwegian: Self = "Norwegian"
+    public static let indonesian: Self = "Indonesian"
+    public static let malay: Self = "Malay"
+    public static let vietnamese: Self = "Vietnamese"
+    public static let thai: Self = "Thai"
+    public static let tagalog: Self = "Tagalog"
+    public static let burmese: Self = "Burmese"
+    public static let khmer: Self = "Khmer"
+    public static let lao: Self = "Lao"
+    public static let swahili: Self = "Swahili"
 }
 
 /// A voice the runtime selects by `identifier`. Catalog voices also carry the

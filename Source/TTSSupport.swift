@@ -79,6 +79,14 @@ public struct TTSSynthesisOptions: Sendable, Hashable {
     /// How closely the output follows the voice, 0...1 (Chatterbox CFG weight,
     /// default 0.5).
     public var voiceGuidance: Float?
+    /// Diffusion sampling steps for models with a local diffusion head
+    /// (VoxCPM2: upstream default 10; fewer is faster, more is cleaner).
+    /// Overrides what `generationProfile` would pick.
+    public var diffusionSteps: Int?
+    /// Classifier-free guidance scale for models that expose one as a scale
+    /// rather than a weight (VoxCPM2: upstream default 2.0; higher follows the
+    /// text and description more closely, at some cost in naturalness).
+    public var guidanceScale: Float?
     /// A voice prepared with `prepareVoice`. Ignored when `referenceAudio` is
     /// also set.
     public var preparedVoice: TTSPreparedVoice?
@@ -126,6 +134,8 @@ public struct TTSSynthesisOptions: Sendable, Hashable {
         seed: UInt64? = nil,
         expressiveness: Float? = nil,
         voiceGuidance: Float? = nil,
+        diffusionSteps: Int? = nil,
+        guidanceScale: Float? = nil,
         preparedVoice: TTSPreparedVoice? = nil
     ) {
         self.preparedVoice = preparedVoice
@@ -137,6 +147,8 @@ public struct TTSSynthesisOptions: Sendable, Hashable {
         self.seed = seed
         self.expressiveness = expressiveness
         self.voiceGuidance = voiceGuidance
+        self.diffusionSteps = diffusionSteps
+        self.guidanceScale = guidanceScale
         self.language = language
         self.voice = voice
         self.referenceAudio = referenceAudio
@@ -156,6 +168,7 @@ public struct TTSSynthesisOptions: Sendable, Hashable {
     public var hasControls: Bool {
         instruction != nil || emotion != nil || speed != nil || rate != nil || targetDuration != nil
             || seed != nil || expressiveness != nil || voiceGuidance != nil || preparedVoice != nil
+            || diffusionSteps != nil || guidanceScale != nil
     }
 
     /// `rate`, or the rate `speed` stands for.
@@ -169,6 +182,7 @@ public struct TTSSynthesisOptions: Sendable, Hashable {
             + "|rate=\(rate.map { String($0) } ?? "")|target=\(targetDuration.map { String($0) } ?? "")|seed=\(seed.map { String($0) } ?? "")"
             + "|expr=\(expressiveness.map { String($0) } ?? "")|guide=\(voiceGuidance.map { String($0) } ?? "")"
             + "|prepared=\(preparedVoice?.referenceURL.standardizedFileURL.path ?? "")"
+            + (diffusionSteps == nil && guidanceScale == nil ? "" : "|steps=\(diffusionSteps.map { String($0) } ?? "")|cfg=\(guidanceScale.map { String($0) } ?? "")")
     }
 }
 

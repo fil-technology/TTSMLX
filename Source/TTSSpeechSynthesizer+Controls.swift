@@ -93,6 +93,26 @@ extension TTSSpeechSynthesizer {
             if let speed = options.speed, speed != .normal { parts.append(speed == .slow ? "slow pace" : "fast pace") }
             request.voice = parts.isEmpty ? nil : parts.joined(separator: ", ")
 
+        case let vox as VoxCPM2Model:
+            // VoxCPM2 has no preset voices and no separate style input: a
+            // natural-language description in parentheses at the front of the
+            // text designs the voice (no clip) or steers a cloned one (clip).
+            // `voice`, `instruction`, `emotion` and `speed` are compiled into
+            // that description; a text that already opens with "(" is left
+            // alone so callers can write the prompt themselves.
+            let description = Self.voxCPM2Description(
+                voice: request.voice, instruction: options.instruction,
+                emotion: options.emotion, speed: options.speed)
+            if let description, !request.text.hasPrefix("(") {
+                request.text = "(\(description))" + request.text
+            }
+            request.voice = nil
+            vox.callParameters = VoxCPM2GenerationParameters(
+                inferenceTimesteps: options.diffusionSteps ?? Self.voxCPM2Steps(for: options.generationProfile),
+                cfgValue: options.guidanceScale)
+            if options.voiceGuidance != nil { request.ignored.append("voiceGuidance (VoxCPM2 takes guidanceScale, a CFG scale, not a 0...1 weight)") }
+            if options.expressiveness != nil { request.ignored.append("expressiveness (describe the delivery in instruction instead)") }
+
         case is Qwen3TTSModel where features.contains(.instruction):
             // CustomVoice builds read the voice as "speaker, instruction".
             var parts: [String] = []
@@ -166,5 +186,28 @@ extension TTSSpeechSynthesizer {
         if let explicit = options.referenceAudio { return explicit }
         guard let voice = options.preparedVoice else { return nil }
         return prepared == nil ? voice.referenceURL : nil
+    }
+    /// The parenthesised VoxCPM2 voice description built from the uniform
+    /// controls. `voice` is read as free text (there are no presets).
+    nonisolated static func voxCPM2Description(
+        voice: String?, instruction: String?, emotion: TTSEmotion?, speed: TTSSpeed?
+    ) -> String? {
+        var parts: [String] = []
+        if let voice, !voice.isEmpty { parts.append(voice) }
+        if let instruction, !instruction.isEmpty { parts.append(instruction) }
+        if let emotion { parts.append("\(emotion.rawValue) tone") }
+        if let speed, speed != .normal { parts.append(speed == .slow ? "slow speaking pace" : "fast speaking pace") }
+        return parts.isEmpty ? nil : parts.joined(separator: ", ")
+    }
+
+    /// Diffusion steps per profile. `balanced` is upstream's default (10);
+    /// the other two are TTSMLX's choices, listed in Docs/voxcpm2-integration.md
+    /// with the measurements behind them.
+    nonisolated static func voxCPM2Steps(for profile: TTSGenerationProfile?) -> Int? {
+        switch profile {
+        case .fast: return 6
+        case .balanced, nil: return nil
+        case .highQuality: return 16
+        }
     }
 }

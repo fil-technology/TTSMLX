@@ -48,7 +48,7 @@ iPhone 17 (8 GB) on iOS 27.2. Numbers: `Docs/benchmarks.md`.
 | `mlx-community/OmniVoice` | implemented | Mac | 6000 | yes (0.13.0 validation) | – (gated) | non-commercial |
 | `mlx-community/Voxtral-4B-TTS-2603-mlx-4bit` | implemented | iPhone | 4000 | yes (0.13.0 validation) | – | non-commercial |
 | `mlx-community/VibeVoice-Realtime-0.5B-8bit` | implemented | iPhone | 2000 | yes, benchmarks.md | yes, benchmarks.md | commercial |
-| `mlx-community/VoxCPM2-4bit` | implemented | Mac | 6500 | yes, benchmarks.md | – (gated) | commercial |
+| `mlx-community/VoxCPM2-4bit` | implemented | Mac | 3500 | yes, benchmarks.md (0.1.8-tts.6 streaming) and `Benchmarks/validation` | – (gated) | commercial |
 | `mlx-community/VoxCPM1.5-4bit` | implemented | Mac | 7500 | yes, benchmarks.md | – (gated) | commercial |
 
 Discovery-only entries (`Kitten TTS`, `Higgs TTS 3`, `LongCat AudioDiT`,

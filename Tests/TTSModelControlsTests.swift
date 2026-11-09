@@ -100,3 +100,50 @@ struct TTSModelControlsTests {
         #expect(TTSSpeechSynthesizer.chatterboxExaggeration(.angry) > TTSSpeechSynthesizer.chatterboxExaggeration(.neutral))
     }
 }
+
+@Suite("VoxCPM2 controls")
+struct VoxCPM2ControlsTests {
+    @Test("Structured controls compile into one parenthesised description")
+    func descriptionFromControls() {
+        let d = TTSSpeechSynthesizer.voxCPM2Description(
+            voice: "A mature male narrator", instruction: "warm, slightly raspy, calm and reassuring",
+            emotion: .happy, speed: .slow)
+        #expect(d == "A mature male narrator, warm, slightly raspy, calm and reassuring, happy tone, slow speaking pace")
+        #expect(TTSSpeechSynthesizer.voxCPM2Description(voice: nil, instruction: nil, emotion: nil, speed: .normal) == nil)
+        #expect(TTSSpeechSynthesizer.voxCPM2Description(voice: "", instruction: "whispering", emotion: nil, speed: .fast) == "whispering, fast speaking pace")
+    }
+
+    @Test("Profiles map onto diffusion steps with balanced left to the checkpoint")
+    func stepsPerProfile() {
+        #expect(TTSSpeechSynthesizer.voxCPM2Steps(for: .fast) == 6)
+        #expect(TTSSpeechSynthesizer.voxCPM2Steps(for: .balanced) == nil)
+        #expect(TTSSpeechSynthesizer.voxCPM2Steps(for: nil) == nil)
+        #expect(TTSSpeechSynthesizer.voxCPM2Steps(for: .highQuality) == 16)
+    }
+
+    @Test("The catalog entry lists all thirty languages, streams, and owns the design controls")
+    func catalogEntry() throws {
+        let entry = try #require(TTSMLX.modelCatalog.first { $0.id == "mlx-community/VoxCPM2-4bit" })
+        let d = try #require(entry.descriptor)
+        #expect(d.supportedLanguages.count == 30)
+        #expect(Set(d.supportedLanguages).count == 30)
+        #expect(d.supportedLanguages.contains(.hebrew))
+        #expect(d.supportedLanguages.contains(.russian))
+        #expect(!d.supportedLanguages.contains(.ukrainian))
+        #expect(d.capabilities.supportsStreaming)
+        for feature in [TTSModelFeature.voiceDesign, .instruction, .emotion, .speed, .referenceTranscript] {
+            #expect(d.features.contains(feature), "\(feature)")
+        }
+        #expect(d.capabilities.minimumDeviceClass == .mac)
+    }
+
+    @Test("Synthesis options carry diffusion steps and guidance scale")
+    func newOptions() {
+        var options = TTSSynthesisOptions()
+        #expect(options.diffusionSteps == nil && options.guidanceScale == nil)
+        options.diffusionSteps = 16
+        options.guidanceScale = 2.5
+        #expect(options.diffusionSteps == 16)
+        #expect(options.guidanceScale == 2.5)
+    }
+}

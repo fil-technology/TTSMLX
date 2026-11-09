@@ -63,7 +63,7 @@ in the catalog (`TTSModelDescriptor.license`).
 | `mlx-community/VibeVoice-Realtime-0.5B-8bit` | implemented | iPhone by gate; measured: Mac for live playback (1x realtime with stalls on an iPhone 17) | en (+9 experimental) | 25 presets, streaming | MIT |
 | `mlx-community/OmniVoice` | implemented | Mac | 6 | voice design, instruction, cloning | CC-BY-NC (non-commercial) |
 | `mlx-community/Voxtral-4B-TTS-2603-mlx-4bit` | implemented | iPhone | 9 | 20 presets | CC-BY-NC-4.0 (non-commercial) |
-| `mlx-community/VoxCPM2-4bit` | implemented | Mac | 15 listed (30 upstream) | cloning, voice design, 48 kHz | Apache-2.0 |
+| `mlx-community/VoxCPM2-4bit` | implemented | Mac | 30 | voice design (free text or `TTSVoiceDesign`), cloning, controllable cloning, high-fidelity continuation, streaming, seed, 48 kHz ([guide](Docs/voxcpm2.md)) | Apache-2.0 |
 | `mlx-community/VoxCPM1.5-4bit` | implemented | Mac | en, zh | cloning (clip + transcript), 44.1 kHz | Apache-2.0 |
 
 Which models an app may ship commercially: `TTSMLX.models(maximumTier: .attributionRequired)`.
@@ -185,7 +185,7 @@ these — don't pin older versions of them yourself.
 
 | Dependency | Required | Why the fork |
 | --- | --- | --- |
-| `mlx-audio-swift` | `fil-technology/mlx-audio-swift` **0.1.8-tts.5** | Upstream v0.1.8 plus `TTSModelRegistry` (queryable loader table and companion repositories, which TTSMLX calls directly) and MOSS-TTS-Nano bundled voices / codebook dial / per-chunk decoding; since `0.1.8-tts.4` the regular-Chatterbox fixes (multilingual config detection, reference-faithful text pipeline with `[SPACE]` and language tags); since `0.1.8-tts.5` it names `fil-technology/mlx-swift` directly (no consumer mirror) and exposes Chatterbox prepared conditioning. |
+| `mlx-audio-swift` | `fil-technology/mlx-audio-swift` **0.1.8-tts.6** | Upstream v0.1.8 plus `TTSModelRegistry` (queryable loader table and companion repositories, which TTSMLX calls directly) and MOSS-TTS-Nano bundled voices / codebook dial / per-chunk decoding; since `0.1.8-tts.4` the regular-Chatterbox fixes (multilingual config detection, reference-faithful text pipeline with `[SPACE]` and language tags); since `0.1.8-tts.5` it names `fil-technology/mlx-swift` directly (no consumer mirror) and exposes Chatterbox prepared conditioning. 0.1.8-tts.6 adds VoxCPM2 prompt modes (reference / continuation), per-call CFG, steps and seed, and per-patch streaming. |
 | `mlx-swift` | `fil-technology/mlx-swift` **0.33.100** | Upstream 0.33.0 with the MLX C++ submodule repointed at `fil-technology/mlx`, which ignores the iOS background-clamp error on in-flight Metal command buffers (Metal-in-background crash fix). The `.100` patch number is reserved so the tag can never collide with an upstream release. |
 
 Since `0.15.0` no SwiftPM mirror is needed: the `mlx-audio-swift` fork names the background-safe `fil-technology/mlx-swift` itself, so a consumer's graph never mentions `ml-explore/mlx-swift`. CI resolves a mirror-less throwaway consumer (`Tools/verify-consumer-resolution.sh`) to prove it on every push. If you added `.swiftpm/configuration/mirrors.json` for an earlier version you can keep it; `Tools/verify-mlx-fork.sh` still checks a resolved checkout.
@@ -203,7 +203,7 @@ swift package update mlx-audio-swift     # or: rm Package.resolved && swift pack
 
 In Xcode: **File ▸ Packages ▸ Reset Package Caches**, then **Update to Latest
 Package Versions**. Confirm your `Package.resolved` then shows
-`fil-technology/mlx-audio-swift` at `0.1.8-tts.5` and `mlx-swift` at
+`fil-technology/mlx-audio-swift` at `0.1.8-tts.6` and `mlx-swift` at
 `0.33.100` from `fil-technology/mlx-swift`.
 
 ### If resolution fails with "Couldn't check out revision"

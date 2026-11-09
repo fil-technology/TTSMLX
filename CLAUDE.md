@@ -20,7 +20,7 @@ the start of every session, before acting on whatever they asked for.
   disk; if the SSD is not plugged in, say so instead of building internally.
 
 - `swift build` — framework. Needs the Swift 6.3 toolchain or newer (Xcode 26.3+): `mlx-swift` 0.33 requires it. CI runs on `macos-26`.
-- `swift test` — full suite (currently 268 tests across 44 suites; should always be green on `main`).
+- `swift test` — full suite (currently 279 tests across 48 suites; should always be green on `main`).
 - `xcodebuild -project DemoApp/TTSMLXDemo.xcodeproj -scheme TTSMLXDemo-macOS -configuration Debug build` — demo app, macOS target. iOS target also exists.
 - After any change to `mlx-audio-swift` (local path dependency), wipe `~/Library/Developer/Xcode/DerivedData/TTSMLXDemo-*` and reset SwiftPM package caches in Xcode — incremental builds do not pick up local-path package source changes reliably. The same holds for TTSMLX's own `Source/` when building the demo app: wipe `DerivedData/TTSMLXDemo-*/Build` (keep `SourcePackages`) before a device build that must carry fresh framework code; a stale build shipped a harness without its retry logic once.
 - If the demo project fails to resolve with "Couldn't check out revision", delete its ignored `project.xcworkspace/xcshareddata/swiftpm/Package.resolved` and `DerivedData/TTSMLXDemo-*/SourcePackages`; a resolved file from the mirror days pins `ml-explore/mlx-swift` at a fork revision.
@@ -30,6 +30,8 @@ the start of every session, before acting on whatever they asked for.
 - `Tools/bench.sh mac [models…]` runs the shared harness (`Source/TTSBenchmark.swift`) on this Mac through `xcodebuild test` (plain `swift test` has no Metal library); `DEVICE=<udid> Tools/bench.sh device [models…]` runs it on a phone through the demo app's `--benchmark` argument, `Tools/bench.sh pull` copies the reports back. Reports go to `Benchmarks/results/*.json`; `python3 Tools/render-benchmarks.py` rewrites `Docs/benchmarks.md`.
 - Always run with the MLX cache capped (the harness default, 512 MB): uncapped, one long-form run on macOS reached 24 GB resident and filled the disk through swap.
 - Do not run benchmarks while another build or test run is going; the numbers are wall-clock.
+- VoxCPM2 end to end: `TEST_RUNNER_TTS_VOXCPM2=1` with `TEST_RUNNER_TTS_VOXCPM2_OUT`, `TEST_RUNNER_TTS_VOXCPM2_STT` (path to the fork's `mlx-audio-swift-stt`, built with `swift build -c release --product mlx-audio-swift-stt` in the fork's scratch) and `TEST_RUNNER_HF_HOME`, through `xcodebuild test … -only-testing:TTSMLXTests/VoxCPM2ValidationTests` in Release (`Tests/VoxCPM2ValidationTests.swift` has the command). Whisper runs as a subprocess: linking `MLXAudioSTT` into the Release test bundle crashes the linker.
+- If a Release link or a SwiftPM build on the work volume fails with a corrupted object or "malformed precompiled file", wipe that build folder (`DerivedData/TTSMLX/Build`, or the fork's scratch) and rebuild; it happened twice on 2026-11-09 and a clean rebuild fixed it both times. A SwiftPM clone failure with "nonexistent object" means the scratch-local mirror under `<scratch>/repositories/` is stale: `git fetch` the copy in `~/Library/Caches/org.swift.swiftpm/repositories/` and delete the scratch-local one.
 - On a phone the demo app shows `RunStatusView` (stage, log, elapsed) and disables the idle timer for the run; a cancelled trial means the app went inactive (lock, shade, call) and is retried twice. Watch the Mac side through the `devicectl … --console` stream (`[bench]` lines).
 
 ## Versioning and releases
