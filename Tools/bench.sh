@@ -11,6 +11,9 @@
 # Reports land in Benchmarks/results/<model>-<device>-<timestamp>.json plus
 # Benchmarks/results/audio/*.wav for the first trial of each fixture.
 # Tools/render-benchmarks.py turns the JSON into Docs/benchmarks.md.
+# With TTSMLX_WORK set (see Tools/work-volume.sh) DerivedData goes there and
+# the test runner inherits HF_HOME, so weights and builds stay off the
+# internal disk.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -20,6 +23,9 @@ models=${(j:,:)@}
 out=$PWD/Benchmarks/results
 mkdir -p "$out"
 bundle=com.filtechnology.ttsmlx.demo.ios
+# With -derivedDataPath xcodebuild writes Build/ straight into that folder,
+# so each project gets its own.
+work_dd=${TTSMLX_WORK:+$TTSMLX_WORK/DerivedData}
 
 case $command in
   mac)
@@ -30,16 +36,23 @@ case $command in
         ${FIXTURES:+TEST_RUNNER_TTS_BENCH_FIXTURES=$FIXTURES} \
         ${MODES:+TEST_RUNNER_TTS_BENCH_MODES=$MODES} \
         TEST_RUNNER_TTS_BENCH_OUT="$out" \
+        ${HF_HOME:+TEST_RUNNER_HF_HOME=$HF_HOME} \
         xcodebuild test -scheme TTSMLX -destination 'platform=macOS' \
+          ${work_dd:+-derivedDataPath "$work_dd/TTSMLX"} \
           -only-testing:TTSMLXTests/TTSBenchmarkTests 2>&1 | grep -E '^\[bench\]|error:|Test Suite|\*\* TEST'
     ;;
   device)
     device=${DEVICE:?set DEVICE to the devicectl device name or udid}
     xcodebuild -project DemoApp/TTSMLXDemo.xcodeproj -scheme TTSMLXDemo-iOS \
       -configuration Release -destination "generic/platform=iOS" \
+      ${work_dd:+-derivedDataPath "$work_dd/TTSMLXDemo"} \
       -allowProvisioningUpdates ${TEAM:+DEVELOPMENT_TEAM=$TEAM CODE_SIGN_STYLE=Automatic} \
       build 2>&1 | grep -E 'error:|BUILD'
-    app=$(ls -d ~/Library/Developer/Xcode/DerivedData/TTSMLXDemo-*/Build/Products/Release-iphoneos/TTSMLXDemo.app | head -1)
+    if [[ -n $work_dd ]]; then
+      app=$work_dd/TTSMLXDemo/Build/Products/Release-iphoneos/TTSMLXDemo.app
+    else
+      app=$(ls -d ~/Library/Developer/Xcode/DerivedData/TTSMLXDemo-*/Build/Products/Release-iphoneos/TTSMLXDemo.app | head -1)
+    fi
     xcrun devicectl device install app --device "$device" "$app"
     xcrun devicectl device process launch --device "$device" --console --terminate-existing "$bundle" \
       --benchmark ${models:+--models $models} ${TRIALS:+--trials $TRIALS} ${PROFILE:+--profile $PROFILE} \
