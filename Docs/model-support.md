@@ -84,10 +84,12 @@ Legend for the **Status** column:
 Marvis-250M (`Marvis-AI/marvis-tts-250m-v0.2-MLX-8bit`), VyvoTTS-EN-Beta,
 MOSS-TTS-Nano and VoxCPM 1.5 are supported today but are not on the
 leaderboard. VoxCPM 1.5 (`mlx-community/VoxCPM1.5-4bit`, `.implemented`,
-Mac-gated until measured) is the 0.8 B predecessor of VoxCPM2: MiniCPM-4
-0.5B backbone, 44.1 kHz AudioVAE, English and Chinese, cloning from a clip
-with its transcript, no voice design; 620 MB on disk with the LM quantised.
-The fork's `voxcpm` loader covers the VoxCPM 1 / 1.5 architecture.
+Mac) is the 0.8 B predecessor of VoxCPM2: MiniCPM-4 0.5B backbone, 44.1 kHz
+AudioVAE, English and Chinese, cloning from a clip with its transcript, no
+voice design; 620 MB on disk with the LM quantised. The fork's `voxcpm`
+loader covers the VoxCPM 1 / 1.5 architecture. Measured on the M1 Pro in
+Release: 1.2x realtime, 3.2 s to first audio, MLX peak 7.2 GB on long form
+(`Docs/benchmarks.md`), so it stays off the phone.
 
 ## Features to expose per family (on the TTSMLX API)
 

@@ -7,7 +7,10 @@ import TTSMLX
 //   .executableTarget(name: "TTSMLXPreviews", dependencies: ["TTSMLX"], path: "Tools/previews")
 // to Package.swift temporarily, then
 //   swift run TTSMLXPreviews <output-dir> [model-id,...]
-// With PREVIEWS_MANIFEST_ONLY=1 it only records the clips already on disk.
+// With PREVIEWS_MANIFEST_ONLY=1 it only records the clips already on disk
+// (decode Docs/previews/audio/*.mp3 into <output-dir> first to rebuild a
+// lost manifest). Benchmark paragraph clips are always taken from
+// Benchmarks/samples/<device>/<model>.m4a.
 // It writes manifest.json (every catalog entry, with languages, voices and
 // capabilities) and one WAV per clip spec below, skipping clips that already
 // exist so it can be run in several passes on a disk-constrained machine.
@@ -156,6 +159,31 @@ for entry in TTSMLX.modelCatalog {
             }
         }
         await synth.releaseRuntimeBuffers()
+    }
+    // Benchmark clips: the paragraph fixture of every harness run, committed
+    // as AAC under Benchmarks/samples/<device>/<model>.m4a (Tools/bench-samples.sh).
+    // Decoded to WAV here so Tools/render-previews.py treats them like any clip.
+    if entry.descriptor != nil {
+        let samplesRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Benchmarks/samples")
+        let deviceNames = ["MacBookPro18,3": "M1 Pro", "iPhone18,3": "iPhone 17"]
+        let flat = entry.id.replacingOccurrences(of: "/", with: "_")
+        for deviceDir in ((try? FileManager.default.contentsOfDirectory(at: samplesRoot, includingPropertiesForKeys: nil)) ?? []).sorted(by: { $0.path < $1.path }) {
+            let m4a = deviceDir.appendingPathComponent("\(flat).m4a")
+            guard FileManager.default.fileExists(atPath: m4a.path) else { continue }
+            let device = deviceNames[deviceDir.lastPathComponent] ?? deviceDir.lastPathComponent
+            let label = "paragraph · \(device) (benchmark)"
+            let fileLabel = label.unicodeScalars.map { CharacterSet.alphanumerics.contains($0) ? String($0) : "-" }.joined()
+                .replacingOccurrences(of: "-+", with: "-", options: .regularExpression).trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+            let file = outDir.appendingPathComponent("\(slug(entry.id))--\(fileLabel).wav")
+            if !FileManager.default.fileExists(atPath: file.path) {
+                let convert = Process()
+                convert.executableURL = URL(fileURLWithPath: "/usr/bin/afconvert")
+                convert.arguments = ["-f", "WAVE", "-d", "LEI16", m4a.path, file.path]
+                try convert.run(); convert.waitUntilExit()
+                guard convert.terminationStatus == 0 else { print("FAIL decode \(m4a.path)"); continue }
+            }
+            clips.append(["label": label, "file": file.lastPathComponent, "voice": "", "language": "", "text": TTSBenchmarkFixture.paragraph.text, "seconds": duration(file), "benchmark": true, "device": device])
+        }
     }
     record["clips"] = clips
     manifest.append(record)

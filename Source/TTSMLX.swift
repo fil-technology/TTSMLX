@@ -1274,7 +1274,9 @@ public enum TTSMLX {
                 design: pass a reference clip with its exact transcript to clone, or nothing \
                 for a sampled voice. Upstream trains English and Chinese only; other \
                 languages are not guaranteed. Like VoxCPM2, the Swift port generates a take \
-                whole and yields it as one chunk. Benchmark numbers: see Docs/benchmarks.md.
+                whole and yields it as one chunk. Measured on the M1 Pro in Release: 1.2x \
+                realtime, 3.2 s to first audio on a sentence, MLX peak up to 7.2 GB on long \
+                form, so it is gated to the Mac. Numbers: Docs/benchmarks.md.
                 """,
             modelURL: URL(string: "https://huggingface.co/mlx-community/VoxCPM1.5-4bit"),
             projectURL: URL(string: "https://github.com/OpenBMB/VoxCPM"),
@@ -1290,10 +1292,11 @@ public enum TTSMLX {
                     supportedLanguages: [.english, .chinese],
                     defaultGenerationProfile: .balanced,
                     supportsStreaming: false,
-                    // Provisional until measured (see Docs/benchmarks.md): the
-                    // 44.1 kHz AudioVAE decoder is the same kind of transient
-                    // that put VoxCPM2 at a 6.4 GB MLX peak on the M1 Pro.
-                    peakMemoryMB: 4_000,
+                    // Measured on the M1 Pro (Release, 2026-11-09): MLX peak
+                    // 3.6 GB on a sentence, 5.4 GB on a paragraph, 7.2 GB over
+                    // the long-form fixture (the 44.1 kHz AudioVAE decoder);
+                    // resident 2.1 GB with the cache cap. Not a phone model.
+                    peakMemoryMB: 7_500,
                     minimumDeviceClass: .mac,
                     features: [.referenceTranscript],
                     sampleRate: 44_100,

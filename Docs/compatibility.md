@@ -49,7 +49,7 @@ iPhone 17 (8 GB) on iOS 27.2. Numbers: `Docs/benchmarks.md`.
 | `mlx-community/Voxtral-4B-TTS-2603-mlx-4bit` | implemented | iPhone | 4000 | yes (0.13.0 validation) | – | non-commercial |
 | `mlx-community/VibeVoice-Realtime-0.5B-8bit` | implemented | iPhone | 2000 | yes, benchmarks.md | yes, benchmarks.md | commercial |
 | `mlx-community/VoxCPM2-4bit` | implemented | Mac | 6500 | yes, benchmarks.md | – (gated) | commercial |
-| `mlx-community/VoxCPM1.5-4bit` | implemented | Mac | 4000 | pending (added in this release; see benchmarks.md) | – (gated) | commercial |
+| `mlx-community/VoxCPM1.5-4bit` | implemented | Mac | 7500 | yes, benchmarks.md | – (gated) | commercial |
 
 Discovery-only entries (`Kitten TTS`, `Higgs TTS 3`, `LongCat AudioDiT`,
 `Maya1`, `CSM 1B`, `OuteTTS`, `Audio8`, `Dia 1.6B`) have no descriptor and

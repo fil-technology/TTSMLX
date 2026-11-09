@@ -113,7 +113,7 @@ the integration cost for each is at the end of this document.
 - **Capabilities.** English and Chinese; upstream says other languages are not guaranteed. No preset voices, no voice design, no style text: cloning is "continuation only", a reference clip plus its exact transcript. Phoneme input (`{HH AH0 L OW1}`) exists upstream but is not exposed here.
 - **Streaming.** As VoxCPM2: the Swift port generates the take whole and yields one audio event.
 - **Licence.** Apache-2.0 code and weights.
-- **Latency.** [upstream] RTF 0.15–0.17 on an RTX 4090; about 6 GB of VRAM. [TTSMLX] see `Docs/benchmarks.md`; the catalog's 4 000 MB peak and Mac gate are provisional until the harness has run.
+- **Latency.** [upstream] RTF 0.15–0.17 on an RTX 4090; about 6 GB of VRAM. [TTSMLX, M1 Pro, Release, 2026-11-09] 1.2x realtime on every fixture, 3.2 s to first audio on a sentence (narration path; the model does not stream), MLX peak 3.6 GB sentence / 5.4 GB paragraph / 7.2 GB long form, resident 2.1 GB with the cache cap; stalls on long form (8.5 s of pre-roll). Three times smaller on disk than VoxCPM2 and twice as fast, but the AudioVAE transient keeps it a Mac model. `Docs/benchmarks.md`.
 
 ---
 

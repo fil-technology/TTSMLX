@@ -15,10 +15,13 @@ Fixtures: `sentence` (12 words), `paragraph` (51 words), `longForm` (275 words, 
 | Qwen3-TTS-12Hz-0.6B-Base-4bit | `0d6bb6fe` | 1711 MB | 1.42s / 2.77s | 0.39s | 1784 MB | 0.48s | 0.84s | 2.34x | 2.38x | 0 (0 overruns) | 0.0s | 3946 MB | 2853 MB | 0.94 | nominal |
 | Qwen3-TTS-12Hz-0.6B-Base-8bit | `50f45ef0` | 1996 MB | 0.94s / 2.30s | 0.36s | 2041 MB | 0.48s | 1.00s | 2.07x | 2.28x | 0 (0 overruns) | 0.0s | 4213 MB | 3100 MB | 0.82 | fair/nominal |
 | VibeVoice-Realtime-0.5B-8bit | `ae6a233e` | 1220 MB | 1.06s / 3.17s | 0.54s | 1240 MB | 0.62s | 1.33s | 1.49x | 1.63x | 0 (0 overruns) | 0.0s | 1521 MB | 1851 MB | 1.12 | fair |
+| VoxCPM1.5-4bit | `0cada41a` | 627 MB | 0.23s / 4.80s | 0.24s | 737 MB | – | 4.29s | 1.26x | 1.22x | 6 (0 overruns) | 8.5s | 7228 MB | 2104 MB | 0.98 | nominal |
 | VoxCPM2-4bit | `dc9e5c18` | 2302 MB | 1.13s / 7.51s | 0.39s | 2325 MB | – | 8.30s | 0.62x | 0.66x | 19 (0 overruns) | 50.8s | 6408 MB | 3693 MB | 0.51 | fair |
 | chatterbox-turbo-4bit | `c6381772` | 418 MB | 0.74s / 2.56s | 0.40s | 1054 MB | 1.66s | 1.91s | 2.23x | 2.45x | 3 (0 overruns) | 0.6s | 2846 MB | 2354 MB | 0.91 | nominal |
 | pocket-tts | `cbf71d5f` | 240 MB | 0.15s / 0.88s | 0.09s | 562 MB | 0.28s | 0.50s | 4.23x | 6.85x | 0 (0 overruns) | 0.0s | 876 MB | 869 MB | 0.50 | nominal |
 
+- VoxCPM1.5-4bit: sentence/stream skipped: the model does not stream
+- VoxCPM1.5-4bit: paragraph/stream skipped: the model does not stream
 - VoxCPM2-4bit: sentence/stream skipped: the model does not stream
 - VoxCPM2-4bit: paragraph/stream skipped: the model does not stream
 
@@ -138,6 +141,14 @@ debug numbers.
   MLX peak 1.8 GB, resident 1.5 GB, six bounded overruns over the long-form
   fixture (8 s tails), and the run completed; before them the same phone
   killed the app at the long-form fixture with a 3.0 GB peak.
+- **VoxCPM 1.5 is the fast VoxCPM, and still not a phone model.** On the
+  M1 Pro in Release the 4-bit build runs at 1.2x realtime on every fixture
+  with 3.2 s to first audio (narration path; no streaming), against 0.62x
+  for VoxCPM2. Its MLX peak grows with the take: 3.6 GB on a sentence,
+  5.4 GB on a paragraph, 7.2 GB over the long-form fixture, with 2.1 GB
+  resident under the cache cap; the 44.1 kHz AudioVAE decode is the
+  transient, as it is for VoxCPM2. Long form stalled for up to 10 s of
+  pre-roll. English and Chinese only, no voice design.
 - **One unexplained kill remains.** A MOSS rerun on the phone was killed
   by iOS (signal 9) ten seconds after launch, right after a cold load at
   430 MB resident with 2.9 GB available and the scene still active, so

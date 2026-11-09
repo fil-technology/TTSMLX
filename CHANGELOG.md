@@ -10,10 +10,20 @@ The format follows Keep a Changelog and the project uses Semantic Versioning.
 - `mlx-community/VoxCPM1.5-4bit` (VoxCPM 1.5, `.implemented`): the 0.8 B
   predecessor of VoxCPM2 on the fork's `voxcpm` loader. English and Chinese
   at 44.1 kHz, cloning from a reference clip with its transcript, no preset
-  voices or voice design, 620 MB on disk. Gated to the Mac with a provisional
-  4 000 MB peak until the benchmark harness has measured it
-  (`Docs/benchmarks.md`); rows added to `README.md`, `Docs/compatibility.md`,
+  voices or voice design, 620 MB on disk. Measured on the M1 Pro in Release:
+  1.2x realtime, 3.2 s to first audio, MLX peak 7.2 GB on the long-form
+  fixture, so it is gated to the Mac (`Docs/benchmarks.md`, paragraph clip on
+  the previews page); rows added to `README.md`, `Docs/compatibility.md`,
   `Docs/model-support.md` and `Docs/model-research.md`.
+- `Docs/voxcpm2-integration.md`: audit of the VoxCPM2 port against the
+  full-feature spec (runtime choice, feature parity matrix, plan).
+- `Tools/work-volume.sh`: mounts the APFS sparse image on the external SSD
+  and exports `TTSMLX_WORK`, `HF_HOME`, `SWIFTPM_SCRATCH`; `Tools/bench.sh`
+  puts DerivedData there when set and defaults the Mac run to Release.
+- `Tools/previews` records the benchmark paragraph clips from
+  `Benchmarks/samples/<device>/<model>.m4a` by itself, so the previews
+  manifest can be rebuilt from committed data (`PREVIEWS_MANIFEST_ONLY=1`
+  over the decoded published clips).
 
 ## [0.16.1] - 2026-11-05
 

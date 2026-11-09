@@ -8,6 +8,7 @@
 # Models default to the validated defaults. Options via environment:
 #   TRIALS=3  PROFILE=fast|balanced|highQuality  FIXTURES=sentence,paragraph,longForm
 #   MODES=narration,stream  DEVICE=<devicectl name or udid>  TEAM=<DEVELOPMENT_TEAM>
+#   CONFIGURATION=Release|Debug (mac; Release is the default and the headline)
 # Reports land in Benchmarks/results/<model>-<device>-<timestamp>.json plus
 # Benchmarks/results/audio/*.wav for the first trial of each fixture.
 # Tools/render-benchmarks.py turns the JSON into Docs/benchmarks.md.
@@ -26,6 +27,8 @@ bundle=com.filtechnology.ttsmlx.demo.ios
 # With -derivedDataPath xcodebuild writes Build/ straight into that folder,
 # so each project gets its own.
 work_dd=${TTSMLX_WORK:+$TTSMLX_WORK/DerivedData}
+dd_mac=(); dd_ios=()
+if [[ -n $work_dd ]]; then dd_mac=(-derivedDataPath "$work_dd/TTSMLX"); dd_ios=(-derivedDataPath "$work_dd/TTSMLXDemo"); fi
 
 case $command in
   mac)
@@ -38,14 +41,15 @@ case $command in
         TEST_RUNNER_TTS_BENCH_OUT="$out" \
         ${HF_HOME:+TEST_RUNNER_HF_HOME=$HF_HOME} \
         xcodebuild test -scheme TTSMLX -destination 'platform=macOS' \
-          ${work_dd:+-derivedDataPath "$work_dd/TTSMLX"} \
+          -configuration "${CONFIGURATION:-Release}" ENABLE_TESTABILITY=YES \
+          "${dd_mac[@]}" \
           -only-testing:TTSMLXTests/TTSBenchmarkTests 2>&1 | grep -E '^\[bench\]|error:|Test Suite|\*\* TEST'
     ;;
   device)
     device=${DEVICE:?set DEVICE to the devicectl device name or udid}
     xcodebuild -project DemoApp/TTSMLXDemo.xcodeproj -scheme TTSMLXDemo-iOS \
       -configuration Release -destination "generic/platform=iOS" \
-      ${work_dd:+-derivedDataPath "$work_dd/TTSMLXDemo"} \
+      "${dd_ios[@]}" \
       -allowProvisioningUpdates ${TEAM:+DEVELOPMENT_TEAM=$TEAM CODE_SIGN_STYLE=Automatic} \
       build 2>&1 | grep -E 'error:|BUILD'
     if [[ -n $work_dd ]]; then
