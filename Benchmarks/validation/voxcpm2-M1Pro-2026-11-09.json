@@ -1,0 +1,202 @@
+[
+  {
+    "code" : "en",
+    "language" : "English",
+    "name" : "seed42-a",
+    "peakDBFS" : -7.355833248482809,
+    "seconds" : 4.309333333333333,
+    "text" : "The lighthouse keeper climbed the spiral stairs every evening, counting each step out of habit.",
+    "transcript" : "The lighthouse keeper climbed the spiral stairs every evening counting each step out of habit.",
+    "wallSeconds" : 14.051505088806152,
+    "wer" : 0
+  },
+  {
+    "code" : "en",
+    "language" : "English",
+    "name" : "seed42-b",
+    "peakDBFS" : -7.355833248482809,
+    "seconds" : 4.309333333333333,
+    "text" : "The lighthouse keeper climbed the spiral stairs every evening, counting each step out of habit.",
+    "transcript" : "The lighthouse keeper climbed the spiral stairs every evening counting each step out of habit.",
+    "wallSeconds" : 7.564016938209534,
+    "wer" : 0
+  },
+  {
+    "code" : "en",
+    "language" : "English",
+    "name" : "seed43",
+    "peakDBFS" : -10.3820382331773,
+    "seconds" : 5.269333333333333,
+    "text" : "The lighthouse keeper climbed the spiral stairs every evening, counting each step out of habit.",
+    "transcript" : "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",
+    "wallSeconds" : 9.292227983474731,
+    "wer" : 1
+  },
+  {
+    "code" : "en",
+    "language" : "English",
+    "name" : "design-narrator",
+    "note" : "voice design",
+    "peakDBFS" : -2.7409959618707127,
+    "seconds" : 6.08,
+    "text" : "The lighthouse keeper climbed the spiral stairs every evening, counting each step out of habit.",
+    "transcript" : "The lighthouse keeper climbed the spiral stairs every evening, counting each step out of habit.",
+    "wallSeconds" : 10.816740036010742,
+    "wer" : 0
+  },
+  {
+    "code" : "en",
+    "language" : "English",
+    "name" : "design-anchor",
+    "note" : "structured voice design",
+    "peakDBFS" : -5.863824840633378,
+    "seconds" : 5.269333333333333,
+    "text" : "The lighthouse keeper climbed the spiral stairs every evening, counting each step out of habit.",
+    "transcript" : "The lighthouse keeper climbed the spiral stairs every evening, counting each step out of habit.",
+    "wallSeconds" : 9.352645993232727,
+    "wer" : 0
+  },
+  {
+    "code" : "en",
+    "language" : "English",
+    "name" : "clone-reference",
+    "note" : "reference cloning (clip only)",
+    "peakDBFS" : -8.689623810459995,
+    "seconds" : 3.989333333333333,
+    "text" : "Later that night the wind changed, and the sea grew restless under a thin moon.",
+    "transcript" : "Later that night the wind changed, and the sea grew restless under a thin moon.",
+    "wallSeconds" : 7.32781708240509,
+    "wer" : 0
+  },
+  {
+    "code" : "en",
+    "language" : "English",
+    "name" : "clone-controllable",
+    "note" : "controllable cloning (clip + style)",
+    "peakDBFS" : -8.438539053661032,
+    "seconds" : 4.309333333333333,
+    "text" : "Later that night the wind changed, and the sea grew restless under a thin moon.",
+    "transcript" : "Later that night the wind changed and the sea grew restless under a thin moon.",
+    "wallSeconds" : 8.226552963256836,
+    "wer" : 0
+  },
+  {
+    "code" : "en",
+    "language" : "English",
+    "name" : "clone-hifi",
+    "note" : "high-fidelity continuation (clip + transcript)",
+    "peakDBFS" : -7.761951484733918,
+    "seconds" : 3.6693333333333333,
+    "text" : "Later that night the wind changed, and the sea grew restless under a thin moon.",
+    "transcript" : "Later that night the wind changed, and the sea grew restless under a thin moon,",
+    "wallSeconds" : 6.871197938919067,
+    "wer" : 0
+  },
+  {
+    "code" : "en",
+    "firstAudioSeconds" : 0.3692910671234131,
+    "language" : "English",
+    "name" : "stream",
+    "note" : "stream path",
+    "peakDBFS" : 0,
+    "seconds" : 8,
+    "text" : "The lighthouse keeper climbed the spiral stairs every evening, counting each step out of habit.",
+    "wallSeconds" : 17.314934968948364
+  },
+  {
+    "code" : "ru",
+    "language" : "Russian",
+    "name" : "lang-ru",
+    "peakDBFS" : -0.4908527654400401,
+    "seconds" : 3.52,
+    "text" : "Маяк стоял на скале, и его свет был виден далеко в море.",
+    "transcript" : "Маяк стоял на скале, и его свет был виден далеко в море.",
+    "wallSeconds" : 6.24471390247345,
+    "wer" : 0
+  },
+  {
+    "code" : "he",
+    "language" : "Hebrew",
+    "name" : "lang-he",
+    "peakDBFS" : -1.7847544501643853,
+    "seconds" : 3.6693333333333333,
+    "text" : "שומר המגדלור עלה במדרגות בכל ערב וספר את הצעדים.",
+    "transcript" : "שומר המגדלור עלה במדרגות בכל ערב וספר את הצעדים.",
+    "wallSeconds" : 6.562322020530701,
+    "wer" : 0
+  },
+  {
+    "code" : "uk",
+    "language" : "Ukrainian",
+    "name" : "lang-uk",
+    "note" : "unsupported-language experiment (not one of the 30)",
+    "peakDBFS" : -5.1782920347067005,
+    "seconds" : 3.6693333333333333,
+    "text" : "Доглядач маяка щовечора піднімався сходами і рахував кроки.",
+    "transcript" : "Доглядач маєка ще вечора піднімався з ходами і рахував кроки.",
+    "wallSeconds" : 6.542297959327698,
+    "wer" : 0.625
+  },
+  {
+    "code" : "de",
+    "language" : "German",
+    "name" : "lang-de",
+    "peakDBFS" : -0.25749013000686,
+    "seconds" : 2.7093333333333334,
+    "text" : "Der Leuchtturmwärter stieg jeden Abend die Wendeltreppe hinauf.",
+    "transcript" : "Der Leuchtturmwärter stieg jeden Abend die Wendeltreppe hinauf.",
+    "wallSeconds" : 4.812391996383667,
+    "wer" : 0
+  },
+  {
+    "code" : "fr",
+    "language" : "French",
+    "name" : "lang-fr",
+    "peakDBFS" : -0.051137312023628104,
+    "seconds" : 2.88,
+    "text" : "Le gardien du phare montait l'escalier en colimaçon chaque soir.",
+    "transcript" : "Le gardien du phare montait l'escalier en colimaçon chaque soir.",
+    "wallSeconds" : 5.093719005584717,
+    "wer" : 0
+  },
+  {
+    "code" : "es",
+    "language" : "Spanish",
+    "name" : "lang-es",
+    "peakDBFS" : -4.033219955154138,
+    "seconds" : 4.48,
+    "text" : "El farero subía la escalera de caracol cada tarde, contando los peldaños.",
+    "transcript" : "El farero subía la escalera de caracol cada tarde, contando los peldaños.",
+    "wallSeconds" : 7.896936058998108,
+    "wer" : 0
+  },
+  {
+    "code" : "it",
+    "language" : "Italian",
+    "name" : "lang-it",
+    "peakDBFS" : -6.823165496525135,
+    "seconds" : 4.16,
+    "text" : "Il guardiano del faro saliva la scala a chiocciola ogni sera.",
+    "transcript" : "Il guardiano del faro saliva la scala a chiocciola ogni sera",
+    "wallSeconds" : 7.313125967979431,
+    "wer" : 0
+  },
+  {
+    "code" : "ja",
+    "language" : "Japanese",
+    "name" : "lang-ja",
+    "peakDBFS" : -6.656803102372936,
+    "seconds" : 4.309333333333333,
+    "text" : "灯台守は毎晩、螺旋階段を登りながら段を数えていた。",
+    "wallSeconds" : 7.611420035362244
+  },
+  {
+    "code" : "zh",
+    "language" : "Chinese",
+    "name" : "lang-zh",
+    "peakDBFS" : -1.6890973620030503,
+    "seconds" : 6.8693333333333335,
+    "text" : "灯塔看守人每天傍晚都会爬上螺旋楼梯，习惯性地数着台阶。",
+    "wallSeconds" : 12.087350010871887
+  }
+]

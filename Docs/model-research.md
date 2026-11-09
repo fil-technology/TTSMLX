@@ -10,7 +10,7 @@ source linked.
 
 Legend for the status column of the summary table: *loadable* means a
 TTSMLX descriptor exists and the runtime (our `mlx-audio-swift` fork,
-0.1.8-tts.5) has a loader; *no port* means nothing in the fork, in upstream
+0.1.8-tts.6) has a loader; *no port* means nothing in the fork, in upstream
 `mlx-audio-swift`, or in Python `mlx-audio` runs it.
 
 | Model | Params / disk (MLX) | Languages | Cloning | Audio streaming (reference impl.) | Progressive text input | Weights licence | Commercial | TTSMLX status |

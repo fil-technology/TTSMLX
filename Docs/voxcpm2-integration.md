@@ -1,8 +1,9 @@
-# VoxCPM2 in TTSMLX: audit, runtime choice and work plan
+# VoxCPM2 in TTSMLX: audit, runtime choice, work plan and results
 
-Phase 0 of the "Integrate VoxCPM2 with full feature support" task
-(2026-11-09). Everything below was read from the code and the upstream
-sources on that date; nothing here has been measured yet on this round.
+The "Integrate VoxCPM2 with full feature support" task (2026-11-09). The
+audit and plan below were written first; the **Status** section at the end
+records what shipped the same day and what it measured. Usage examples:
+`Docs/voxcpm2.md`.
 
 ## What exists today
 
@@ -15,7 +16,7 @@ sources on that date; nothing here has been measured yet on this round.
   classes (`VoxCPMModel`, `VoxCPM2Model`) for that reason. 1.5 has no
   voice design, no style text and two languages; nothing in the 1.x code
   path carries over to the VoxCPM2 feature list.
-- **Runtime.** The fork `fil-technology/mlx-audio-swift` 0.1.8-tts.5 holds a
+- **Runtime.** The fork `fil-technology/mlx-audio-swift` 0.1.8-tts.5 held a
   native Swift/MLX VoxCPM2 port (`Sources/MLXAudioTTS/Models/VoxCPM2`,
   2 600 lines): MiniCPM-4 LM, residual LM, encoder, DiT, AudioVAE v2 with
   the 16 kHz encoder and 48 kHz decoder. It loads, generates and clones from
@@ -40,8 +41,8 @@ sources on that date; nothing here has been measured yet on this round.
 ## Feature parity matrix
 
 "Upstream" is the PyTorch `voxcpm` package at OpenBMB/VoxCPM; "Swift port"
-is the fork at 0.1.8-tts.5; "TTSMLX" is what a caller of
-`TTSSpeechSynthesizer` gets today.
+is the fork at 0.1.8-tts.5 (before this work); "TTSMLX" is what a caller of
+`TTSSpeechSynthesizer` got then. The Status section says what changed.
 
 | Feature | Upstream | Swift port | TTSMLX today | Work |
 |---|---|---|---|---|
@@ -96,3 +97,58 @@ is the fork at 0.1.8-tts.5; "TTSMLX" is what a caller of
   left to delete.
 - Everything in the plan touches the runtime fork first; a new fork tag
   (0.1.8-tts.6) and a pin bump in `Package.swift` follow.
+
+## Status (2026-11-09, runtime 0.1.8-tts.6)
+
+Steps 1 to 5 and 7 of the plan shipped the same day; the fork gained
+`VoxCPM2Prompt`, `VoxCPM2GenerationParameters` and a real `generateStream`,
+TTSMLX gained the controls case, the two options, all 30 languages,
+`TTSVoiceProfile` / `TTSVoiceDesign` / `TTSVoiceProfileStore`, the demo app
+its delivery controls, and the validation test
+`Tests/VoxCPM2ValidationTests.swift` (`TTS_VOXCPM2=1`) records the evidence
+below in `Benchmarks/validation/voxcpm2-M1Pro-2026-11-09.json`.
+
+| Acceptance item | Evidence (M1 Pro, Release) |
+|---|---|
+| Loads on Apple silicon, no Python | catalog entry, benchmark harness, demo app; weights verified against the Hub's sha256 |
+| Ordinary synthesis, native 48 kHz audio | every validation take; Whisper large-v3-turbo transcribes the English takes with WER 0.00 |
+| Voice design (free text and `TTSVoiceDesign` controls) | `design-narrator`, `design-anchor`: 6.1 s and 5.3 s of speech, WER 0.00; the compiled description is `(…)` at the front of the text |
+| Reference cloning (clip only) | `clone-reference`: WER 0.00 on new text |
+| Controllable cloning (clip + style text) | `clone-controllable` ("whispering, urgent", fast): WER 0.00 |
+| High-fidelity continuation (clip + exact transcript) | `clone-hifi`: WER 0.00; the transcript now enters the prompt (it was dropped before 0.1.8-tts.6) |
+| Streaming audio | first buffer after 0.32–0.40 s on both the stream and narration paths, one 160 ms patch per event (51 buffers for an 8 s take); before: the whole take, 8 s |
+| Russian and Hebrew | `lang-ru`, `lang-he`: WER 0.00 with Whisper large-v3-turbo; Ukrainian (unsupported) WER 0.62 with mispronounced words |
+| Structured controls translated | `VoxCPM2ControlsTests`, `TTSVoiceProfileTests` (unit) |
+| Advanced settings have observable effects | `diffusionSteps` and `guidanceScale` reach the DiT per call (`callParameters`); seed 42 reproduces a take with a maximum sample difference of 0.0, seed 43 gives a different take |
+| Voice profiles reusable | `TTSVoiceProfile.apply(to:)`, `TTSVoiceProfileStore` round trip, consent required for cloned kinds |
+| Existing engines unchanged | 279 unit tests green; VoxCPM 1.5, Kokoro, Pocket TTS and the rest untouched |
+| Tests and benchmarks | `Docs/benchmarks.md` VoxCPM2 rows re-measured on 0.1.8-tts.6 |
+
+**Memory and speed after streaming.** The decoder no longer renders a
+whole take at once, so the MLX peak fell from 6.4 GB to 3.1–3.4 GB on the
+M1 Pro (resident 2.9 GB with the cache cap). The per-step windowed decode
+costs about a quarter of the throughput: 0.50–0.55x realtime against 0.62x
+for the old whole-take path. The gate stays `.mac`: 2.3 GB of weights plus
+a 2.9 GB resident footprint do not fit the iPhone 17's budget (about 3 GB).
+
+**Limitations, kept explicit.**
+- Text is fixed per take; there is no incremental text input. Sentence
+  orchestration above the engine (`synthesizeLong`, `TTSRealtimeSession`)
+  is the supported way to speak live text.
+- `temperature`, `topP`, `voiceGuidance` and `expressiveness` do nothing on
+  VoxCPM2 and are reported through `controlsIgnored`.
+- Speaker similarity and style preservation are not scored (no speaker
+  embedding model in the runtime); the validation WAVs are kept for
+  listening. Intelligibility is scored with Whisper large-v3-turbo through
+  the fork's `mlx-audio-swift-stt` tool, run as a subprocess because linking
+  the STT library into the Release test bundle crashes the linker.
+- The fast / high-quality profiles (6 / 16 diffusion steps) are TTSMLX's
+  choices; only balanced (10) is upstream's default. They are not yet
+  measured for quality.
+- Still a Mac model; a stateful causal-conv streaming decoder (upstream's
+  `StreamingVAEDecoder`) would remove the windowed re-decode and is the
+  next optimisation, together with an iPhone measurement on a 12 GB device.
+- A streamed chunk was briefly a view into a recycled buffer (non-finite
+  samples from the fifth patch on, seen once with seed 43); 0.1.8-tts.6
+  copies each chunk out. The validation test checks every take for
+  non-finite samples.

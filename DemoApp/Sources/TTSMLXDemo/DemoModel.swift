@@ -42,6 +42,12 @@ final class DemoModel {
         var topP: String
         var referenceAudioPath: String?
         var referenceText: String?
+        var instruction: String?
+        var emotion: String?
+        var speed: String?
+        var seed: String?
+        var diffusionSteps: String?
+        var guidanceScale: String?
     }
 
     struct GeneratedAudioRecord: Identifiable, Hashable {
@@ -83,6 +89,27 @@ final class DemoModel {
         didSet { persistSettings() }
     }
     var customReferenceText = "" {
+        didSet { persistSettings() }
+    }
+    /// Delivery controls (`TTSSynthesisOptions.instruction` / `emotion` /
+    /// `speed`): on VoxCPM2 they compile into the voice description, on Ming,
+    /// Qwen3 CustomVoice and OmniVoice into their own prompts.
+    var customInstruction = "" {
+        didSet { persistSettings() }
+    }
+    var selectedEmotion: TTSEmotion? {
+        didSet { persistSettings() }
+    }
+    var selectedSpeed: TTSSpeed? {
+        didSet { persistSettings() }
+    }
+    var customSeed = "" {
+        didSet { persistSettings() }
+    }
+    var customDiffusionSteps = "" {
+        didSet { persistSettings() }
+    }
+    var customGuidanceScale = "" {
         didSet { persistSettings() }
     }
 
@@ -644,7 +671,7 @@ final class DemoModel {
     }
 
     private func synthesisOptions() -> TTSSynthesisOptions {
-        .init(
+        var options = TTSSynthesisOptions(
             language: resolvedLanguage(),
             voice: resolvedVoice(),
             referenceAudio: resolvedReferenceAudio(),
@@ -654,7 +681,18 @@ final class DemoModel {
             temperature: parsed(customTemperature),
             topP: parsed(customTopP)
         )
+        let instruction = customInstruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        options.instruction = instruction.isEmpty ? nil : instruction
+        options.emotion = selectedEmotion
+        options.speed = selectedSpeed
+        options.seed = UInt64(customSeed.trimmingCharacters(in: .whitespacesAndNewlines))
+        options.diffusionSteps = parsed(customDiffusionSteps)
+        options.guidanceScale = parsed(customGuidanceScale)
+        return options
     }
+
+    /// Features the selected model declares, for showing only the controls it honours.
+    var selectedModelFeatures: Set<TTSModelFeature> { selectedModel.features }
 
     private func resolvedReferenceAudio() -> URL? {
         guard supportsReferenceAudioForSelectedModel else { return nil }
@@ -866,7 +904,13 @@ final class DemoModel {
             temperature: customTemperature,
             topP: customTopP,
             referenceAudioPath: customReferenceAudioPath,
-            referenceText: customReferenceText
+            referenceText: customReferenceText,
+            instruction: customInstruction,
+            emotion: selectedEmotion?.rawValue,
+            speed: selectedSpeed?.rawValue,
+            seed: customSeed,
+            diffusionSteps: customDiffusionSteps,
+            guidanceScale: customGuidanceScale
         )
 
         guard let data = try? JSONEncoder().encode(settings) else { return }
@@ -893,6 +937,12 @@ final class DemoModel {
         customTopP = settings.topP
         customReferenceAudioPath = settings.referenceAudioPath ?? ""
         customReferenceText = settings.referenceText ?? ""
+        customInstruction = settings.instruction ?? ""
+        selectedEmotion = settings.emotion.flatMap(TTSEmotion.init(rawValue:))
+        selectedSpeed = settings.speed.flatMap(TTSSpeed.init(rawValue:))
+        customSeed = settings.seed ?? ""
+        customDiffusionSteps = settings.diffusionSteps ?? ""
+        customGuidanceScale = settings.guidanceScale ?? ""
     }
 
     private func coerceSelectedLanguageMode() {

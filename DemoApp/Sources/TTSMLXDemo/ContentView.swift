@@ -490,6 +490,10 @@ struct ContentView: View {
                 }
             }
 
+                Section("Delivery") {
+                    deliveryFields
+                }
+
                 Section("Advanced Parameters") {
                     TextField("maxTokens", text: $model.customMaxTokens)
                         .keyboardType(.numberPad)
@@ -503,6 +507,16 @@ struct ContentView: View {
                         .keyboardType(.decimalPad)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                    TextField("seed (reproducible take)", text: $model.customSeed)
+                        .keyboardType(.numberPad)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    if model.selectedModelFeatures.contains(.voiceDesign) {
+                        TextField("diffusion steps (VoxCPM2: 10)", text: $model.customDiffusionSteps)
+                            .keyboardType(.numberPad)
+                        TextField("guidance scale (VoxCPM2: 2.0)", text: $model.customGuidanceScale)
+                            .keyboardType(.decimalPad)
+                    }
                 }
 
                 Section("Discover Models") {
@@ -1097,6 +1111,9 @@ private struct ActivityOrbView: View {
                                 .textFieldStyle(.roundedBorder)
                         }
                     }
+                    settingsGroup(title: "Delivery") {
+                        deliveryFields
+                    }
                     settingsGroup(title: "Advanced Parameters") {
                         TextField("maxTokens", text: $model.customMaxTokens)
                             .textFieldStyle(.roundedBorder)
@@ -1104,6 +1121,14 @@ private struct ActivityOrbView: View {
                             .textFieldStyle(.roundedBorder)
                         TextField("topP", text: $model.customTopP)
                             .textFieldStyle(.roundedBorder)
+                        TextField("seed (reproducible take)", text: $model.customSeed)
+                            .textFieldStyle(.roundedBorder)
+                        if model.selectedModelFeatures.contains(.voiceDesign) {
+                            TextField("diffusion steps (VoxCPM2: 10)", text: $model.customDiffusionSteps)
+                                .textFieldStyle(.roundedBorder)
+                            TextField("guidance scale (VoxCPM2: 2.0)", text: $model.customGuidanceScale)
+                                .textFieldStyle(.roundedBorder)
+                        }
                     }
                 }
             } else {
@@ -1132,6 +1157,9 @@ private struct ActivityOrbView: View {
                     }
                 }
                 HStack(alignment: .top, spacing: 16) {
+                    settingsGroup(title: "Delivery") {
+                        deliveryFields
+                    }
                     settingsGroup(title: "Advanced Parameters") {
                         TextField("maxTokens", text: $model.customMaxTokens)
                             .textFieldStyle(.roundedBorder)
@@ -1139,6 +1167,14 @@ private struct ActivityOrbView: View {
                             .textFieldStyle(.roundedBorder)
                         TextField("topP", text: $model.customTopP)
                             .textFieldStyle(.roundedBorder)
+                        TextField("seed (reproducible take)", text: $model.customSeed)
+                            .textFieldStyle(.roundedBorder)
+                        if model.selectedModelFeatures.contains(.voiceDesign) {
+                            TextField("diffusion steps (VoxCPM2: 10)", text: $model.customDiffusionSteps)
+                                .textFieldStyle(.roundedBorder)
+                            TextField("guidance scale (VoxCPM2: 2.0)", text: $model.customGuidanceScale)
+                                .textFieldStyle(.roundedBorder)
+                        }
                     }
                 }
             }
@@ -1177,6 +1213,41 @@ private struct ActivityOrbView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Delivery controls. Each is shown only when the selected model declares the
+    /// feature; VoxCPM2 compiles them into its voice description, Ming, Qwen3
+    /// CustomVoice and OmniVoice into their own prompts.
+    @ViewBuilder
+    private var deliveryFields: some View {
+        let features = model.selectedModelFeatures
+        if features.contains(.instruction) || features.contains(.voiceDesign) {
+            TextField(features.contains(.voiceDesign) ? "Voice / delivery description" : "Delivery instruction", text: $model.customInstruction)
+                #if os(macOS)
+                .textFieldStyle(.roundedBorder)
+                #endif
+        }
+        if features.contains(.emotion) {
+            Picker("Emotion", selection: $model.selectedEmotion) {
+                Text("Default").tag(TTSEmotion?.none)
+                ForEach(TTSEmotion.allCases, id: \.self) { emotion in
+                    Text(emotion.rawValue.capitalized).tag(TTSEmotion?.some(emotion))
+                }
+            }
+        }
+        if features.contains(.speed) {
+            Picker("Speed", selection: $model.selectedSpeed) {
+                Text("Default").tag(TTSSpeed?.none)
+                ForEach(TTSSpeed.allCases, id: \.self) { speed in
+                    Text(speed.rawValue.capitalized).tag(TTSSpeed?.some(speed))
+                }
+            }
+        }
+        if !(features.contains(.instruction) || features.contains(.voiceDesign) || features.contains(.emotion) || features.contains(.speed)) {
+            Text("This model has no delivery controls")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 
     @ViewBuilder
