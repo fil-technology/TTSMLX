@@ -18,6 +18,13 @@ the start of every session, before acting on whatever they asked for.
   picks up the variables (DerivedData and model weights land there). Check
   `df -h /System/Volumes/Data` before anything that writes to the internal
   disk; if the SSD is not plugged in, say so instead of building internally.
+  Caveat (2026-11-09): the sparse image sits on macOS 26's exFAT driver and
+  three heavy parallel builds on it ended in corrupted memory-mapped files
+  (a linker crash on an object file, a "malformed precompiled file", a
+  compiler bus error). Model weights there verified against the Hub's
+  sha256 and are fine (sequential writes). Prefer the SSD for weights,
+  reports and DerivedData of long benchmark runs, and the internal disk for
+  compiles when it has the room; on a corruption, wipe that build folder.
 
 - `swift build` — framework. Needs the Swift 6.3 toolchain or newer (Xcode 26.3+): `mlx-swift` 0.33 requires it. CI runs on `macos-26`.
 - `swift test` — full suite (currently 279 tests across 48 suites; should always be green on `main`).
