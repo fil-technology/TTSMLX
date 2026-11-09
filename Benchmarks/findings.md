@@ -84,6 +84,14 @@ debug numbers.
   MLX peak 1.8 GB, resident 1.5 GB, six bounded overruns over the long-form
   fixture (8 s tails), and the run completed; before them the same phone
   killed the app at the long-form fixture with a 3.0 GB peak.
+- **VoxCPM 1.5 is the fast VoxCPM, and still not a phone model.** On the
+  M1 Pro in Release the 4-bit build runs at 1.2x realtime on every fixture
+  with 3.2 s to first audio (narration path; no streaming), against 0.62x
+  for VoxCPM2. Its MLX peak grows with the take: 3.6 GB on a sentence,
+  5.4 GB on a paragraph, 7.2 GB over the long-form fixture, with 2.1 GB
+  resident under the cache cap; the 44.1 kHz AudioVAE decode is the
+  transient, as it is for VoxCPM2. Long form stalled for up to 10 s of
+  pre-roll. English and Chinese only, no voice design.
 - **One unexplained kill remains.** A MOSS rerun on the phone was killed
   by iOS (signal 9) ten seconds after launch, right after a cold load at
   430 MB resident with 2.9 GB available and the scene still active, so

@@ -10,6 +10,15 @@ the start of every session, before acting on whatever they asked for.
 
 ## Build and test
 
+- **Disk.** The internal volume is usually near full. Heavy, regenerable data
+  goes on the external SSD through an APFS sparse image: run
+  `eval "$(Tools/work-volume.sh)"` first (mounts `/Volumes/TTSMLX-work`,
+  exports `TTSMLX_WORK`, `HF_HOME`, `SWIFTPM_SCRATCH`), then
+  `swift build --scratch-path "$SWIFTPM_SCRATCH"`, and `Tools/bench.sh`
+  picks up the variables (DerivedData and model weights land there). Check
+  `df -h /System/Volumes/Data` before anything that writes to the internal
+  disk; if the SSD is not plugged in, say so instead of building internally.
+
 - `swift build` — framework. Needs the Swift 6.3 toolchain or newer (Xcode 26.3+): `mlx-swift` 0.33 requires it. CI runs on `macos-26`.
 - `swift test` — full suite (currently 268 tests across 44 suites; should always be green on `main`).
 - `xcodebuild -project DemoApp/TTSMLXDemo.xcodeproj -scheme TTSMLXDemo-macOS -configuration Debug build` — demo app, macOS target. iOS target also exists.
