@@ -64,6 +64,7 @@ in the catalog (`TTSModelDescriptor.license`).
 | `mlx-community/OmniVoice` | implemented | Mac | 6 | voice design, instruction, cloning | CC-BY-NC (non-commercial) |
 | `mlx-community/Voxtral-4B-TTS-2603-mlx-4bit` | implemented | iPhone | 9 | 20 presets | CC-BY-NC-4.0 (non-commercial) |
 | `mlx-community/VoxCPM2-4bit` | implemented | Mac | 15 listed (30 upstream) | cloning, voice design, 48 kHz | Apache-2.0 |
+| `mlx-community/VoxCPM1.5-4bit` | implemented | Mac (until measured) | en, zh | cloning (clip + transcript), 44.1 kHz | Apache-2.0 |
 
 Which models an app may ship commercially: `TTSMLX.models(maximumTier: .attributionRequired)`.
 The leaderboard-wide view, including models the runtime routes to but

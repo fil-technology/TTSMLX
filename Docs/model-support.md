@@ -81,8 +81,13 @@ Legend for the **Status** column:
 | 47 | SupraTTS 0.1 Beta | 739 | ⛔ | MIT | Glow-TTS + HiFi-GAN · 43.5M | One voice | No port; beta quality. |
 | 48 | sanoTTS | 729 / 701 | ⛔ | GPL-3.0 | Tiny numpy duration + acoustic + iSTFT · ≤ 1.5M | One voice | GPL plus no port. |
 
-Marvis-250M (`Marvis-AI/marvis-tts-250m-v0.2-MLX-8bit`), VyvoTTS-EN-Beta and
-MOSS-TTS-Nano are supported today but are not on the leaderboard.
+Marvis-250M (`Marvis-AI/marvis-tts-250m-v0.2-MLX-8bit`), VyvoTTS-EN-Beta,
+MOSS-TTS-Nano and VoxCPM 1.5 are supported today but are not on the
+leaderboard. VoxCPM 1.5 (`mlx-community/VoxCPM1.5-4bit`, `.implemented`,
+Mac-gated until measured) is the 0.8 B predecessor of VoxCPM2: MiniCPM-4
+0.5B backbone, 44.1 kHz AudioVAE, English and Chinese, cloning from a clip
+with its transcript, no voice design; 620 MB on disk with the LM quantised.
+The fork's `voxcpm` loader covers the VoxCPM 1 / 1.5 architecture.
 
 ## Features to expose per family (on the TTSMLX API)
 

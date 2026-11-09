@@ -1262,6 +1262,49 @@ public enum TTSMLX {
             license: .apache2
         ),
         .init(
+            id: "mlx-community/VoxCPM1.5-4bit",
+            displayName: "VoxCPM 1.5",
+            summary: "OpenBMB VoxCPM 1.5 (MiniCPM-4 0.5B + local diffusion, 44.1 kHz, 4-bit): the small VoxCPM. English and Chinese, cloning from a clip with its transcript. Apache-2.0.",
+            supportStage: .implemented,
+            supportedLanguages: [.english, .chinese],
+            runtimeNotes: """
+                Routes to the voxcpm loader (runtime 0.1.8-tts.5), the VoxCPM 1 / 1.5 \
+                architecture; VoxCPM2 is a separate entry. 0.8 B parameters with the \
+                language model quantised (620 MB on disk). No preset voices and no voice \
+                design: pass a reference clip with its exact transcript to clone, or nothing \
+                for a sampled voice. Upstream trains English and Chinese only; other \
+                languages are not guaranteed. Like VoxCPM2, the Swift port generates a take \
+                whole and yields it as one chunk. Benchmark numbers: see Docs/benchmarks.md.
+                """,
+            modelURL: URL(string: "https://huggingface.co/mlx-community/VoxCPM1.5-4bit"),
+            projectURL: URL(string: "https://github.com/OpenBMB/VoxCPM"),
+            descriptor: .init(
+                id: "mlx-community/VoxCPM1.5-4bit",
+                displayName: "VoxCPM 1.5",
+                summary: "English and Chinese at 44.1 kHz with cloning from a clip and its transcript; no preset voices.",
+                supportedLanguages: [.english, .chinese],
+                capabilities: .init(
+                    isRuntimeSupported: true,
+                    supportsReferenceAudio: true,
+                    supportsLanguageList: true,
+                    supportedLanguages: [.english, .chinese],
+                    defaultGenerationProfile: .balanced,
+                    supportsStreaming: false,
+                    // Provisional until measured (see Docs/benchmarks.md): the
+                    // 44.1 kHz AudioVAE decoder is the same kind of transient
+                    // that put VoxCPM2 at a 6.4 GB MLX peak on the M1 Pro.
+                    peakMemoryMB: 4_000,
+                    minimumDeviceClass: .mac,
+                    features: [.referenceTranscript],
+                    sampleRate: 44_100,
+                    maxCharactersPerTake: 300
+                ),
+                modelURL: URL(string: "https://huggingface.co/mlx-community/VoxCPM1.5-4bit"),
+                files: ["config.json", "model.safetensors", "model.safetensors.index.json", "special_tokens_map.json", "tokenizer.json", "tokenizer_config.json"]
+            ),
+            license: .apache2
+        ),
+        .init(
             id: "mlx-community/Dia-1.6B",
             displayName: "Dia 1.6B",
             summary: "Nari Labs Dia (encoder-decoder over DAC with CFG, 44.1 kHz): #40 on the board. `[S1]`/`[S2]` dialogue, nonverbal tags, cloning. Apache-2.0.",

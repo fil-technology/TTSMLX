@@ -106,6 +106,15 @@ the integration cost for each is at the end of this document.
 - **Licence.** Apache-2.0 code and weights, "free for commercial use"; a non-binding usage policy forbids impersonation and asks for AI labelling.
 - **Latency.** [upstream] RTF 0.30 (wall/audio) on an RTX 4090; llama.cpp-omni Q8_0 on an M4 Pro RTF 1.76 (slower than realtime). [third party] the mlx-community card on unnamed Apple Silicon: 4-bit 0.90x where above 1 is faster than realtime. [TTSMLX] see `Docs/benchmarks.md`.
 
+### VoxCPM 1.5 (added 2026-11-09)
+
+- **Identity.** OpenBMB, released December 2025, the "stable" release in the VoxCPM repository next to the legacy 0.5B (September 2025) and VoxCPM2. Same tokenizer-free diffusion-autoregressive design on a MiniCPM-4 0.5B backbone, 0.8 B parameters in all; AudioVAE at **44.1 kHz**, patch size 4 so the LM steps at 6.25 Hz (the 0.5B stepped at 12.5 Hz over a 16 kHz VAE).
+- **MLX checkpoint.** `mlx-community/VoxCPM1.5-4bit` 620 MB (LM quantised, group size 64); fp16 and 8-bit also exist. The fork's `voxcpm` loader (runtime 0.1.8-tts.5) accepts all three.
+- **Capabilities.** English and Chinese; upstream says other languages are not guaranteed. No preset voices, no voice design, no style text: cloning is "continuation only", a reference clip plus its exact transcript. Phoneme input (`{HH AH0 L OW1}`) exists upstream but is not exposed here.
+- **Streaming.** As VoxCPM2: the Swift port generates the take whole and yields one audio event.
+- **Licence.** Apache-2.0 code and weights.
+- **Latency.** [upstream] RTF 0.15–0.17 on an RTX 4090; about 6 GB of VRAM. [TTSMLX] see `Docs/benchmarks.md`; the catalog's 4 000 MB peak and Mac gate are provisional until the harness has run.
+
 ---
 
 ## Integration cost for the two models without a port
